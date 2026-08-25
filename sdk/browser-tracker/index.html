@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenTelemetry 前端采集 SDK 演示与测试页面</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/sdk/browser-tracker/tracker.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-8">
+  <div class="max-w-4xl mx-auto space-y-6">
+    <div class="bg-slate-800/80 backdrop-blur border border-slate-700 rounded-xl p-6 shadow-xl">
+      <div class="flex items-center justify-between border-b border-slate-700 pb-4">
+        <div>
+          <h1 class="text-2xl font-bold text-sky-400">OpenTelemetry 前端采集 SDK 实时联调</h1>
+          <p class="text-sm text-slate-400 mt-1">自动采集 W3C Trace、PV/UV、交互点击、转化行为与异常</p>
+        </div>
+        <a href="/dashboard" target="_blank" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium transition shadow-lg shadow-indigo-600/30">
+          打开数据分析与链路看板 ↗
+        </a>
+      </div>
+
+      <!-- User Journey Simulation -->
+      <div class="mt-6">
+        <h2 class="text-lg font-semibold text-slate-200 mb-3">1. 模拟电商转化路径 (漏斗事件)</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <button id="btn-view-item" data-track="view_item" class="p-3 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 font-medium text-sm transition">
+            ① 浏览商品 (View Item)
+          </button>
+          <button id="btn-add-cart" data-track="add_to_cart" class="p-3 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 font-medium text-sm transition">
+            ② 加入购物车 (Add Cart)
+          </button>
+          <button id="btn-checkout" data-track="begin_checkout" class="p-3 bg-slate-700 hover:bg-slate-600 rounded-lg border border-slate-600 font-medium text-sm transition">
+            ③ 发起结算 (Checkout)
+          </button>
+          <button id="btn-purchase" data-track="purchase_success" class="p-3 bg-emerald-600 hover:bg-emerald-500 rounded-lg font-medium text-sm transition shadow-lg shadow-emerald-600/30">
+            ④ 支付成功 (Purchase)
+          </button>
+        </div>
+      </div>
+
+      <!-- SPA Routing Simulation -->
+      <div class="mt-6">
+        <h2 class="text-lg font-semibold text-slate-200 mb-3">2. 模拟单页应用路由切换 (SPA Route)</h2>
+        <div class="flex flex-wrap gap-3">
+          <button onclick="navigate('/home')" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">跳转 /home</button>
+          <button onclick="navigate('/products')" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">跳转 /products</button>
+          <button onclick="navigate('/cart')" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">跳转 /cart</button>
+          <button onclick="navigate('/orders/123')" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">跳转 /orders/123</button>
+        </div>
+      </div>
+
+      <!-- Exception Simulation -->
+      <div class="mt-6">
+        <h2 class="text-lg font-semibold text-slate-200 mb-3">3. 异常与现场复现测试 (Error & Replay)</h2>
+        <div class="flex gap-3">
+          <button onclick="triggerError()" class="px-4 py-2 bg-rose-600/80 hover:bg-rose-600 rounded-lg text-sm font-medium">触发 JS 运行错误</button>
+          <button onclick="triggerPromiseReject()" class="px-4 py-2 bg-amber-600/80 hover:bg-amber-600 rounded-lg text-sm font-medium">触发 Promise 未捕获异常</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Event Log Stream -->
+    <div class="bg-slate-800/80 backdrop-blur border border-slate-700 rounded-xl p-6 shadow-xl">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-semibold text-slate-200">SDK 本地事件发射日志</h3>
+        <button onclick="clearLogs()" class="text-xs text-slate-400 hover:text-slate-200">清空日志</button>
+      </div>
+      <div id="log-box" class="bg-slate-950 p-4 rounded-lg font-mono text-xs text-slate-300 h-64 overflow-y-auto space-y-2 border border-slate-800">
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Initialize OpenTracker SDK
+    const tracker = new OpenTracker({
+      endpoint: '/api/v1/collect/events',
+      serviceName: 'demo-shop-frontend',
+      batchSize: 1, // Flush immediately for demonstration
+      flushIntervalMs: 2000
+    });
+
+    function logToUI(msg, type = 'info') {
+      const box = document.getElementById('log-box');
+      const item = document.createElement('div');
+      const time = new Date().toLocaleTimeString();
+      item.className = type === 'error' ? 'text-rose-400' : (type === 'success' ? 'text-emerald-400' : 'text-sky-300');
+      item.textContent = `[${time}] ${msg}`;
+      box.appendChild(item);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function clearLogs() {
+      document.getElementById('log-box').innerHTML = '';
+    }
+
+    // Bind Funnel Buttons
+    document.getElementById('btn-view-item').addEventListener('click', () => {
+      tracker.trackEvent('view_item', { item_id: 'P1001', category: 'Digital', price: 2999 });
+      logToUI('Emitted custom event: view_item ($2999, Digital)', 'info');
+    });
+
+    document.getElementById('btn-add-cart').addEventListener('click', () => {
+      tracker.trackEvent('add_to_cart', { item_id: 'P1001', quantity: 1, amount: 2999 });
+      logToUI('Emitted custom event: add_to_cart (1 item)', 'info');
+    });
+
+    document.getElementById('btn-checkout').addEventListener('click', () => {
+      tracker.trackEvent('begin_checkout', { order_id: 'ORD_' + Date.now(), total_amount: 2999 });
+      logToUI('Emitted custom event: begin_checkout', 'info');
+    });
+
+    document.getElementById('btn-purchase').addEventListener('click', () => {
+      tracker.trackEvent('purchase_success', { order_id: 'ORD_' + Date.now(), total_amount: 2999, payment_method: 'Alipay' });
+      logToUI('Emitted custom event: purchase_success ($2999 Paid)', 'success');
+    });
+
+    function navigate(path) {
+      history.pushState({}, '', path);
+      logToUI('SPA Navigated to: ' + path, 'info');
+    }
+
+    function triggerError() {
+      logToUI('Simulating runtime error...', 'error');
+      setTimeout(() => {
+        window.nonExistentFunctionCall();
+      }, 50);
+    }
+
+    function triggerPromiseReject() {
+      logToUI('Simulating unhandled promise rejection...', 'error');
+      new Promise((_, reject) => {
+        reject(new Error('Network timeout during checkout payment!'));
+      });
+    }
+  </script>
+</body>
+</html>
