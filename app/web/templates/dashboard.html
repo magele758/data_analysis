@@ -24,6 +24,7 @@
     <!-- Navigation Tabs -->
     <nav class="flex space-x-1.5 overflow-x-auto py-1">
       <button data-tab="overview" class="tab-btn active px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">大盘概览</button>
+      <button data-tab="ontology" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">业务本体(Ontology)</button>
       <button data-tab="catalog" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">数据资产与血缘</button>
       <button data-tab="transform" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">ETL与DAG建模</button>
       <button data-tab="retl" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">Reverse ETL激活</button>
@@ -77,6 +78,43 @@
             </thead>
             <tbody id="page-table-body"></tbody>
           </table>
+        </div>
+      </div>
+    </section>
+
+    
+    <!-- Tab: Palantir-Style Agentic Ontology -->
+    <section id="pane-ontology" class="tab-pane hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Object Types & Properties -->
+        <div class="glass-card p-6 rounded-xl space-y-4 lg:col-span-1">
+          <div class="flex justify-between items-center">
+            <h3 class="text-base font-bold text-slate-200">业务对象模型 (Object Types)</h3>
+            <button onclick="loadOntologySchema()" class="text-xs px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-medium">刷新</button>
+          </div>
+          <div id="ontology-objects-list" class="space-y-3 max-h-[420px] overflow-y-auto"></div>
+        </div>
+
+        <!-- Entity Graph Visualization -->
+        <div class="glass-card p-6 rounded-xl space-y-4 lg:col-span-2">
+          <h3 class="text-base font-bold text-slate-200">实体多跳拓扑图谱 (Entity Link Graph)</h3>
+          <div id="ontology-graph-container" class="h-80 w-full"></div>
+        </div>
+      </div>
+
+      <!-- Actions & Audit Trail -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="glass-card p-6 rounded-xl space-y-4">
+          <h3 class="text-base font-bold text-slate-200">可用业务动作 (Available Actions)</h3>
+          <div id="ontology-actions-list" class="space-y-3 max-h-[300px] overflow-y-auto"></div>
+        </div>
+
+        <div class="glass-card p-6 rounded-xl space-y-4">
+          <div class="flex justify-between items-center">
+            <h3 class="text-base font-bold text-slate-200">动作执行审计流水 (Action Audit Trail)</h3>
+            <button onclick="loadOntologyAudits()" class="text-xs px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-300">刷新审计</button>
+          </div>
+          <div id="ontology-audit-list" class="space-y-2 max-h-[300px] overflow-y-auto font-mono text-xs"></div>
         </div>
       </div>
     </section>

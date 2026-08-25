@@ -66,6 +66,51 @@ class MetadataDB:
                 created_at TEXT
             );
 
+                        CREATE TABLE IF NOT EXISTS ontology_objects (
+                name TEXT PRIMARY KEY,
+                display_name TEXT,
+                description TEXT,
+                primary_key TEXT,
+                title_property TEXT,
+                backed_by_table TEXT,
+                properties_json TEXT,
+                tags_json TEXT,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS ontology_links (
+                name TEXT PRIMARY KEY,
+                display_name TEXT,
+                description TEXT,
+                source_object_type TEXT,
+                target_object_type TEXT,
+                cardinality TEXT,
+                source_join_key TEXT,
+                target_join_key TEXT,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS ontology_actions (
+                name TEXT PRIMARY KEY,
+                display_name TEXT,
+                description TEXT,
+                target_object_type TEXT,
+                parameters_json TEXT,
+                handler_type TEXT,
+                handler_config_json TEXT,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS ontology_action_audit (
+                audit_id TEXT PRIMARY KEY,
+                action_name TEXT,
+                target_object_type TEXT,
+                target_instance_id TEXT,
+                parameters_json TEXT,
+                status TEXT,
+                execution_result_json TEXT,
+                executed_at TEXT
+            );
             CREATE TABLE IF NOT EXISTS dag_models_meta (
                 name TEXT PRIMARY KEY,
                 sql TEXT,
@@ -228,4 +273,168 @@ class MetadataDB:
                     "materialization": r["materialization"],
                     "depends_on": json.loads(r["depends_on_json"] or "[]"),
                     "description": r["description"]
+                } for r in rows]
+
+    # --- Ontology Methods ---
+    def save_ontology_object(self, obj_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("""
+                INSERT INTO ontology_objects (
+                    name, display_name, description, primary_key, title_property,
+                    backed_by_table, properties_json, tags_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    description=excluded.description,
+                    primary_key=excluded.primary_key,
+                    title_property=excluded.title_property,
+                    backed_by_table=excluded.backed_by_table,
+                    properties_json=excluded.properties_json,
+                    tags_json=excluded.tags_json
+                """, (
+                    obj_dict["name"],
+                    obj_dict.get("display_name"),
+                    obj_dict.get("description", ""),
+                    obj_dict["primary_key"],
+                    obj_dict.get("title_property"),
+                    obj_dict["backed_by_table"],
+                    json.dumps([p if isinstance(p, dict) else p.model_dump() for p in obj_dict.get("properties", [])]),
+                    json.dumps(obj_dict.get("tags", [])),
+                    obj_dict.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                ))
+
+    def list_ontology_objects(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT * FROM ontology_objects").fetchall()
+                return [{
+                    "name": r["name"],
+                    "display_name": r["display_name"],
+                    "description": r["description"],
+                    "primary_key": r["primary_key"],
+                    "title_property": r["title_property"],
+                    "backed_by_table": r["backed_by_table"],
+                    "properties": json.loads(r["properties_json"] or "[]"),
+                    "tags": json.loads(r["tags_json"] or "[]"),
+                    "created_at": r["created_at"]
+                } for r in rows]
+
+    def save_ontology_link(self, link_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("""
+                INSERT INTO ontology_links (
+                    name, display_name, description, source_object_type,
+                    target_object_type, cardinality, source_join_key, target_join_key, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    description=excluded.description,
+                    source_object_type=excluded.source_object_type,
+                    target_object_type=excluded.target_object_type,
+                    cardinality=excluded.cardinality,
+                    source_join_key=excluded.source_join_key,
+                    target_join_key=excluded.target_join_key
+                """, (
+                    link_dict["name"],
+                    link_dict.get("display_name"),
+                    link_dict.get("description", ""),
+                    link_dict["source_object_type"],
+                    link_dict["target_object_type"],
+                    link_dict.get("cardinality", "ONE_TO_MANY"),
+                    link_dict["source_join_key"],
+                    link_dict["target_join_key"],
+                    link_dict.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                ))
+
+    def list_ontology_links(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT * FROM ontology_links").fetchall()
+                return [{
+                    "name": r["name"],
+                    "display_name": r["display_name"],
+                    "description": r["description"],
+                    "source_object_type": r["source_object_type"],
+                    "target_object_type": r["target_object_type"],
+                    "cardinality": r["cardinality"],
+                    "source_join_key": r["source_join_key"],
+                    "target_join_key": r["target_join_key"],
+                    "created_at": r["created_at"]
+                } for r in rows]
+
+    def save_ontology_action(self, act_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("""
+                INSERT INTO ontology_actions (
+                    name, display_name, description, target_object_type,
+                    parameters_json, handler_type, handler_config_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    description=excluded.description,
+                    target_object_type=excluded.target_object_type,
+                    parameters_json=excluded.parameters_json,
+                    handler_type=excluded.handler_type,
+                    handler_config_json=excluded.handler_config_json
+                """, (
+                    act_dict["name"],
+                    act_dict.get("display_name"),
+                    act_dict.get("description", ""),
+                    act_dict["target_object_type"],
+                    json.dumps([p if isinstance(p, dict) else p.model_dump() for p in act_dict.get("parameters", [])]),
+                    act_dict.get("handler_type", "WEBHOOK"),
+                    json.dumps(act_dict.get("handler_config", {})),
+                    act_dict.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                ))
+
+    def list_ontology_actions(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT * FROM ontology_actions").fetchall()
+                return [{
+                    "name": r["name"],
+                    "display_name": r["display_name"],
+                    "description": r["description"],
+                    "target_object_type": r["target_object_type"],
+                    "parameters": json.loads(r["parameters_json"] or "[]"),
+                    "handler_type": r["handler_type"],
+                    "handler_config": json.loads(r["handler_config_json"] or "{}"),
+                    "created_at": r["created_at"]
+                } for r in rows]
+
+    def save_action_audit(self, audit_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("""
+                INSERT INTO ontology_action_audit (
+                    audit_id, action_name, target_object_type, target_instance_id,
+                    parameters_json, status, execution_result_json, executed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    audit_dict["audit_id"],
+                    audit_dict["action_name"],
+                    audit_dict["target_object_type"],
+                    audit_dict["target_instance_id"],
+                    json.dumps(audit_dict.get("parameters", {})),
+                    audit_dict.get("status", "SUCCESS"),
+                    json.dumps(audit_dict.get("execution_result", {})),
+                    audit_dict.get("executed_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                ))
+
+    def list_action_audits(self, limit: int = 50) -> List[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT * FROM ontology_action_audit ORDER BY executed_at DESC LIMIT ?", (limit,)).fetchall()
+                return [{
+                    "audit_id": r["audit_id"],
+                    "action_name": r["action_name"],
+                    "target_object_type": r["target_object_type"],
+                    "target_instance_id": r["target_instance_id"],
+                    "parameters": json.loads(r["parameters_json"] or "{}"),
+                    "status": r["status"],
+                    "execution_result": json.loads(r["execution_result_json"] or "{}"),
+                    "executed_at": r["executed_at"]
                 } for r in rows]

@@ -20,6 +20,7 @@ function initTabs() {
       const activePane = document.getElementById('pane-' + target);
       if (activePane) activePane.classList.remove('hidden');
 
+      if (target === 'ontology') { loadOntologySchema(); loadOntologyAudits(); }
       if (target === 'catalog') { loadCatalogTables(); loadSemanticMetrics(); loadLineageGraph(); }
       if (target === 'transform') loadDagModels();
       if (target === 'funnel') loadFunnelData();
@@ -497,4 +498,112 @@ async function loadSessionTimeline() {
   } catch (err) {
     console.error(err);
   }
+}
+
+// 11. Palantir Ontology Functions
+let ontologyChart = null;
+
+async function loadOntologySchema() {
+  try {
+    const res = await fetch('/api/v1/ontology/schema');
+    const data = await res.json();
+    
+    // Render Object Types
+    const objList = document.getElementById('ontology-objects-list');
+    objList.innerHTML = '';
+    (data.object_types || []).forEach(o => {
+      const d = document.createElement('div');
+      d.className = 'p-3 bg-slate-900 rounded border border-slate-800 text-xs space-y-1.5';
+      d.innerHTML = `
+        <div class="flex justify-between items-center">
+          <span class="font-bold text-sky-400 font-mono text-sm">${o.name}</span>
+          <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">PK: ${o.primary_key}</span>
+        </div>
+        <div class="text-slate-400">${o.description || '业务实体对象'}</div>
+        <div class="text-[11px] text-slate-500 font-mono">属性: ${(o.properties||[]).join(', ')}</div>
+        ${o.available_actions.length > 0 ? `<div class="text-[11px] text-indigo-400 font-mono">⚡ 动作: ${o.available_actions.join(', ')}</div>` : ''}
+      `;
+      objList.appendChild(d);
+    });
+
+    // Render Actions List
+    const actRes = await fetch('/api/v1/ontology/actions');
+    const actData = await actRes.json();
+    const actList = document.getElementById('ontology-actions-list');
+    actList.innerHTML = '';
+    (actData.action_types || []).forEach(a => {
+      const d = document.createElement('div');
+      d.className = 'p-3 bg-slate-900 rounded border border-slate-800 text-xs space-y-1';
+      d.innerHTML = `
+        <div class="flex justify-between items-center">
+          <span class="font-bold text-emerald-400 font-mono">${a.name}</span>
+          <span class="px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-300">${a.target_object_type}</span>
+        </div>
+        <div class="text-slate-400">${a.description || '业务闭环动作'}</div>
+        <div class="text-[11px] text-slate-500 font-mono">处理器: ${a.handler_type}</div>
+      `;
+      actList.appendChild(d);
+    });
+
+    // Render Ontology Graph
+    if (!ontologyChart) {
+      ontologyChart = echarts.init(document.getElementById('ontology-graph-container'));
+    }
+
+    const nodes = (data.object_types || []).map(o => ({
+      id: o.name,
+      name: `${o.name} (PK: ${o.primary_key})`,
+      symbolSize: 45,
+      itemStyle: { color: '#6366f1' }
+    }));
+
+    const links = (data.link_types || []).map(l => ({
+      source: l.source,
+      target: l.target,
+      label: { show: true, formatter: l.name, fontSize: 10 }
+    }));
+
+    const option = {
+      backgroundColor: 'transparent',
+      tooltip: {},
+      series: [
+        {
+          type: 'graph',
+          layout: 'force',
+          roam: true,
+          label: { show: true, color: '#e2e8f0', fontSize: 11 },
+          edgeSymbol: ['circle', 'arrow'],
+          edgeSymbolSize: [4, 8],
+          data: nodes,
+          links: links,
+          lineStyle: { color: '#38bdf8', curveness: 0.2, width: 2 }
+        }
+      ]
+    };
+    ontologyChart.setOption(option);
+  } catch (e) {}
+}
+
+async function loadOntologyAudits() {
+  try {
+    const res = await fetch('/api/v1/ontology/audit');
+    const data = await res.json();
+    const list = document.getElementById('ontology-audit-list');
+    list.innerHTML = '';
+    (data.audits || []).forEach(a => {
+      const d = document.createElement('div');
+      d.className = 'p-2.5 bg-slate-900 rounded border border-slate-800 flex justify-between items-center text-[11px]';
+      d.innerHTML = `
+        <div>
+          <span class="text-indigo-400 font-bold">${a.action_name}</span> 
+          <span class="text-slate-400">-> [${a.target_object_type}#${a.target_instance_id}]</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <span class="px-2 py-0.5 rounded text-[10px] ${a.status === 'SUCCESS' ? 'bg-emerald-950 text-emerald-400' : 'bg-amber-950 text-amber-400'}">${a.status}</span>
+          <span class="text-slate-500">${a.executed_at}</span>
+        </div>
+      `;
+      list.appendChild(d);
+    });
+  } catch (e) {}
 }

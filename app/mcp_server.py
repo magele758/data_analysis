@@ -1,3 +1,4 @@
+from app.ontology.ontology_engine import get_ontology_engine
 import json
 from typing import List, Optional, Dict, Any
 from fastmcp import FastMCP
@@ -348,6 +349,66 @@ def detect_table_schema_drift(session_id: str, table: str, baseline_schema: Dict
     con = sess.get_duckdb_conn()
     res = SchemaDrifter.detect_drift(con, table, baseline_schema)
     return json.dumps({"status": "success", "drift_report": res}, ensure_ascii=False)
+
+
+# ---------------- Palantir-Style Agentic Ontology Tools ----------------
+
+@mcp.tool(name="ontology_list_schema", description="List business entities (ObjectTypes), relation graphs (LinkTypes), and available actions (ActionTypes).")
+def ontology_list_schema() -> str:
+    engine = get_ontology_engine()
+    summary = engine.get_ontology_schema_summary()
+    return json.dumps({"status": "success", "ontology_schema": summary}, ensure_ascii=False)
+
+@mcp.tool(name="ontology_query_objects", description="Query business entity instances (e.g. Customers, Orders, Devices) with property projections and filters.")
+def ontology_query_objects(
+    session_id: str,
+    object_type: str,
+    filters: Optional[str] = None,
+    properties: Optional[List[str]] = None,
+    limit: int = 50
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_session(session_id)
+    if not sess:
+        return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine()
+    res = engine.query_object_instances(con, object_type, filters, properties, limit)
+    return json.dumps({"status": "success", "data": res}, ensure_ascii=False)
+
+@mcp.tool(name="ontology_traverse_links", description="Graph-traverse from a source entity instance along relation links to discover connected business entities.")
+def ontology_traverse_links(
+    session_id: str,
+    source_object_type: str,
+    source_instance_id: str,
+    link_name: str,
+    limit: int = 50
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_session(session_id)
+    if not sess:
+        return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine()
+    res = engine.traverse_links(con, source_object_type, source_instance_id, link_name, limit)
+    return json.dumps({"status": "success", "traversal": res}, ensure_ascii=False)
+
+@mcp.tool(name="ontology_execute_action", description="Execute an atomic business action on an entity instance (e.g. ApplyDiscount, RerouteOrder) with audit logging.")
+def ontology_execute_action(
+    session_id: str,
+    action_name: str,
+    instance_id: str,
+    parameters: Dict[str, Any],
+    dry_run: bool = False
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_session(session_id)
+    if not sess:
+        return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine()
+    audit = engine.execute_action(con, action_name, instance_id, parameters, dry_run)
+    return json.dumps({"status": "success", "action_audit": audit}, ensure_ascii=False)
 
 if __name__ == "__main__":
     mcp.run()

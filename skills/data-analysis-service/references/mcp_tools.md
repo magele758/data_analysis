@@ -1,7 +1,11 @@
-# MCP Tools Specification (21 Registered Tools)
+# MCP Tools Specification (25 Registered Tools)
 
 | Tool Name | Category | Key Parameters | Return Value |
 | :--- | :--- | :--- | :--- |
+| `ontology_list_schema` | Ontology | None | `status`, `ontology_schema` (objects, links, actions) |
+| `ontology_query_objects` | Ontology | `session_id`, `object_type`, `filters`, `properties`, `limit` | `status`, `instances` |
+| `ontology_traverse_links` | Ontology | `session_id`, `source_object_type`, `source_instance_id`, `link_name` | `status`, `traversal` (linked instances) |
+| `ontology_execute_action` | Ontology | `session_id`, `action_name`, `instance_id`, `parameters`, `dry_run` | `status`, `action_audit` |
 | `connect_and_load_db` | Ingestion | `conn_str`, `query_or_table`, `dataset_name`, `select_cols`, `filter_sql` | `session_id`, `row_count`, `column_count`, `summary` |
 | `eda_profile` | Profiling | `session_id`, `dataset_name` | `summary`, `quality_score`, `total_rows`, `columns` |
 | `driver_attribution_analysis` | Attribution | `session_id`, `dataset_name`, `target_metric`, `dimension_path`, `base_filter`, `current_filter` | `summary`, `driver_hierarchy`, `chart_spec` |

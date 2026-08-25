@@ -1,3 +1,7 @@
+from app.ontology.ontology_engine import get_ontology_engine
+from app.ontology.object_type import ObjectType
+from app.ontology.link_type import LinkType
+from app.ontology.action_type import ActionType
 import os
 import time
 from fastapi import FastAPI, HTTPException, Depends, Request, Query
@@ -418,3 +422,96 @@ def api_detect_schema_drift(req: SchemaDriftRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
     return SchemaDrifter.detect_drift(con, req.table, req.baseline_schema)
+
+# ----------------- Palantir-Style Agentic Ontology Endpoints -----------------
+
+@app.get("/api/v1/ontology/schema")
+def api_get_ontology_schema():
+    engine = get_ontology_engine()
+    return engine.get_ontology_schema_summary()
+
+@app.get("/api/v1/ontology/objects")
+def api_list_ontology_objects():
+    engine = get_ontology_engine()
+    return {"object_types": engine.list_object_types()}
+
+@app.post("/api/v1/ontology/objects")
+def api_register_ontology_object(obj: ObjectType):
+    engine = get_ontology_engine()
+    return engine.register_object_type(obj)
+
+@app.get("/api/v1/ontology/links")
+def api_list_ontology_links():
+    engine = get_ontology_engine()
+    return {"link_types": engine.list_link_types()}
+
+@app.post("/api/v1/ontology/links")
+def api_register_ontology_link(link: LinkType):
+    engine = get_ontology_engine()
+    return engine.register_link_type(link)
+
+@app.get("/api/v1/ontology/actions")
+def api_list_ontology_actions(target_object_type: Optional[str] = None):
+    engine = get_ontology_engine()
+    return {"action_types": engine.list_action_types(target_object_type=target_object_type)}
+
+@app.post("/api/v1/ontology/actions")
+def api_register_ontology_action(action: ActionType):
+    engine = get_ontology_engine()
+    return engine.register_action_type(action)
+
+class OntologyQueryRequest(BaseModel):
+    session_id: str
+    object_type: str
+    filters: Optional[str] = None
+    properties: Optional[List[str]] = None
+    limit: int = 50
+
+@app.post("/api/v1/ontology/instances/query")
+def api_query_ontology_instances(req: OntologyQueryRequest):
+    mgr = SessionManager()
+    sess = mgr.get_session(req.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine()
+    return engine.query_object_instances(con, req.object_type, req.filters, req.properties, req.limit)
+
+class OntologyTraverseRequest(BaseModel):
+    session_id: str
+    source_object_type: str
+    source_instance_id: Any
+    link_name: str
+    limit: int = 50
+
+@app.post("/api/v1/ontology/instances/traverse")
+def api_traverse_ontology_links(req: OntologyTraverseRequest):
+    mgr = SessionManager()
+    sess = mgr.get_session(req.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine()
+    return engine.traverse_links(con, req.source_object_type, req.source_instance_id, req.link_name, req.limit)
+
+class OntologyActionExecRequest(BaseModel):
+    session_id: str
+    action_name: str
+    instance_id: Any
+    parameters: Dict[str, Any]
+    dry_run: bool = False
+
+@app.post("/api/v1/ontology/actions/execute")
+def api_execute_ontology_action(req: OntologyActionExecRequest):
+    mgr = SessionManager()
+    sess = mgr.get_session(req.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine()
+    return engine.execute_action(con, req.action_name, req.instance_id, req.parameters, req.dry_run)
+
+@app.get("/api/v1/ontology/audit")
+def api_list_ontology_audits(limit: int = 50):
+    engine = get_ontology_engine()
+    return {"audits": engine.list_action_audits(limit=limit)}
