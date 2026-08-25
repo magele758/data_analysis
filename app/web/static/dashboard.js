@@ -607,3 +607,38 @@ async function loadOntologyAudits() {
     });
   } catch (e) {}
 }
+
+// 12. File Upload Handling (Excel / CSV)
+async function handleFileUpload(input) {
+  if (!input.files || input.files.length === 0) return;
+  const file = input.files[0];
+  const datasetName = document.getElementById('dataset-name-input').value.trim() || 'uploaded_dataset';
+  const statusBox = document.getElementById('file-upload-status');
+  statusBox.classList.remove('hidden');
+  statusBox.className = 'text-xs font-mono p-3 bg-slate-900 rounded border border-slate-800 text-sky-400';
+  statusBox.textContent = `⏳ 正在解析并加载文件 "${file.name}" (${(file.size / 1024 / 1024).toFixed(2)} MB)...`;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('dataset_name', datasetName);
+  formData.append('session_id', 'default_session');
+
+  try {
+    const res = await fetch('/api/v1/import/file', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if (data.status === 'success') {
+      statusBox.className = 'text-xs font-mono p-3 bg-slate-900 rounded border border-slate-800 text-emerald-400';
+      statusBox.innerHTML = `✅ <b>加载成功！</b> ${data.summary} <br>列名: [${data.columns.join(', ')}] <br>💡 已自动登记至 <b>Data Catalog</b>，可直接使用 EDA、归因或 SQL 沙箱进行分析！`;
+      loadCatalogTables();
+    } else {
+      statusBox.className = 'text-xs font-mono p-3 bg-slate-900 rounded border border-slate-800 text-rose-400';
+      statusBox.textContent = `❌ 上传失败: ${data.detail || '未知错误'}`;
+    }
+  } catch (err) {
+    statusBox.className = 'text-xs font-mono p-3 bg-slate-900 rounded border border-slate-800 text-rose-400';
+    statusBox.textContent = `❌ 网络异常: ${err.message}`;
+  }
+}

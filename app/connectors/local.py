@@ -5,9 +5,10 @@ import pyarrow.parquet as pq
 import pyarrow.csv as pcsv
 import duckdb
 from app.connectors.base import BaseConnector, TableSchema, ColumnInfo
+from app.connectors.excel_reader import FastExcelReader
 
 class LocalFileConnector(BaseConnector):
-    """Local Parquet / CSV / SQLite / Arrow file connector."""
+    """Local Parquet / CSV / Excel (.xlsx, .xls) / SQLite / Arrow file connector."""
 
     def test_connection(self) -> bool:
         path = self.conn_str.replace("file://", "").replace("sqlite://", "")
@@ -15,7 +16,14 @@ class LocalFileConnector(BaseConnector):
 
     def list_tables(self) -> List[str]:
         path = self.conn_str.replace("file://", "").replace("sqlite://", "")
-        if path.endswith(".sqlite") or path.endswith(".db"):
+        if path.endswith((".xlsx", ".xls")):
+            try:
+                import zipfile
+                with zipfile.ZipFile(path) as z:
+                    return FastExcelReader.list_sheet_names(z)
+            except Exception:
+                return ["Sheet1"]
+        elif path.endswith(".sqlite") or path.endswith(".db"):
             con = duckdb.connect(path, read_only=True)
             res = con.execute("SHOW TABLES").fetchall()
             con.close()
@@ -25,12 +33,15 @@ class LocalFileConnector(BaseConnector):
     def introspect_schema(self, table_name: str) -> TableSchema:
         path = self.conn_str.replace("file://", "").replace("sqlite://", "")
         cols = []
-        if path.endswith(".parquet"):
+        if path.endswith((".xlsx", ".xls")):
+            arrow_tbl = FastExcelReader.read_xlsx_to_arrow(path, sheet_name=table_name, limit_rows=10)
+            for field in arrow_tbl.schema:
+                cols.append(ColumnInfo(name=field.name, physical_type=str(field.type), is_nullable=field.nullable))
+        elif path.endswith(".parquet"):
             schema = pq.read_schema(path)
             for field in schema:
                 cols.append(ColumnInfo(name=field.name, physical_type=str(field.type), is_nullable=field.nullable))
         elif path.endswith(".csv"):
-            # Sample read
             table = pcsv.read_csv(path)
             for field in table.schema:
                 cols.append(ColumnInfo(name=field.name, physical_type=str(field.type), is_nullable=field.nullable))
@@ -52,11 +63,36 @@ class LocalFileConnector(BaseConnector):
         limit: Optional[int] = None
     ) -> pa.Table:
         path = self.conn_str.replace("file://", "").replace("sqlite://", "")
+        
+        # 1. Excel direct high-performance ingestion
+        if path.endswith((".xlsx", ".xls")):
+            sheet = query_or_table if query_or_table and not query_or_table.lower().startswith("select") else None
+            arrow_table = FastExcelReader.read_xlsx_to_arrow(
+                path,
+                sheet_name=sheet,
+                limit_rows=limit
+            )
+            if select_cols or filter_sql:
+                con = duckdb.connect(":memory:")
+                con.register("excel_tmp", arrow_table)
+                cols_clause = ", ".join(select_cols) if select_cols else "*"
+                sql = f"SELECT {cols_clause} FROM excel_tmp"
+                if filter_sql:
+                    sql += f" WHERE {filter_sql}"
+                if limit:
+                    sql += f" LIMIT {limit}"
+                arrow_table = con.execute(sql).arrow()
+                if isinstance(arrow_table, pa.RecordBatchReader):
+                    arrow_table = arrow_table.read_all()
+                con.close()
+            return arrow_table
+
+        # 2. CSV / Parquet / SQLite via DuckDB
         con = duckdb.connect(":memory:")
         if path.endswith(".parquet"):
             con.execute(f"CREATE VIEW tbl AS SELECT * FROM read_parquet('{path}')")
         elif path.endswith(".csv"):
-            con.execute(f"CREATE VIEW tbl AS SELECT * FROM read_csv_auto('{path}')")
+            con.execute(f"CREATE VIEW tbl AS SELECT * FROM read_csv_auto('{path}', sample_size=100000, ignore_errors=true)")
         elif path.endswith(".sqlite") or path.endswith(".db"):
             con.execute(f"ATTACH '{path}' AS sqlite_db (TYPE SQLITE)")
             con.execute(f"CREATE VIEW tbl AS SELECT * FROM sqlite_db.{query_or_table}")

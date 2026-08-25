@@ -4,7 +4,7 @@ from app.ontology.link_type import LinkType
 from app.ontology.action_type import ActionType
 import os
 import time
-from fastapi import FastAPI, HTTPException, Depends, Request, Query
+from fastapi import FastAPI, HTTPException, Depends, Request, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
@@ -515,3 +515,61 @@ def api_execute_ontology_action(req: OntologyActionExecRequest):
 def api_list_ontology_audits(limit: int = 50):
     engine = get_ontology_engine()
     return {"audits": engine.list_action_audits(limit=limit)}
+
+# ----------------- Excel & CSV High-Performance Ingestion Endpoints -----------------
+
+@app.post("/api/v1/import/file")
+async def api_import_file(
+    file: Optional[UploadFile] = File(None),
+    file_path: Optional[str] = Form(None),
+    dataset_name: str = Form("uploaded_dataset"),
+    session_id: Optional[str] = Form(None),
+    sheet_name: Optional[str] = Form(None),
+    limit: Optional[int] = Form(None)
+):
+    mgr = SessionManager()
+    sess = mgr.get_or_create_session(session_id)
+    
+    target_path = file_path
+    if file:
+        os.makedirs("data/uploads", exist_ok=True)
+        target_path = f"data/uploads/{file.filename}"
+        with open(target_path, "wb") as f_out:
+            while chunk := await file.read(1024 * 1024 * 5): # 5MB stream chunks
+                f_out.write(chunk)
+
+    if not target_path or not os.path.exists(target_path):
+        raise HTTPException(status_code=400, detail="Invalid file or file_path provided")
+
+    conn_str = f"file://{target_path}"
+    connector = ConnectorFactory.get_connector(conn_str)
+    arrow_table = connector.fetch_to_arrow(
+        query_or_table=sheet_name or "Sheet1",
+        limit=limit
+    )
+
+    meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": target_path})
+
+    # Register into Catalog
+    cat = get_meta_registry()
+    cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
+    cat.register_table(TableAsset(
+        dataset_name=dataset_name,
+        display_name=dataset_name,
+        description=f"Imported from {os.path.basename(target_path)}",
+        row_count=meta.row_count,
+        column_count=meta.column_count,
+        columns=cols,
+        tags=["file_import", "raw"]
+    ))
+
+    return {
+        "status": "success",
+        "session_id": sess.session_id,
+        "dataset_name": dataset_name,
+        "row_count": meta.row_count,
+        "column_count": meta.column_count,
+        "columns": meta.column_names,
+        "memory_bytes": meta.memory_bytes,
+        "summary": f"Successfully loaded {os.path.basename(target_path)} ({meta.row_count:,} rows, {meta.column_count} cols) into dataset '{dataset_name}'."
+    }

@@ -1,3 +1,4 @@
+import os
 from app.ontology.ontology_engine import get_ontology_engine
 import json
 from typing import List, Optional, Dict, Any
@@ -409,6 +410,49 @@ def ontology_execute_action(
     engine = get_ontology_engine()
     audit = engine.execute_action(con, action_name, instance_id, parameters, dry_run)
     return json.dumps({"status": "success", "action_audit": audit}, ensure_ascii=False)
+
+
+@mcp.tool(name="import_excel_or_csv", description="High-performance ingestion of large Excel (.xlsx, .xls) and CSV files into memory with zero copy.")
+def import_excel_or_csv(
+    file_path: str,
+    dataset_name: str,
+    session_id: Optional[str] = None,
+    sheet_name: Optional[str] = None,
+    limit: Optional[int] = None
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_or_create_session(session_id)
+    conn_str = f"file://{file_path}"
+    connector = ConnectorFactory.get_connector(conn_str)
+    arrow_table = connector.fetch_to_arrow(
+        query_or_table=sheet_name or "Sheet1",
+        limit=limit
+    )
+    meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": file_path})
+
+    # Register into Catalog
+    cat = get_meta_registry()
+    cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
+    cat.register_table(TableAsset(
+        dataset_name=dataset_name,
+        display_name=dataset_name,
+        description=f"Imported from {os.path.basename(file_path)}",
+        row_count=meta.row_count,
+        column_count=meta.column_count,
+        columns=cols,
+        tags=["file_import", "excel_csv"]
+    ))
+
+    return json.dumps({
+        "status": "success",
+        "session_id": sess.session_id,
+        "dataset_name": dataset_name,
+        "row_count": meta.row_count,
+        "column_count": meta.column_count,
+        "columns": meta.column_names,
+        "memory_bytes": meta.memory_bytes,
+        "summary": f"Successfully loaded {os.path.basename(file_path)} with {meta.row_count:,} rows and {meta.column_count} columns into session '{sess.session_id}'."
+    }, ensure_ascii=False)
 
 if __name__ == "__main__":
     mcp.run()
