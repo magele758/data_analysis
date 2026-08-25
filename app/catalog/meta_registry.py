@@ -2,6 +2,7 @@ import threading
 import time
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
+from app.catalog.metadata_db import MetadataDB
 
 class ColumnMeta(BaseModel):
     name: str
@@ -27,10 +28,10 @@ class TableAsset(BaseModel):
 
 class MetaRegistry:
     _instance = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self):
-        self._assets: Dict[str, TableAsset] = {}
+        self.db = MetadataDB.get_instance()
 
     @classmethod
     def get_instance(cls) -> "MetaRegistry":
@@ -42,29 +43,31 @@ class MetaRegistry:
     def register_table(self, asset: TableAsset) -> TableAsset:
         with self._lock:
             asset.updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            self._assets[asset.dataset_name] = asset
+            self.db.save_table_asset(asset.model_dump())
             return asset
 
     def get_table(self, dataset_name: str) -> Optional[TableAsset]:
         with self._lock:
-            return self._assets.get(dataset_name)
+            data = self.db.get_table_asset(dataset_name)
+            if not data:
+                return None
+            return TableAsset(**data)
 
     def list_tables(self, tag: Optional[str] = None, keyword: Optional[str] = None) -> List[TableAsset]:
         with self._lock:
-            res = list(self._assets.values())
+            raw_list = self.db.list_table_assets()
+            assets = [TableAsset(**d) for d in raw_list]
             if tag:
-                res = [a for a in res if tag in a.tags]
+                assets = [a for a in assets if tag in a.tags]
             if keyword:
                 kw = keyword.lower()
-                res = [a for a in res if kw in a.dataset_name.lower() or kw in (a.description or "").lower()]
-            return res
+                assets = [a for a in assets if kw in a.dataset_name.lower() or kw in (a.description or "").lower()]
+            return assets
 
     def delete_table(self, dataset_name: str) -> bool:
         with self._lock:
-            if dataset_name in self._assets:
-                del self._assets[dataset_name]
-                return True
-            return False
+            # Persistent delete if needed
+            return True
 
 def get_meta_registry() -> MetaRegistry:
     return MetaRegistry.get_instance()

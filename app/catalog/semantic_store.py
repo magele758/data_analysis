@@ -1,6 +1,7 @@
 import threading
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
+from app.catalog.metadata_db import MetadataDB
 
 class MetricDefinition(BaseModel):
     name: str
@@ -15,10 +16,10 @@ class MetricDefinition(BaseModel):
 
 class SemanticMetricStore:
     _instance = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self):
-        self._metrics: Dict[str, MetricDefinition] = {}
+        self.db = MetadataDB.get_instance()
 
     @classmethod
     def get_instance(cls) -> "SemanticMetricStore":
@@ -29,16 +30,20 @@ class SemanticMetricStore:
 
     def register_metric(self, metric: MetricDefinition) -> MetricDefinition:
         with self._lock:
-            self._metrics[metric.name] = metric
+            self.db.save_metric(metric.model_dump())
             return metric
 
     def get_metric(self, metric_name: str) -> Optional[MetricDefinition]:
         with self._lock:
-            return self._metrics.get(metric_name)
+            data = self.db.get_metric(metric_name)
+            if not data:
+                return None
+            return MetricDefinition(**data)
 
     def list_metrics(self) -> List[MetricDefinition]:
         with self._lock:
-            return list(self._metrics.values())
+            rows = self.db.list_metrics()
+            return [MetricDefinition(**r) for r in rows]
 
     def compile_query(
         self,
@@ -53,7 +58,7 @@ class SemanticMetricStore:
             raise ValueError("metric_names cannot be empty")
 
         with self._lock:
-            first_m = self._metrics.get(metric_names[0])
+            first_m = self.get_metric(metric_names[0])
             if not first_m:
                 raise ValueError(f"Metric '{metric_names[0]}' not defined in Semantic Store")
             
@@ -65,7 +70,7 @@ class SemanticMetricStore:
                     select_parts.append(dim)
 
             for m_name in metric_names:
-                m_def = self._metrics.get(m_name)
+                m_def = self.get_metric(m_name)
                 if not m_def:
                     raise ValueError(f"Metric '{m_name}' not defined in Semantic Store")
                 if m_def.table_name != table_name:

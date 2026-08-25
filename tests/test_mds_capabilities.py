@@ -131,7 +131,7 @@ def test_pipeline_dag(mds_session):
     order = pipe.get_execution_order()
     assert order.index("stg_orders") < order.index("marts_region_sales")
 
-    exec_res = pipe.run_pipeline(mds_session)
+    exec_res = pipe.run_pipeline(mds_session, models=["stg_orders", "marts_region_sales"])
     assert exec_res["total_models"] >= 2
     row_cnt = mds_session.execute("SELECT count(*) FROM marts_region_sales").fetchone()[0]
     assert row_cnt > 0

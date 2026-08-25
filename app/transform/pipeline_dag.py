@@ -1,8 +1,11 @@
 import threading
+import time
 from typing import Dict, List, Set, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
 import duckdb
 from app.catalog.lineage_tracker import get_lineage_tracker
+from app.catalog.metadata_db import MetadataDB
 
 class DAGModel(BaseModel):
     name: str
@@ -13,10 +16,12 @@ class DAGModel(BaseModel):
 
 class PipelineDAG:
     _instance = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self):
         self._models: Dict[str, DAGModel] = {}
+        self.db = MetadataDB.get_instance()
+        self._restore_from_db()
 
     @classmethod
     def get_instance(cls) -> "PipelineDAG":
@@ -25,9 +30,19 @@ class PipelineDAG:
                 cls._instance = cls()
             return cls._instance
 
+    def _restore_from_db(self):
+        saved = self.db.list_dag_models()
+        lineage = get_lineage_tracker()
+        for d in saved:
+            m = DAGModel(**d)
+            self._models[m.name] = m
+            for dep in m.depends_on:
+                lineage.record_dependency(dep, m.name)
+
     def register_model(self, model: DAGModel) -> DAGModel:
         with self._lock:
             self._models[model.name] = model
+            self.db.save_dag_model(model.model_dump())
             # Record in lineage tracker
             lineage = get_lineage_tracker()
             for dep in model.depends_on:
@@ -40,6 +55,17 @@ class PipelineDAG:
 
     def get_execution_order(self) -> List[str]:
         """Topological sort using Kahn's algorithm."""
+        stages = self.get_execution_stages()
+        flat_order = []
+        for stage in stages:
+            flat_order.extend(stage)
+        return flat_order
+
+    def get_execution_stages(self) -> List[List[str]]:
+        """
+        Partition DAG models into execution stages (Levels).
+        Models in the same stage have no mutual dependencies and can execute in parallel.
+        """
         with self._lock:
             in_degree = {name: 0 for name in self._models}
             adj = {name: [] for name in self._models}
@@ -50,49 +76,90 @@ class PipelineDAG:
                         adj[dep].append(name)
                         in_degree[name] += 1
 
-            queue = [name for name, deg in in_degree.items() if deg == 0]
-            order = []
+            current_queue = [name for name, deg in in_degree.items() if deg == 0]
+            stages = []
+            visited_count = 0
 
-            while queue:
-                curr = queue.pop(0)
-                order.append(curr)
-                for neighbor in adj[curr]:
-                    in_degree[neighbor] -= 1
-                    if in_degree[neighbor] == 0:
-                        queue.append(neighbor)
+            while current_queue:
+                stages.append(list(current_queue))
+                visited_count += len(current_queue)
+                next_queue = []
+                for curr in current_queue:
+                    for neighbor in adj[curr]:
+                        in_degree[neighbor] -= 1
+                        if in_degree[neighbor] == 0:
+                            next_queue.append(neighbor)
+                current_queue = next_queue
 
-            if len(order) != len(self._models):
+            if visited_count != len(self._models):
                 raise ValueError("Cyclic dependency detected in DAG transformation pipeline!")
 
-            return order
+            return stages
 
-    def run_pipeline(self, con: duckdb.DuckDBPyConnection) -> Dict[str, Any]:
-        """Execute the entire DAG transformation in dependency order."""
-        order = self.get_execution_order()
-        results = []
+    def _execute_single_model(self, con: duckdb.DuckDBPyConnection, model: DAGModel) -> Dict[str, Any]:
+        """Execute model with atomic shadow-table swap & rollback."""
+        name = model.name
+        mat_type = model.materialization.lower()
+        staging_name = f"_stg_swap_{name}"
 
+        start_t = time.time()
+        try:
+            if mat_type == "view":
+                con.execute(f"CREATE OR REPLACE VIEW {name} AS {model.sql}")
+            else:
+                # 1. Build into staging table
+                con.execute(f"CREATE OR REPLACE TABLE {staging_name} AS {model.sql}")
+                # 2. Atomic swap
+                con.execute(f"DROP TABLE IF EXISTS {name}")
+                con.execute(f"ALTER TABLE {staging_name} RENAME TO {name}")
+
+            row_count = con.execute(f"SELECT count(*) FROM {name}").fetchone()[0]
+            duration_ms = round((time.time() - start_t) * 1000, 2)
+
+            return {
+                "model_name": name,
+                "materialization": mat_type,
+                "row_count": row_count,
+                "duration_ms": duration_ms,
+                "status": "SUCCESS"
+            }
+        except Exception as e:
+            # Cleanup staging table on failure
+            try:
+                con.execute(f"DROP TABLE IF EXISTS {staging_name}")
+            except Exception:
+                pass
+            raise RuntimeError(f"Model '{name}' execution failed: {str(e)}")
+
+    def clear_models(self):
         with self._lock:
-            for model_name in order:
-                m = self._models[model_name]
-                mat_type = m.materialization.lower()
-                
-                if mat_type == "view":
-                    con.execute(f"CREATE OR REPLACE VIEW {model_name} AS {m.sql}")
-                else:
-                    con.execute(f"CREATE OR REPLACE TABLE {model_name} AS {m.sql}")
+            self._models.clear()
 
-                row_count = con.execute(f"SELECT count(*) FROM {model_name}").fetchone()[0]
-                results.append({
-                    "model_name": model_name,
-                    "materialization": mat_type,
-                    "row_count": row_count,
-                    "status": "SUCCESS"
-                })
+    def run_pipeline(self, con: duckdb.DuckDBPyConnection, models: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Execute the DAG transformation across dependency stages with atomic materialization.
+        """
+        stages = self.get_execution_stages()
+        all_results = []
+        start_time = time.time()
+
+        target_set = set(models) if models else None
+        for stage_idx, stage_models in enumerate(stages):
+            for model_name in stage_models:
+                if target_set and model_name not in target_set:
+                    continue
+                m = self._models[model_name]
+                res = self._execute_single_model(con, m)
+                all_results.append(res)
+
+        total_duration = round((time.time() - start_time) * 1000, 2)
 
         return {
-            "total_models": len(order),
-            "execution_order": order,
-            "results": results
+            "total_models": len(all_results),
+            "total_stages": len(stages),
+            "execution_order": [r["model_name"] for r in all_results],
+            "total_duration_ms": total_duration,
+            "results": all_results
         }
 
 def get_pipeline_engine() -> PipelineDAG:
