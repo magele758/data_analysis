@@ -7,12 +7,12 @@
 ## 📌 Agent 核心交互规范 (Interaction Guidelines)
 
 1. **计算与推理职责分离**：
-   * **确定性计算下沉**：所有数据聚合、偏度/分位数计算、方差分解、Shapley 归因、t/F 统计检验、ETL 建模必须调用本服务算子，严禁由 LLM 直接做大数心算或经验推测。
-   * **高层次编排与业务洞察**：Agent 负责理解用户业务意图，拆解为分析步骤（如：`资产目录发现 -> 数据清洗 -> DAG 建模 -> 归因下钻 -> 假设检验 -> 结果反写/告警激活`），并基于算子返回的结构化统计量和结论组装最终业务汇报。
+   * **确定性计算下沉**：所有大 Excel/CSV 流式解析、数据聚合、偏度/分位数计算、方差分解、Shapley 归因、t/F 统计检验、ETL 建模、Ontology 实体图谱遍历必须调用本服务算子，严禁由 LLM 直接做大数心算或经验推测。
+   * **高层次编排与业务洞察**：Agent 负责理解用户业务意图，拆解为分析步骤（如：`大文件/库接入 -> 业务本体建模 -> 图谱遍历 -> 归因下钻 -> 假设检验 -> 闭环动作执行/告警激活`），并基于算子返回的结构化统计量和结论组装最终业务汇报。
 
 2. **会话生命周期管理**：
-   * 首次操作调用 `connect_and_load_db` 获取 `session_id`。
-   * 后续所有分析、建模、逆向同步算子均复用该 `session_id`，利用 DuckDB 内存空间实现秒级零拷贝交互。
+   * 首次操作调用 `connect_and_load_db` 或 `import_excel_or_csv` 获取 `session_id`。
+   * 后续所有分析、建模、本体动作、逆向同步算子均复用该 `session_id`，利用 DuckDB 内存空间实现秒级零拷贝交互。
    * 会话空闲 30 分钟后自动由后台异步守护线程回收。
 
 ---
@@ -24,15 +24,15 @@
 > 每当开发者或 Agent 对本代码库进行以下改动时，**必须同步更新相关 Skill 与规范文档**：
 >
 > 1. **算子新增/修改 (Operator Changes)**：
->    - 若修改或新增 `app/operators/*`、`app/distributed_ops/*`、`app/catalog/*`、`app/transform/*`、`app/retl/*`、`app/observability/*`，必须同步更新：
+>    - 若修改或新增 `app/ontology/*`、`app/operators/*`、`app/distributed_ops/*`、`app/catalog/*`、`app/transform/*`、`app/retl/*`、`app/observability/*`，必须同步更新：
 >      - `app/schemas/requests.py` 与 `app/schemas/responses.py`
 >      - `app/mcp_server.py`（更新 Tool Description 与入参）
 >      - `skills/data-analysis-service/SKILL.md` 与 `skills/data-analysis-service/references/`
 >      - `docs/operators_guide.md`
 > 2. **数据源连接器更新 (Connector Changes)**：
->    - 若新增数据源支持（如 ClickHouse, Snowflake, Oracle），必须同步更新：
->      - `app/connectors/factory.py`
->      - `skills/data-analysis-service/SKILL.md` (Description 触发词与支持数据库列表)
+>    - 若新增数据源支持（如 Excel、ClickHouse、Snowflake），必须同步更新：
+>      - `app/connectors/factory.py` 与 `app/connectors/local.py`
+>      - `skills/data-analysis-service/SKILL.md` (Description 触发词与支持数据源列表)
 > 3. **输出协议与可视化演进 (Protocol Changes)**：
 >    - 若调整 Vega-Lite/ECharts 图表 Spec 格式或 NLG 叙述字段，必须同步更新 `app/nlg/narrative_builder.py` 与 `tests/` 测试用例。
 > 4. **提交前自检流水线**：
