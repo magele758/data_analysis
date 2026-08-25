@@ -1,0 +1,40 @@
+replicaCount: 3
+
+image:
+  repository: data-analysis-service
+  tag: latest
+  pullPolicy: IfNotPresent
+
+rayCluster:
+  enabled: true
+  head:
+    resources:
+      limits:
+        cpu: "4"
+        memory: "16Gi"
+      requests:
+        cpu: "2"
+        memory: "8Gi"
+  worker:
+    replicas: 4
+    minReplicas: 2
+    maxReplicas: 32
+    resources:
+      limits:
+        cpu: "8"
+        memory: "32Gi"
+      requests:
+        cpu: "4"
+        memory: "16Gi"
+
+service:
+  type: ClusterIP
+  port: 8000
+  mcpPort: 8001
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "DATA_SESSION_ID"

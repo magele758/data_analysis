@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>现代数据栈 (MDS) 全链路分析与治理大盘</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <!-- Top Navigation Bar -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-50 px-8 py-3.5 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/40">
+        MDS
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-slate-100">现代数据栈全链路智能分析与治理平台</h1>
+        <p class="text-xs text-slate-400">Data Catalog · ETL 建模 · 深度分析 · Reverse ETL · 质量可观测</p>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <nav class="flex space-x-1.5 overflow-x-auto py-1">
+      <button data-tab="overview" class="tab-btn active px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">大盘概览</button>
+      <button data-tab="catalog" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">数据资产与血缘</button>
+      <button data-tab="transform" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">ETL与DAG建模</button>
+      <button data-tab="retl" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">Reverse ETL激活</button>
+      <button data-tab="observability" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">数据质量监控</button>
+      <button data-tab="traces" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">Trace链路</button>
+      <button data-tab="replay" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">路径复现</button>
+      <button data-tab="funnel" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">转化漏斗</button>
+      <button data-tab="flow" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">流动桑基图</button>
+      <button data-tab="retention" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">留存分析</button>
+      <a href="/sdk/browser-tracker/index.html" target="_blank" class="px-2.5 py-1.5 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 flex items-center">
+        SDK 联调 ↗
+      </a>
+    </nav>
+  </header>
+
+  <!-- Main Content Container -->
+  <main class="max-w-7xl mx-auto p-8">
+    <!-- Tab 1: Overview -->
+    <section id="pane-overview" class="tab-pane space-y-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="glass-card p-5 rounded-xl">
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">总上报事件数 (Events)</div>
+          <div id="stat-events" class="text-3xl font-extrabold text-sky-400 mt-2">--</div>
+        </div>
+        <div class="glass-card p-5 rounded-xl">
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">独立访客 (UV)</div>
+          <div id="stat-uv" class="text-3xl font-extrabold text-indigo-400 mt-2">--</div>
+        </div>
+        <div class="glass-card p-5 rounded-xl">
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">活跃会话数 (Sessions)</div>
+          <div id="stat-sessions" class="text-3xl font-extrabold text-emerald-400 mt-2">--</div>
+        </div>
+        <div class="glass-card p-5 rounded-xl">
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">异常与错误告警 (Errors)</div>
+          <div id="stat-errors" class="text-3xl font-extrabold text-rose-400 mt-2">--</div>
+        </div>
+      </div>
+
+      <div class="glass-card p-6 rounded-xl space-y-4">
+        <h2 class="text-base font-bold text-slate-200">受访页面深度度量排行 (Top Pages)</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left">
+            <thead>
+              <tr class="border-b border-slate-700 text-xs font-semibold text-slate-400 uppercase">
+                <th class="py-3 px-4">页面路径 (Path)</th>
+                <th class="py-3 px-4">浏览量 (PV)</th>
+                <th class="py-3 px-4">访客数 (UV)</th>
+                <th class="py-3 px-4">访问会话 (Sessions)</th>
+                <th class="py-3 px-4">平均停留时长 (Avg Dwell)</th>
+              </tr>
+            </thead>
+            <tbody id="page-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 2: Data Catalog & Lineage -->
+    <section id="pane-catalog" class="tab-pane hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="glass-card p-6 rounded-xl space-y-4">
+          <div class="flex justify-between items-center">
+            <h3 class="text-base font-bold text-slate-200">数据资产目录 (Data Asset Registry)</h3>
+            <button onclick="loadCatalogTables()" class="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-medium">刷新资产</button>
+          </div>
+          <div id="catalog-table-list" class="space-y-3 max-h-[450px] overflow-y-auto"></div>
+        </div>
+
+        <div class="glass-card p-6 rounded-xl space-y-4">
+          <div class="flex justify-between items-center">
+            <h3 class="text-base font-bold text-slate-200">统一指标语义库 (Metric Store)</h3>
+            <button onclick="loadSemanticMetrics()" class="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-medium">刷新指标</button>
+          </div>
+          <div id="semantic-metrics-list" class="space-y-3 max-h-[450px] overflow-y-auto"></div>
+        </div>
+      </div>
+
+      <div class="glass-card p-6 rounded-xl space-y-4">
+        <h3 class="text-base font-bold text-slate-200">全链路数据血缘关系拓扑 (Data Lineage Graph)</h3>
+        <div id="lineage-graph-container" class="h-80 w-full"></div>
+      </div>
+    </section>
+
+    <!-- Tab 3: Transform & DAG -->
+    <section id="pane-transform" class="tab-pane hidden space-y-6">
+      <div class="glass-card p-6 rounded-xl space-y-4">
+        <div class="flex justify-between items-center">
+          <div>
+            <h3 class="text-base font-bold text-slate-200">dbt-style SQL DAG 建模与拓扑调度</h3>
+            <p class="text-xs text-slate-400 mt-0.5">支持基于 Kahn 算法的自动依赖解析、循环依赖检测与分层物化</p>
+          </div>
+          <button onclick="runDagPipeline()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs font-semibold text-white transition shadow-lg shadow-emerald-600/30">
+            ▶ 触发全量 DAG 物化执行
+          </button>
+        </div>
+        <div id="dag-models-container" class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2"></div>
+        <div id="dag-execution-result" class="hidden p-4 bg-slate-900 rounded-lg border border-slate-800 font-mono text-xs text-slate-300"></div>
+      </div>
+    </section>
+
+    <!-- Tab 4: Reverse ETL & Activation -->
+    <section id="pane-retl" class="tab-pane hidden space-y-6">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="glass-card p-6 rounded-xl space-y-4">
+          <h3 class="text-base font-bold text-slate-200">反向同步至外部业务库 (Reverse ETL Sync)</h3>
+          <p class="text-xs text-slate-400">将分析结果或 RFM 分群标签反写至外部 PostgreSQL/MySQL/SQLite</p>
+          <div class="space-y-3 text-xs">
+            <div>
+              <label class="text-slate-400">源表 (Source Table):</label>
+              <input id="retl-source-table" type="text" value="events" class="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+            </div>
+            <div>
+              <label class="text-slate-400">目标连接串 (Destination URI):</label>
+              <input id="retl-dest-uri" type="text" value="sqlite:///data/export_sync.db" class="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+            </div>
+            <div>
+              <label class="text-slate-400">目标表名 (Destination Table):</label>
+              <input id="retl-dest-table" type="text" value="synced_user_insights" class="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+            </div>
+            <button onclick="triggerReverseSync()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-medium">执行反向同步</button>
+            <div id="retl-sync-msg" class="text-xs font-mono text-emerald-400"></div>
+          </div>
+        </div>
+
+        <div class="glass-card p-6 rounded-xl space-y-4">
+          <h3 class="text-base font-bold text-slate-200">智能异动与归因告警推送 (Webhook Pusher)</h3>
+          <p class="text-xs text-slate-400">支持一键向飞书/企业微信/Slack 推送富文本卡片告警</p>
+          <div class="space-y-3 text-xs">
+            <div>
+              <label class="text-slate-400">Webhook 平台 (Platform):</label>
+              <select id="webhook-platform" class="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+                <option value="feishu">飞书机器人 (Feishu Bot)</option>
+                <option value="dingtalk">钉钉机器人 (DingTalk)</option>
+                <option value="generic">通用 Webhook (Generic)</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-slate-400">告警标题 (Title):</label>
+              <input id="webhook-title" type="text" value="【数据智能预警】核心指标异动归因分析报告" class="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+            </div>
+            <div>
+              <label class="text-slate-400">告警内容 (Message):</label>
+              <textarea id="webhook-msg" rows="3" class="w-full mt-1 bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">今日大盘转化率环比下降 12.5%，主因因子定位为「华东大区-电子品类」加购流失率上升。</textarea>
+            </div>
+            <button onclick="triggerWebhookAlert()" class="w-full py-2.5 bg-sky-600 hover:bg-sky-500 rounded text-white font-medium">模拟下发告警卡片</button>
+            <div id="webhook-send-msg" class="text-xs font-mono text-sky-400"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 5: Data Quality & Observability -->
+    <section id="pane-observability" class="tab-pane hidden space-y-6">
+      <div class="glass-card p-6 rounded-xl space-y-4">
+        <div class="flex justify-between items-center">
+          <div>
+            <h3 class="text-base font-bold text-slate-200">Great-Expectations 风格声明式数据质量断言</h3>
+            <p class="text-xs text-slate-400">支持非空校验、唯一性校验、数值区间与行数波动断言</p>
+          </div>
+          <button onclick="runQualityAssertions()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold text-white">
+            运行质量断言套件
+          </button>
+        </div>
+
+        <div id="quality-report-card" class="hidden p-4 bg-slate-900 rounded-lg border border-slate-800 space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-slate-400">数据健康总评分 (Health Score):</span>
+            <span id="quality-health-score" class="text-2xl font-bold text-emerald-400">100.0%</span>
+          </div>
+          <div id="quality-rules-list" class="space-y-2 text-xs font-mono"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 6: Traces & Realtime -->
+    <section id="pane-traces" class="tab-pane hidden space-y-6">
+      <div class="glass-card p-6 rounded-xl space-y-4">
+        <div class="flex items-center space-x-3">
+          <input id="trace-id-input" type="text" placeholder="输入 Trace ID 检索 OpenTelemetry 完整调用链路瀑布流..." class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+          <button onclick="searchTrace()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium text-white transition">检索 Trace</button>
+        </div>
+        <div id="trace-waterfall-view" class="space-y-3"></div>
+      </div>
+
+      <div class="glass-card p-6 rounded-xl space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="text-sm font-bold text-slate-300">实时摄入事件日志流 (Realtime RingBuffer Stream)</h3>
+          <span class="flex items-center text-xs text-emerald-400">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping mr-2"></span> 实时监听中 (3s刷新)
+          </span>
+        </div>
+        <div id="realtime-log-container" class="space-y-2 max-h-96 overflow-y-auto"></div>
+      </div>
+    </section>
+
+    <!-- Tab 7: Session Replay -->
+    <section id="pane-replay" class="tab-pane hidden space-y-6">
+      <div class="glass-card p-6 rounded-xl space-y-4">
+        <div class="flex items-center space-x-4">
+          <select id="replay-session-select" onchange="loadSessionTimeline()" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"></select>
+          <button onclick="loadSessionTimeline()" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium text-white">刷新轨迹</button>
+        </div>
+        <div id="replay-timeline-container" class="mt-6 pt-4"></div>
+      </div>
+    </section>
+
+    <!-- Tab 8: Funnel Analysis -->
+    <section id="pane-funnel" class="tab-pane hidden space-y-6">
+      <div class="glass-card p-6 rounded-xl space-y-4">
+        <div class="flex items-center space-x-3">
+          <label class="text-xs text-slate-400 whitespace-nowrap">漏斗转化步骤:</label>
+          <input id="funnel-steps-input" type="text" value="view_item, add_to_cart, begin_checkout, purchase_success" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500">
+          <button onclick="loadFunnelData()" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium text-white">计算转化率</button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-4 pt-2">
+          <div class="bg-slate-900/80 p-4 rounded-lg border border-slate-800 text-center">
+            <div class="text-xs text-slate-400">总转化率 (Overall Rate)</div>
+            <div id="funnel-overall-rate" class="text-2xl font-bold text-emerald-400 mt-1">--</div>
+          </div>
+          <div class="bg-slate-900/80 p-4 rounded-lg border border-slate-800 text-center">
+            <div class="text-xs text-slate-400">起始人数 (Step 1 Users)</div>
+            <div id="funnel-initial-users" class="text-2xl font-bold text-sky-400 mt-1">--</div>
+          </div>
+          <div class="bg-slate-900/80 p-4 rounded-lg border border-slate-800 text-center">
+            <div class="text-xs text-slate-400">最终成单人数 (Converted)</div>
+            <div id="funnel-final-users" class="text-2xl font-bold text-indigo-400 mt-1">--</div>
+          </div>
+        </div>
+
+        <div id="funnel-chart-container" class="h-96 w-full mt-4"></div>
+      </div>
+    </section>
+
+    <!-- Tab 9: Flow Sankey -->
+    <section id="pane-flow" class="tab-pane hidden space-y-6">
+      <div class="glass-card p-6 rounded-xl space-y-4">
+        <h3 class="text-base font-bold text-slate-200">用户全站页面流向拓扑 (User Navigation Journey)</h3>
+        <div id="flow-chart-container" class="h-[500px] w-full"></div>
+      </div>
+    </section>
+
+    <!-- Tab 10: Retention Matrix -->
+    <section id="pane-retention" class="tab-pane hidden space-y-6">
+      <div class="glass-card p-6 rounded-xl space-y-4">
+        <h3 class="text-base font-bold text-slate-200">用户群组留存热力矩阵 (Cohort Retention Heatmap)</h3>
+        <div class="overflow-x-auto">
+          <table class="w-full text-center">
+            <thead>
+              <tr id="retention-thead" class="border-b border-slate-700 text-xs font-semibold text-slate-400 uppercase"></tr>
+            </thead>
+            <tbody id="retention-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

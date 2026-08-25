@@ -1,0 +1,28 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: data-analysis-ray-cluster
+spec:
+  rayVersion: '2.30.0'
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: '0.0.0.0'
+    template:
+      spec:
+        containers:
+        - name: ray-head
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          resources:
+            {{- toYaml .Values.rayCluster.head.resources | nindent 12 }}
+  workerGroupSpecs:
+  - groupName: worker-group
+    replicas: {{ .Values.rayCluster.worker.replicas }}
+    minReplicas: {{ .Values.rayCluster.worker.minReplicas }}
+    maxReplicas: {{ .Values.rayCluster.worker.maxReplicas }}
+    template:
+      spec:
+        containers:
+        - name: ray-worker
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          resources:
+            {{- toYaml .Values.rayCluster.worker.resources | nindent 12 }}
