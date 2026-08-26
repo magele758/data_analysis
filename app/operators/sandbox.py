@@ -1,4 +1,5 @@
 from typing import Dict, Any
+import pyarrow as pa
 from app.cluster.session_manager import SessionManager
 from app.engine.arrow_utils import ArrowUtils
 

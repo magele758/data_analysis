@@ -1,0 +1,11 @@
+{
+  "name": "data-analysis-service",
+  "install": "sudo apt-get update && sudo apt-get install -y python3.12-venv && python3 -m venv .venv && .venv/bin/pip install --upgrade pip && .venv/bin/pip install -r requirements.txt",
+  "terminals": [
+    {
+      "name": "backend",
+      "command": ".venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    }
+  ],
+  "ports": [8000]
+}

@@ -79,7 +79,7 @@ async function loadCatalogTables() {
           <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">${t.table_type}</span>
         </div>
         <div class="text-slate-400">${t.description || '暂无描述'}</div>
-        <div class="text-[11px] text-slate-500 font-mono">行数: ${t.row_count:,} | 列数: ${t.column_count} | 标签: ${(t.tags||[]).join(', ')}</div>
+        <div class="text-[11px] text-slate-500 font-mono">行数: ${t.row_count} | 列数: ${t.column_count} | 标签: ${(t.tags||[]).join(', ')}</div>
       `;
       list.appendChild(d);
     });
