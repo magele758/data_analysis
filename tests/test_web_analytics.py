@@ -122,4 +122,8 @@ def test_trace_waterfall_and_replay():
 def test_dashboard_endpoint():
     resp = client.get("/dashboard")
     assert resp.status_code == 200
-    assert "现代数据栈全链路智能分析与治理平台" in resp.text
+    # 断言结构而非标题文案：六阶段流程轨是看板的骨架，
+    # 少一段就说明导航被改坏了，而标题改字不该让测试失败。
+    assert "DATA" in resp.text
+    for stage in ("ingest", "model", "ontology", "analyze", "activate", "observe"):
+        assert f'data-stage="{stage}"' in resp.text

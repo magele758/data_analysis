@@ -3,63 +3,118 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>现代数据栈 (MDS) 全链路分析与治理大盘</title>
+  <title>DATA/AGENT — 现代数据栈治理台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    /* 在令牌层重映射 Tailwind 调色板：既有 slate-*/indigo-* 工具类原地换肤，
+       无需改动数百行 class，避免半新半旧的拼接。 */
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            slate: {
+              950: '#121316', 900: '#16171A', 850: '#1B1D21', 800: '#21242A',
+              700: '#2E333A', 600: '#3C424A', 500: '#565D67', 400: '#757D88',
+              300: '#9AA2AD', 200: '#C2C9D1', 100: '#ECEEF1', 50: '#F7F8F9',
+            },
+            indigo: { 950: '#2A1D08', 700: '#C4821F', 600: '#F0A22E', 500: '#F5B454', 400: '#F8C77E', 300: '#F8C77E' },
+            sky:  { 600: '#2E9CB5', 500: '#4CC8E0', 400: '#4CC8E0' },
+            emerald: { 600: '#5F8F4E', 500: '#7FB069', 400: '#7FB069' },
+            rose: { 600: '#C4453B', 500: '#E0574C', 400: '#E0574C' },
+            amber: { 300: '#F0A22E' },
+          },
+        },
+      },
+    };
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen">
-  <!-- Top Navigation Bar -->
-  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-50 px-8 py-3.5 flex items-center justify-between">
-    <div class="flex items-center space-x-3">
-      <div class="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/40">
-        MDS
+  <!-- ======================================================================
+       签名元素：流程轨。导航即架构图 —— 六阶段按数据实际流向排列。
+       ====================================================================== -->
+  <header class="sticky top-0 z-50 bg-slate-950/95 border-b border-white/[0.07]">
+    <div class="px-6 lg:px-8 pt-3 pb-2.5 flex items-baseline justify-between gap-6 flex-wrap">
+      <div class="flex items-baseline gap-3">
+        <h1 class="display text-[0.9375rem] font-bold text-slate-100 tracking-wide">DATA<span class="text-indigo-600">/</span>AGENT</h1>
+        <p class="text-[0.6875rem] text-slate-500">DuckDB 向量化引擎 · Arrow 零拷贝内存 · 本体驱动闭环</p>
       </div>
-      <div>
-        <h1 class="text-base font-bold text-slate-100">现代数据栈全链路智能分析与治理平台</h1>
-        <p class="text-xs text-slate-400">Data Catalog · ETL 建模 · 深度分析 · Reverse ETL · 质量可观测</p>
+      <div class="flex items-center gap-4 text-[0.625rem] font-mono text-slate-500">
+        <span>25 语义算子</span>
+        <span class="text-slate-700">·</span>
+        <span>算法本地自研</span>
+        <span class="text-slate-700">·</span>
+        <a href="/docs" class="text-sky-500 hover:text-sky-400 transition">OpenAPI</a>
+        <a href="/sdk/browser-tracker/index.html" target="_blank" class="text-sky-500 hover:text-sky-400 transition">SDK 联调 ↗</a>
       </div>
     </div>
 
-    <!-- Navigation Tabs -->
-    <nav class="flex space-x-1.5 overflow-x-auto py-1">
-      <button data-tab="overview" class="tab-btn active px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">大盘概览</button>
-      <button data-tab="ontology" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">业务本体(Ontology)</button>
-      <button data-tab="catalog" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">数据资产与血缘</button>
-      <button data-tab="transform" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">ETL与DAG建模</button>
-      <button data-tab="retl" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">Reverse ETL激活</button>
-      <button data-tab="observability" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">数据质量监控</button>
-      <button data-tab="traces" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">Trace链路</button>
-      <button data-tab="replay" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">路径复现</button>
-      <button data-tab="funnel" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">转化漏斗</button>
-      <button data-tab="flow" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">流动桑基图</button>
-      <button data-tab="retention" class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:bg-slate-800 transition">留存分析</button>
-      <a href="/sdk/browser-tracker/index.html" target="_blank" class="px-2.5 py-1.5 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 flex items-center">
-        SDK 联调 ↗
-      </a>
+    <!-- 01 摄取 → 02 建模 → 03 本体 → 04 分析 → 05 激活 → 06 观测 -->
+    <nav class="stack-rail px-4 lg:px-6" aria-label="数据栈阶段">
+      <button data-stage="ingest" class="stage active">
+        <span class="stage-num">01</span><span class="stage-label">摄取</span><span class="stage-sub">INGEST</span>
+      </button>
+      <button data-stage="model" class="stage">
+        <span class="stage-num">02</span><span class="stage-label">建模</span><span class="stage-sub">MODEL</span>
+      </button>
+      <button data-stage="ontology" class="stage">
+        <span class="stage-num">03</span><span class="stage-label">本体</span><span class="stage-sub">ONTOLOGY</span>
+      </button>
+      <button data-stage="analyze" class="stage">
+        <span class="stage-num">04</span><span class="stage-label">分析</span><span class="stage-sub">ANALYZE</span>
+      </button>
+      <button data-stage="activate" class="stage">
+        <span class="stage-num">05</span><span class="stage-label">激活</span><span class="stage-sub">ACTIVATE</span>
+      </button>
+      <button data-stage="observe" class="stage">
+        <span class="stage-num">06</span><span class="stage-label">观测</span><span class="stage-sub">OBSERVE</span>
+      </button>
     </nav>
+
+    <!-- 阶段内视图：仅显示当前阶段的成员 -->
+    <div class="px-6 lg:px-8 py-2 border-t border-white/[0.05] flex gap-1 overflow-x-auto">
+      <button data-tab="overview" data-stage="ingest" class="view-btn">大盘概览</button>
+      <button data-tab="catalog" data-stage="model" class="view-btn">资产与血缘</button>
+      <button data-tab="transform" data-stage="model" class="view-btn">DAG 建模</button>
+      <button data-tab="ontology" data-stage="ontology" class="view-btn">实体图谱与动作</button>
+      <button data-tab="funnel" data-stage="analyze" class="view-btn">转化漏斗</button>
+      <button data-tab="flow" data-stage="analyze" class="view-btn">流向拓扑</button>
+      <button data-tab="retention" data-stage="analyze" class="view-btn">留存矩阵</button>
+      <button data-tab="retl" data-stage="activate" class="view-btn">反向同步与告警</button>
+      <button data-tab="observability" data-stage="observe" class="view-btn">质量断言</button>
+      <button data-tab="traces" data-stage="observe" class="view-btn">Trace 链路</button>
+      <button data-tab="replay" data-stage="observe" class="view-btn">路径复现</button>
+    </div>
   </header>
+  <div class="hidden">
+
+  </div>
 
   <!-- Main Content Container -->
   <main class="max-w-7xl mx-auto p-8">
     <!-- Tab 1: Overview -->
     <section id="pane-overview" class="tab-pane space-y-6">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="glass-card p-5 rounded-xl">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">总上报事件数 (Events)</div>
-          <div id="stat-events" class="text-3xl font-extrabold text-sky-400 mt-2">--</div>
+      <!-- 四个计数：单色墨白，唯有非零错误数转红 -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 border border-white/[0.07] bg-slate-900">
+        <div class="p-5 border-r border-white/[0.07]">
+          <div class="text-[0.625rem] font-mono tracking-[0.13em] text-slate-400">上报事件 EVENTS</div>
+          <div id="stat-events" class="mt-1.5">--</div>
         </div>
-        <div class="glass-card p-5 rounded-xl">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">独立访客 (UV)</div>
-          <div id="stat-uv" class="text-3xl font-extrabold text-indigo-400 mt-2">--</div>
+        <div class="p-5 lg:border-r border-white/[0.07]">
+          <div class="text-[0.625rem] font-mono tracking-[0.13em] text-slate-400">独立访客 UV</div>
+          <div id="stat-uv" class="mt-1.5">--</div>
         </div>
-        <div class="glass-card p-5 rounded-xl">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">活跃会话数 (Sessions)</div>
-          <div id="stat-sessions" class="text-3xl font-extrabold text-emerald-400 mt-2">--</div>
+        <div class="p-5 border-r border-t lg:border-t-0 border-white/[0.07]">
+          <div class="text-[0.625rem] font-mono tracking-[0.13em] text-slate-400">活跃会话 SESSIONS</div>
+          <div id="stat-sessions" class="mt-1.5">--</div>
         </div>
-        <div class="glass-card p-5 rounded-xl">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">异常与错误告警 (Errors)</div>
-          <div id="stat-errors" class="text-3xl font-extrabold text-rose-400 mt-2">--</div>
+        <div class="p-5 border-t lg:border-t-0 border-white/[0.07]">
+          <div class="text-[0.625rem] font-mono tracking-[0.13em] text-slate-400">异常告警 ERRORS</div>
+          <div id="stat-errors" class="mt-1.5">--</div>
         </div>
       </div>
 

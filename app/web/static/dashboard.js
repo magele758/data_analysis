@@ -8,28 +8,46 @@ document.addEventListener('DOMContentLoaded', () => {
   startRealtimeStream();
 });
 
+/**
+ * 两层导航：流程轨（阶段）+ 阶段内视图。
+ * 阶段轨编码数据流向；切换视图会回写高亮所属阶段，
+ * 使"我在管道的哪一段"始终可见。
+ */
 function initTabs() {
-  const tabs = document.querySelectorAll('.tab-btn');
-  tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      tabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
+  const stages = document.querySelectorAll('.stage');
+  const views = document.querySelectorAll('.view-btn');
 
-      const target = tab.getAttribute('data-tab');
-      document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
-      const activePane = document.getElementById('pane-' + target);
-      if (activePane) activePane.classList.remove('hidden');
+  function activate(target, stage) {
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
+    const pane = document.getElementById('pane-' + target);
+    if (pane) pane.classList.remove('hidden');
 
-      if (target === 'ontology') { loadOntologySchema(); loadOntologyAudits(); }
-      if (target === 'catalog') { loadCatalogTables(); loadSemanticMetrics(); loadLineageGraph(); }
-      if (target === 'transform') loadDagModels();
-      if (target === 'funnel') loadFunnelData();
-      if (target === 'flow') loadFlowData();
-      if (target === 'retention') loadRetentionData();
-      if (target === 'replay') loadSessionsList();
-      if (target === 'traces') loadRealtimeLogs();
+    stages.forEach(s => s.classList.toggle('active', s.dataset.stage === stage));
+    views.forEach(v => {
+      v.hidden = v.dataset.stage !== stage;
+      v.classList.toggle('active', v.dataset.tab === target);
     });
-  });
+
+    // 数据加载分派（行为与改版前一致）
+    if (target === 'ontology') { loadOntologySchema(); loadOntologyAudits(); }
+    if (target === 'catalog') { loadCatalogTables(); loadSemanticMetrics(); loadLineageGraph(); }
+    if (target === 'transform') loadDagModels();
+    if (target === 'funnel') loadFunnelData();
+    if (target === 'flow') loadFlowData();
+    if (target === 'retention') loadRetentionData();
+    if (target === 'replay') loadSessionsList();
+    if (target === 'traces') loadRealtimeLogs();
+  }
+
+  stages.forEach(s => s.addEventListener('click', () => {
+    // 进入阶段 = 打开该阶段的首个视图
+    const first = document.querySelector(`.view-btn[data-stage="${s.dataset.stage}"]`);
+    if (first) activate(first.dataset.tab, s.dataset.stage);
+  }));
+
+  views.forEach(v => v.addEventListener('click', () => activate(v.dataset.tab, v.dataset.stage)));
+
+  activate('overview', 'ingest');
 }
 
 // 1. Overview
@@ -38,10 +56,16 @@ async function loadOverviewData() {
     const res = await fetch('/api/v1/analytics/pages');
     const data = await res.json();
     if (data.summary) {
-      document.getElementById('stat-events').textContent = data.summary.total_events || 0;
-      document.getElementById('stat-uv').textContent = data.summary.total_uv || 0;
-      document.getElementById('stat-sessions').textContent = data.summary.total_sessions || 0;
-      document.getElementById('stat-errors').textContent = data.summary.total_errors || 0;
+      const fmt = n => (n ?? 0).toLocaleString();
+      document.getElementById('stat-events').textContent = fmt(data.summary.total_events);
+      document.getElementById('stat-uv').textContent = fmt(data.summary.total_uv);
+      document.getElementById('stat-sessions').textContent = fmt(data.summary.total_sessions);
+
+      // 告警色留给真正的告警：错误数为零时保持墨白
+      const errors = data.summary.total_errors || 0;
+      const errEl = document.getElementById('stat-errors');
+      errEl.textContent = fmt(errors);
+      errEl.classList.toggle('is-alert', errors > 0);
     }
 
     const tbody = document.getElementById('page-table-body');
@@ -79,7 +103,7 @@ async function loadCatalogTables() {
           <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">${t.table_type}</span>
         </div>
         <div class="text-slate-400">${t.description || '暂无描述'}</div>
-        <div class="text-[11px] text-slate-500 font-mono">行数: ${t.row_count:,} | 列数: ${t.column_count} | 标签: ${(t.tags||[]).join(', ')}</div>
+        <div class="text-[11px] text-slate-500 font-mono">行数: ${(t.row_count ?? 0).toLocaleString()} | 列数: ${t.column_count} | 标签: ${(t.tags||[]).join(', ')}</div>
       `;
       list.appendChild(d);
     });
@@ -123,13 +147,13 @@ async function loadLineageGraph() {
           layout: 'force',
           symbolSize: 40,
           roam: true,
-          label: { show: true, color: '#e2e8f0', fontSize: 11 },
+          label: { show: true, color: '#C2C9D1', fontSize: 11 },
           edgeSymbol: ['circle', 'arrow'],
           edgeSymbolSize: [4, 8],
           edgeLabel: { fontSize: 10 },
           data: data.nodes || [],
           links: data.edges || [],
-          lineStyle: { color: '#6366f1', curveness: 0.2, width: 2 }
+          lineStyle: { color: '#4CC8E0', curveness: 0.2, width: 2 }
         }
       ]
     };
@@ -369,8 +393,8 @@ async function loadFunnelData() {
           maxSize: '100%',
           sort: 'descending',
           gap: 4,
-          label: { show: true, position: 'inside', color: '#fff', fontSize: 12 },
-          itemStyle: { borderColor: '#1e293b', borderWidth: 2 },
+          label: { show: true, position: 'inside', color: '#121316', fontSize: 12 },
+          itemStyle: { borderColor: '#16171A', borderWidth: 2 },
           data: chartData
         }
       ]
@@ -407,7 +431,7 @@ async function loadFlowData() {
           data: data.nodes,
           links: data.links,
           lineStyle: { color: 'gradient', curveness: 0.5, opacity: 0.4 },
-          label: { color: '#e2e8f0', fontSize: 11 }
+          label: { color: '#C2C9D1', fontSize: 11 }
         }
       ]
     };
@@ -554,7 +578,7 @@ async function loadOntologySchema() {
       id: o.name,
       name: `${o.name} (PK: ${o.primary_key})`,
       symbolSize: 45,
-      itemStyle: { color: '#6366f1' }
+      itemStyle: { color: '#4CC8E0' }
     }));
 
     const links = (data.link_types || []).map(l => ({
@@ -571,12 +595,12 @@ async function loadOntologySchema() {
           type: 'graph',
           layout: 'force',
           roam: true,
-          label: { show: true, color: '#e2e8f0', fontSize: 11 },
+          label: { show: true, color: '#C2C9D1', fontSize: 11 },
           edgeSymbol: ['circle', 'arrow'],
           edgeSymbolSize: [4, 8],
           data: nodes,
           links: links,
-          lineStyle: { color: '#38bdf8', curveness: 0.2, width: 2 }
+          lineStyle: { color: '#4CC8E0', curveness: 0.2, width: 2 }
         }
       ]
     };
