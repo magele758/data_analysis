@@ -1,6 +1,6 @@
 ---
 name: data-analysis-service
-description: Enterprise Modern Data Stack (MDS) & Palantir-Style Agentic Ontology data intelligence engine. Supports loading large Excel (.xlsx, .xls) and CSV files, Business Objects (Customer, Order, Device), Entity Links & Graph Traversal, Closed-Loop Actions & Audit Trails, Data Catalog & Lineage, Semantic Metric Store, ETL/ELT data cleaning & DAG modeling, Reverse ETL data activation, Data Quality assertions, OpenTelemetry web analytics (funnels, user flow Sankey, cohort retention, trace replay), EDA profiling, multi-dimensional drill-down attribution, and SPSS-grade hypothesis testing (t-test, ANOVA, regression). Use when the user asks to import large Excel/CSV datasets, query business entities, traverse entity relation graphs, execute business actions, catalog assets, clean data, run DAG pipelines, query standardized metrics, sync data back to DB/CRM/webhooks, run data quality assertions, calculate conversion funnels, or perform statistical tests.
+description: Enterprise Modern Data Stack (MDS) data-processing pipeline engine with two data-source paths that share one analytical engine — (A) DB connectors (PostgreSQL/MySQL/MSSQL/SQLite/File/Excel/CSV) and (B) trace/telemetry import (OTLP JSON, span JSON/NDJSON, CSV/Parquet). Once data lands in an in-memory session table, the full pipeline applies uniformly: clean/transform, dbt-style DAG modeling, Data Catalog & lineage, semantic metric store, EDA profiling, OLAP, SPSS-grade hypothesis testing (t-test/ANOVA/regression), driver attribution, conversion funnels / user-flow Sankey / cohort retention / OpenTelemetry span waterfall & session replay (all on the imported trace table), Great-Expectations quality assertions, schema drift, and Reverse ETL activation (DB/CRM/webhooks). Palantir-style Ontology (Objects, Links, Actions, audit) sits on top. Use when the user asks to import large Excel/CSV datasets or connect a database, import/analyze traces or telemetry, catalog assets, clean data, run DAG pipelines, query standardized metrics, sync data back to DB/CRM/webhooks, run data quality assertions, calculate conversion funnels or trace waterfalls, or perform statistical tests. Note: this service does not collect telemetry itself — collection is an optional demo under examples/telemetry-collector-demo that feeds data in via import_traces.
 ---
 
 # Enterprise Modern Data Stack & Agentic Ontology Service (Agent Skill)
@@ -9,9 +9,11 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 
 ## Quick Start Workflows
 
-### 1. Big File & Multi-Source Data Ingestion
-* **Import Big Excel / CSV**: Invoke `import_excel_or_csv` with `file_path`, `dataset_name`, and optional `sheet_name` to stream parse million-row files into memory without OOM.
-* **Database Connectors**: Call `connect_and_load_db` to connect to PostgreSQL/MySQL/MSSQL/SQLite with predicate pushdown.
+### 1. Two Ingestion Paths → One Analytical Session
+* **Path A — Database Connectors**: Call `connect_and_load_db` to connect to PostgreSQL/MySQL/MSSQL/SQLite/File with projection & predicate pushdown.
+* **Path A — Big Excel / CSV**: Invoke `import_excel_or_csv` with `file_path`, `dataset_name`, optional `sheet_name` to stream-parse million-row files without OOM.
+* **Path B — Trace / Telemetry Import**: Invoke `import_traces` with `source` (OTLP JSON, span JSON/NDJSON array, or CSV/Parquet) and `dataset_name` to load trace spans/events as an ordinary session table. It is normalized to a canonical span/event schema so every downstream operator applies.
+* All paths land in the same in-memory DuckDB session (`session_id`), so DB data and trace data share one analysis engine.
 
 ### 2. Palantir Agentic Ontology Layer
 * **Inspect Schema**: Invoke `ontology_list_schema` to discover all business Object Types, Links, and available Actions.
@@ -31,7 +33,7 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 * **EDA Profiling**: Invoke `eda_profile` for semantic types, distribution stats, and data quality scores.
 * **Driver Attribution**: Invoke `driver_attribution_analysis` to drill down root-cause drivers with Shapley contributions.
 * **SPSS Testing & Regression**: Use `spss_hypothesis_test` and `spss_regression_analysis` for formal inference.
-* **Web & Trace Analytics**: Use `analyze_conversion_funnel`, `analyze_user_flow`, `analyze_cohort_retention`, `inspect_trace_and_replay`.
+* **Trace & Web Analytics (on the imported trace table)**: Use `analyze_conversion_funnel`, `analyze_user_flow`, `analyze_cohort_retention`, `analyze_page_performance`, `inspect_trace_and_replay` — each takes `session_id` + `dataset_name` and runs on the session-resident trace/event table (not a separate store).
 
 ### 6. Reverse ETL & Operational Activation
 * **Destination Sync**: Invoke `reverse_sync_destination` to stream sync analytical results back to PostgreSQL/MySQL/SQLite/Parquet.
