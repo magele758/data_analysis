@@ -1,6 +1,10 @@
 from typing import List, Dict, Any, Optional
 import duckdb
 
+from app.engine.sql_guard import safe_ident, safe_table_ref, safe_predicate
+
+_ALLOWED_AGG = {"SUM", "AVG", "COUNT", "MIN", "MAX"}
+
 class DistributedDriverAnalysis:
     """Multi-dimensional Indicator Fluctuation Attribution & Shapley Driver Drill-Down Engine."""
 
@@ -17,8 +21,15 @@ class DistributedDriverAnalysis:
         top_k: int = 5
     ) -> Dict[str, Any]:
         func = agg_func.upper()
-        base_total_sql = f'SELECT {func}("{target_metric}") FROM {table_name} WHERE {base_filter}'
-        curr_total_sql = f'SELECT {func}("{target_metric}") FROM {table_name} WHERE {current_filter}'
+        if func not in _ALLOWED_AGG:
+            raise ValueError(f"Unsupported aggregation function '{agg_func}'")
+        table_name = safe_table_ref(table_name)
+        metric_col = safe_ident(target_metric)
+        base_filter = safe_predicate(base_filter)
+        current_filter = safe_predicate(current_filter)
+
+        base_total_sql = f'SELECT {func}({metric_col}) FROM {table_name} WHERE {base_filter}'
+        curr_total_sql = f'SELECT {func}({metric_col}) FROM {table_name} WHERE {current_filter}'
 
         base_total = con.execute(base_total_sql).fetchone()[0] or 0.0
         curr_total = con.execute(curr_total_sql).fetchone()[0] or 0.0
@@ -30,24 +41,25 @@ class DistributedDriverAnalysis:
         current_dims = []
         for dim in dimension_path:
             current_dims.append(dim)
-            dim_cols = ", ".join([f'"{d}"' for d in current_dims])
-            join_cond = " AND ".join([f'c."{d}" = b."{d}"' for d in current_dims])
-            
+            dim_col = safe_ident(dim)
+            dim_cols = ", ".join([safe_ident(d) for d in current_dims])
+            join_cond = " AND ".join([f'c.{safe_ident(d)} = b.{safe_ident(d)}' for d in current_dims])
+
             sql = f"""
             WITH base_agg AS (
-                SELECT {dim_cols}, {func}("{target_metric}") AS base_val
+                SELECT {dim_cols}, {func}({metric_col}) AS base_val
                 FROM {table_name}
                 WHERE {base_filter}
                 GROUP BY {dim_cols}
             ),
             curr_agg AS (
-                SELECT {dim_cols}, {func}("{target_metric}") AS curr_val
+                SELECT {dim_cols}, {func}({metric_col}) AS curr_val
                 FROM {table_name}
                 WHERE {current_filter}
                 GROUP BY {dim_cols}
             )
-            SELECT 
-                COALESCE(c."{dim}", b."{dim}") AS dim_val,
+            SELECT
+                COALESCE(c.{dim_col}, b.{dim_col}) AS dim_val,
                 COALESCE(b.base_val, 0) AS base_v,
                 COALESCE(c.curr_val, 0) AS curr_v,
                 COALESCE(c.curr_val, 0) - COALESCE(b.base_val, 0) AS diff_v

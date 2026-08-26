@@ -2,6 +2,10 @@ from typing import List, Dict, Any, Optional
 import duckdb
 import pyarrow as pa
 
+from app.engine.sql_guard import safe_ident, safe_table_ref, safe_predicate
+
+_ALLOWED_AGG = {"SUM", "AVG", "COUNT", "MIN", "MAX"}
+
 class DistributedOLAP:
     """High-performance multi-dimensional In-Memory OLAP aggregator."""
 
@@ -22,14 +26,17 @@ class DistributedOLAP:
         funcs = agg_funcs or ["SUM" for _ in metrics]
         agg_exprs = []
         for m, f in zip(metrics, funcs):
-            agg_exprs.append(f'{f.upper()}("{m}") AS "{m}_{f.lower()}"')
-        
-        dim_clause = ", ".join([f'"{d}"' for d in dimensions]) if dimensions else ""
+            func = f.upper()
+            if func not in _ALLOWED_AGG:
+                raise ValueError(f"Unsupported aggregation function '{f}'")
+            agg_exprs.append(f'{func}({safe_ident(m)}) AS {safe_ident(f"{m}_{f.lower()}")}')
+
+        dim_clause = ", ".join([safe_ident(d) for d in dimensions]) if dimensions else ""
         select_clause = ", ".join(filter(None, [dim_clause, ", ".join(agg_exprs)]))
 
-        sql = f"SELECT {select_clause} FROM {table_name}"
+        sql = f"SELECT {select_clause} FROM {safe_table_ref(table_name)}"
         if filters:
-            sql += f" WHERE {filters}"
+            sql += f" WHERE {safe_predicate(filters)}"
 
         if dimensions:
             if cube:
@@ -40,14 +47,16 @@ class DistributedOLAP:
                 sql += f" GROUP BY {dim_clause}"
 
         if order_by:
-            sql += f" ORDER BY {order_by}"
+            sql += f" ORDER BY {safe_predicate(order_by)}"
         elif metrics:
             sql += f" ORDER BY 2 DESC"
 
+        params = []
         if limit:
-            sql += f" LIMIT {limit}"
+            sql += " LIMIT ?"
+            params.append(int(limit))
 
-        res = con.execute(sql).arrow()
+        res = con.execute(sql, params).arrow()
         if isinstance(res, pa.RecordBatchReader):
             res = res.read_all()
         return res
@@ -63,27 +72,35 @@ class DistributedOLAP:
         agg_func: str = "SUM",
         filters: Optional[str] = None
     ) -> pa.Table:
-        dist_sql = f'SELECT DISTINCT "{columns}" FROM {table_name} WHERE "{columns}" IS NOT NULL'
+        func = agg_func.upper()
+        if func not in _ALLOWED_AGG:
+            raise ValueError(f"Unsupported aggregation function '{agg_func}'")
+        table_ref = safe_table_ref(table_name)
+        col_ref = safe_ident(columns)
+        val_ref = safe_ident(values)
+
+        dist_sql = f'SELECT DISTINCT {col_ref} FROM {table_ref} WHERE {col_ref} IS NOT NULL'
         if filters:
-            dist_sql += f" AND ({filters})"
+            dist_sql += f" AND ({safe_predicate(filters)})"
         distinct_vals = [str(r[0]) for r in con.execute(dist_sql).fetchall()]
 
         pivot_exprs = []
+        params = []
         for val in distinct_vals:
-            safe_val = val.replace("'", "''")
-            alias = f"{val}_{agg_func.lower()}"
-            expr = f"{agg_func.upper()}(CASE WHEN \"{columns}\" = '{safe_val}' THEN \"{values}\" ELSE 0 END) AS \"{alias}\""
-            pivot_exprs.append(expr)
+            # alias comes from column data, not a caller identifier: escape quotes, don't reject spaces
+            alias = '"{}"'.format(f"{val}_{agg_func.lower()}".replace('"', '""'))
+            pivot_exprs.append(f"{func}(CASE WHEN {col_ref} = ? THEN {val_ref} ELSE 0 END) AS {alias}")
+            params.append(val)
 
-        row_clause = ", ".join([f'"{r}"' for r in rows])
+        row_clause = ", ".join([safe_ident(r) for r in rows])
         select_clause = f"{row_clause}, " + ", ".join(pivot_exprs)
-        
-        sql = f"SELECT {select_clause} FROM {table_name}"
+
+        sql = f"SELECT {select_clause} FROM {table_ref}"
         if filters:
-            sql += f" WHERE {filters}"
+            sql += f" WHERE {safe_predicate(filters)}"
         sql += f" GROUP BY {row_clause} ORDER BY 1"
 
-        res = con.execute(sql).arrow()
+        res = con.execute(sql, params).arrow()
         if isinstance(res, pa.RecordBatchReader):
             res = res.read_all()
         return res

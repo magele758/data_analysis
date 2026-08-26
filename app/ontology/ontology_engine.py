@@ -8,6 +8,7 @@ from app.ontology.object_type import ObjectType, PropertyMeta
 from app.ontology.link_type import LinkType
 from app.ontology.action_type import ActionType, ActionExecutionAudit
 from app.catalog.metadata_db import MetadataDB
+from app.engine.sql_guard import safe_ident, safe_table_ref, safe_predicate, safe_columns
 from app.retl.webhook_pusher import WebhookPusher
 from app.retl.destination_sync import DestinationSync
 
@@ -121,14 +122,14 @@ class OntologyEngine:
             if not obj:
                 raise ValueError(f"ObjectType '{object_type_name}' is not registered in Ontology.")
 
-            table = obj.backed_by_table
-            select_cols = ", ".join([f'"{p}"' for p in properties]) if properties else "*"
+            table = safe_table_ref(obj.backed_by_table)
+            select_cols = safe_columns(properties) if properties else "*"
             sql = f"SELECT {select_cols} FROM {table}"
             if filters:
-                sql += f" WHERE {filters}"
-            sql += f" LIMIT {limit}"
+                sql += f" WHERE {safe_predicate(filters)}"
+            sql += " LIMIT ?"
 
-            df = con.execute(sql).df()
+            df = con.execute(sql, [limit]).df()
             instances = df.to_dict(orient="records")
 
             return {
@@ -164,21 +165,18 @@ class OntologyEngine:
                 raise ValueError("Source or Target ObjectType definition missing.")
 
             # Perform graph hop via DuckDB join
-            src_table = src_obj.backed_by_table
-            tgt_table = tgt_obj.backed_by_table
-
-            # Safely quote string IDs
-            id_val = f"'{source_instance_id}'" if isinstance(source_instance_id, str) else str(source_instance_id)
+            src_table = safe_table_ref(src_obj.backed_by_table)
+            tgt_table = safe_table_ref(tgt_obj.backed_by_table)
 
             sql = f"""
-            SELECT tgt.* 
+            SELECT tgt.*
             FROM {tgt_table} tgt
-            JOIN {src_table} src ON src."{link.source_join_key}" = tgt."{link.target_join_key}"
-            WHERE src."{src_obj.primary_key}" = {id_val}
-            LIMIT {limit}
+            JOIN {src_table} src ON src.{safe_ident(link.source_join_key)} = tgt.{safe_ident(link.target_join_key)}
+            WHERE src.{safe_ident(src_obj.primary_key)} = ?
+            LIMIT ?
             """
 
-            df = con.execute(sql).df()
+            df = con.execute(sql, [source_instance_id, limit]).df()
             linked_instances = df.to_dict(orient="records")
 
             return {
@@ -235,7 +233,16 @@ class OntologyEngine:
                     template = action.handler_config.get("sql_template")
                     if template:
                         # Simple parameter substitution
-                        formatted_sql = template.format(instance_id=instance_id, **parameter_values)
+                        # sql_template is a .format() string, so values cannot be bound as real
+                        # parameters without an API change: reject anything that could close a
+                        # literal or chain a statement.
+                        subs = {"instance_id": instance_id, **parameter_values}
+                        for k, v in subs.items():
+                            if isinstance(v, str) and any(t in v for t in ("'", '"', ";", "--", "/*")):
+                                raise ValueError(
+                                    f"Unsafe character in SQL_MUTATION parameter '{k}': {v!r}"
+                                )
+                        formatted_sql = template.format(**subs)
                         con.execute(formatted_sql)
                         exec_result = {"status": "SUCCESS", "executed_sql": formatted_sql}
 

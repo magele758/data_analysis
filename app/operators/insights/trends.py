@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional
 import numpy as np
 import scipy.stats as stats
 from app.cluster.session_manager import SessionManager
+from app.engine.sql_guard import safe_ident, safe_table_ref
 
 def detect_trends(
     session_id: str,
@@ -16,13 +17,15 @@ def detect_trends(
         raise ValueError(f"Session '{session_id}' not found")
     con = sess.get_duckdb_conn()
 
-    group_clause = f', "{group_col}"' if group_col else ""
+    group_clause = f", {safe_ident(group_col)}" if group_col else ""
+    time_ref = safe_ident(time_col)
+    metric_ref = safe_ident(metric)
     sql = f"""
-    SELECT "{time_col}"{group_clause}, SUM("{metric}") AS val
-    FROM {dataset_name}
-    WHERE "{metric}" IS NOT NULL
-    GROUP BY "{time_col}"{group_clause}
-    ORDER BY "{time_col}" ASC
+    SELECT {time_ref}{group_clause}, SUM({metric_ref}) AS val
+    FROM {safe_table_ref(dataset_name)}
+    WHERE {metric_ref} IS NOT NULL
+    GROUP BY {time_ref}{group_clause}
+    ORDER BY {time_ref} ASC
     """
     df = con.execute(sql).df()
     

@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
@@ -36,5 +36,29 @@ class Settings(BaseSettings):
     # CDC & Streaming Buffer
     RING_BUFFER_CAPACITY: int = 100000
     STREAM_BATCH_INTERVAL_MS: int = 500
+
+    # ----------------- Security: API key auth -----------------
+    # Comma-separated list of accepted keys. Parsed via api_key_list, not as a
+    # JSON list, so DATA_AGENT_API_KEYS=key1,key2 works from a plain .env file.
+    API_KEYS: str = ""
+    # When True (default) the app refuses to start unless API_KEYS is non-empty.
+    # Set to False ONLY for trusted local dev on a loopback-bound port.
+    REQUIRE_AUTH: bool = True
+
+    # ----------------- Security: CORS -----------------
+    # Explicit origins only. "*" together with credentials is rejected by browsers
+    # and is not accepted here.
+    CORS_ALLOW_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000"
+
+    # ----------------- Observability -----------------
+    LOG_LEVEL: str = "INFO"
+
+    @property
+    def api_key_list(self) -> List[str]:
+        return [k.strip() for k in self.API_KEYS.split(",") if k.strip()]
+
+    @property
+    def cors_origin_list(self) -> List[str]:
+        return [o.strip() for o in self.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
 
 settings = Settings()

@@ -1,7 +1,8 @@
 from typing import List, Optional
 import pyarrow as pa
 import connectorx as cx
-from app.connectors.base import BaseConnector, TableSchema, ColumnInfo
+from app.connectors.base import BaseConnector, TableSchema, ColumnInfo, is_select, safe_select
+from app.engine.sql_guard import safe_columns, safe_ident, safe_predicate, safe_table_ref
 
 class MySQLConnector(BaseConnector):
     """MySQL high-performance connector using ConnectorX (Rust binary protocol)."""
@@ -49,23 +50,23 @@ class MySQLConnector(BaseConnector):
         num_partitions: int = 1,
         limit: Optional[int] = None
     ) -> pa.Table:
-        cols_clause = ", ".join(select_cols) if select_cols else "*"
-        if query_or_table.strip().upper().startswith("SELECT"):
-            base_sql = query_or_table
+        cols_clause = safe_columns(select_cols) if select_cols else "*"
+        if is_select(query_or_table):
+            base_sql = safe_select(query_or_table)
         else:
-            base_sql = f"SELECT {cols_clause} FROM {query_or_table}"
+            base_sql = f"SELECT {cols_clause} FROM {safe_table_ref(query_or_table)}"
 
         if filter_sql:
-            base_sql = f"SELECT * FROM ({base_sql}) AS _sub WHERE {filter_sql}"
+            base_sql = f"SELECT * FROM ({base_sql}) AS _sub WHERE {safe_predicate(filter_sql)}"
 
         if limit:
-            base_sql += f" LIMIT {limit}"
+            base_sql += f" LIMIT {int(limit)}"
 
         if partition_col and num_partitions > 1:
             return cx.read_sql(
                 self.conn_str,
                 base_sql,
-                partition_on=partition_col,
+                partition_on=safe_ident(partition_col),
                 partition_num=num_partitions,
                 return_type="arrow"
             )

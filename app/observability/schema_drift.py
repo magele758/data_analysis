@@ -1,6 +1,8 @@
 from typing import Dict, List, Any, Optional
 import duckdb
 
+from app.engine.sql_guard import safe_table_ref
+
 class SchemaDrifter:
     @staticmethod
     def detect_drift(
@@ -11,7 +13,7 @@ class SchemaDrifter:
         """
         Detect Schema Drift against a registered baseline schema.
         """
-        current_cols = con.execute(f"DESCRIBE {table}").fetchall()
+        current_cols = con.execute(f"DESCRIBE {safe_table_ref(table)}").fetchall()
         current_schema = {r[0]: r[1].upper() for r in current_cols}
 
         added_columns = []

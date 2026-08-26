@@ -2,6 +2,8 @@ from typing import Dict, List, Any, Optional
 import duckdb
 import time
 
+from app.engine.sql_guard import safe_ident, safe_table_ref
+
 class DataQualityAssertions:
     @staticmethod
     def expect_column_values_to_not_be_null(
@@ -9,8 +11,10 @@ class DataQualityAssertions:
         table: str,
         column: str
     ) -> Dict[str, Any]:
+        table = safe_table_ref(table)
+        col = safe_ident(column)
         total = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-        nulls = con.execute(f'SELECT count(*) FROM {table} WHERE "{column}" IS NULL').fetchone()[0]
+        nulls = con.execute(f'SELECT count(*) FROM {table} WHERE {col} IS NULL').fetchone()[0]
         passed = (nulls == 0)
         return {
             "assertion": "expect_column_values_to_not_be_null",
@@ -27,8 +31,10 @@ class DataQualityAssertions:
         table: str,
         column: str
     ) -> Dict[str, Any]:
+        table = safe_table_ref(table)
+        col = safe_ident(column)
         total = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-        distinct = con.execute(f'SELECT count(DISTINCT "{column}") FROM {table}').fetchone()[0]
+        distinct = con.execute(f'SELECT count(DISTINCT {col}) FROM {table}').fetchone()[0]
         duplicates = total - distinct
         passed = (duplicates == 0)
         return {
@@ -48,9 +54,12 @@ class DataQualityAssertions:
         min_val: float,
         max_val: float
     ) -> Dict[str, Any]:
+        table = safe_table_ref(table)
+        col = safe_ident(column)
         total = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
         out_of_bounds = con.execute(
-            f'SELECT count(*) FROM {table} WHERE "{column}" < {min_val} OR "{column}" > {max_val}'
+            f'SELECT count(*) FROM {table} WHERE {col} < ? OR {col} > ?',
+            [min_val, max_val]
         ).fetchone()[0]
         passed = (out_of_bounds == 0)
         return {
@@ -71,7 +80,7 @@ class DataQualityAssertions:
         min_rows: int,
         max_rows: int
     ) -> Dict[str, Any]:
-        total = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+        total = con.execute(f"SELECT count(*) FROM {safe_table_ref(table)}").fetchone()[0]
         passed = (min_rows <= total <= max_rows)
         return {
             "assertion": "expect_table_row_count_to_be_between",
@@ -100,31 +109,31 @@ class DataQualityAssertions:
         # Build consolidated SELECT list
         agg_clauses = ["count(*) AS _total_count"]
         clause_map = []
+        params = []
 
         for idx, r in enumerate(rules):
             rtype = r.get("type")
             alias = f"_metric_{idx}"
-            
+
             if rtype == "not_null":
-                col = r["column"]
-                agg_clauses.append(f'count(CASE WHEN "{col}" IS NULL THEN 1 END) AS {alias}')
+                col = safe_ident(r["column"])
+                agg_clauses.append(f'count(CASE WHEN {col} IS NULL THEN 1 END) AS {alias}')
                 clause_map.append((idx, r, "not_null"))
             elif rtype == "unique":
-                col = r["column"]
-                agg_clauses.append(f'count(DISTINCT "{col}") AS {alias}')
+                col = safe_ident(r["column"])
+                agg_clauses.append(f'count(DISTINCT {col}) AS {alias}')
                 clause_map.append((idx, r, "unique"))
             elif rtype == "between":
-                col = r["column"]
-                min_v = r["min_val"]
-                max_v = r["max_val"]
-                agg_clauses.append(f'count(CASE WHEN "{col}" < {min_v} OR "{col}" > {max_v} THEN 1 END) AS {alias}')
+                col = safe_ident(r["column"])
+                agg_clauses.append(f'count(CASE WHEN {col} < ? OR {col} > ? THEN 1 END) AS {alias}')
+                params.extend([r["min_val"], r["max_val"]])
                 clause_map.append((idx, r, "between"))
             elif rtype == "row_count":
                 # uses _total_count
                 clause_map.append((idx, r, "row_count"))
 
-        consolidated_sql = f"SELECT {', '.join(agg_clauses)} FROM {table}"
-        row = con.execute(consolidated_sql).fetchone()
+        consolidated_sql = f"SELECT {', '.join(agg_clauses)} FROM {safe_table_ref(table)}"
+        row = con.execute(consolidated_sql, params).fetchone()
         cols = [d[0] for d in con.description]
         metrics_dict = dict(zip(cols, row))
 

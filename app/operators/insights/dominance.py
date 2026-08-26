@@ -1,6 +1,7 @@
 from typing import Dict, Any
 import numpy as np
 from app.cluster.session_manager import SessionManager
+from app.engine.sql_guard import safe_ident, safe_table_ref
 
 def detect_dominance(
     session_id: str,
@@ -15,10 +16,12 @@ def detect_dominance(
         raise ValueError(f"Session '{session_id}' not found")
     con = sess.get_duckdb_conn()
 
+    cat_ref = safe_ident(category_col)
+    metric_ref = safe_ident(metric)
     sql = f"""
-    SELECT "{category_col}", SUM("{metric}") AS total_val
-    FROM {dataset_name}
-    WHERE "{metric}" IS NOT NULL
+    SELECT {cat_ref}, SUM({metric_ref}) AS total_val
+    FROM {safe_table_ref(dataset_name)}
+    WHERE {metric_ref} IS NOT NULL
     GROUP BY 1
     ORDER BY total_val DESC
     """

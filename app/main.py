@@ -2,16 +2,21 @@ from app.ontology.ontology_engine import get_ontology_engine
 from app.ontology.object_type import ObjectType
 from app.ontology.link_type import LinkType
 from app.ontology.action_type import ActionType
+import logging
 import os
 import time
+import uuid
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Request, Query, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.logging_setup import configure_logging, set_request_id, get_request_id
+from app.security import require_api_key, validate_auth_config
 from app.schemas.requests import (
     ConnectDBRequest, EDARequest, CorrelationRequest, OLAPRequest, PivotRequest,
     DriverAnalysisRequest, HypothesisTestRequest, RegressionRequest, OutliersRequest,
@@ -53,18 +58,50 @@ from app.retl.webhook_pusher import WebhookPusher
 from app.observability.assertions import DataQualityAssertions
 from app.observability.schema_drift import SchemaDrifter
 
+configure_logging()
+logger = logging.getLogger("app.main")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Validated at startup rather than import so the failure surfaces as a
+    # refused boot with a readable error. Raises when auth is required but no
+    # keys are configured. See app/security.py.
+    validate_auth_config()
+    logger.info(
+        "%s v%s starting (auth_required=%s, keys_configured=%d)",
+        settings.APP_NAME,
+        settings.APP_VERSION,
+        settings.REQUIRE_AUTH,
+        len(settings.api_key_list),
+    )
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    description="High-performance, stateless, distributed in-memory data analysis and automated insight engine for AI Agents."
+    description="High-performance, stateless, distributed in-memory data analysis and automated insight engine for AI Agents.",
+    # One registration covers every /api/v1 route, including routers included
+    # later. require_api_key exempts non-/api/v1 paths itself.
+    dependencies=[Depends(require_api_key)],
 )
 
+# Explicit origins only: allow_credentials with allow_origins=["*"] is rejected
+# by browsers, so the old config was both over-permissive and non-functional.
+_cors_origins = settings.cors_origin_list
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
+    # Safe only because the origin list is explicit and never "*".
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # dashboard.js uses GET and POST; OPTIONS is the preflight itself.
+    allow_methods=["GET", "POST", "OPTIONS"],
+    # Content-Type: dashboard.js + tracker.js JSON posts. X-API-Key: auth.
+    # X-Request-ID: lets a caller supply its own correlation id.
+    allow_headers=["Content-Type", "X-API-Key", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
 )
 
 # Mount Static Files & Collector Router
@@ -73,6 +110,70 @@ os.makedirs("sdk/browser-tracker", exist_ok=True)
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 app.mount("/sdk/browser-tracker", StaticFiles(directory="sdk/browser-tracker"), name="sdk")
 app.include_router(collector_router)
+
+
+@app.middleware("http")
+async def request_context_middleware(request: Request, call_next):
+    """Assign a request id, log the outcome, and echo the id back.
+
+    Logs method/path/status/duration only. Never the body, query secrets, or the
+    X-API-Key value.
+    """
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    set_request_id(request_id)
+    started = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - started) * 1000
+        # exc_info=True gives the traceback in the log, never in the response.
+        logger.error(
+            "%s %s failed after %.2fms",
+            request.method,
+            request.url.path,
+            duration_ms,
+            exc_info=True,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "detail": "Internal server error",
+                "request_id": request_id,
+            },
+            headers={"X-Request-ID": request_id},
+        )
+
+    duration_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "%s %s -> %d in %.2fms",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Generic 500 carrying only the request id, never the stack trace."""
+    request_id = get_request_id()
+    logger.error(
+        "Unhandled exception on %s %s", request.method, request.url.path, exc_info=exc
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status": "error",
+            "detail": "Internal server error",
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id},
+    )
+
 
 @app.get("/health")
 def health_check():

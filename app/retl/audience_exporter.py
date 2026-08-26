@@ -2,6 +2,8 @@ from typing import Dict, Any, List, Optional
 import duckdb
 import json
 
+from app.engine.sql_guard import safe_columns, safe_predicate, safe_table_ref
+
 class AudienceExporter:
     @staticmethod
     def export_cohort(
@@ -15,11 +17,11 @@ class AudienceExporter:
         """
         Extract specific audience segment / user cohort for activation into CRM or marketing tools.
         """
-        cols = ", ".join(export_columns) if export_columns else "*"
-        sql = f"SELECT {cols} FROM {source_table}"
+        cols = safe_columns(export_columns) if export_columns else "*"
+        sql = f"SELECT {cols} FROM {safe_table_ref(source_table)}"
         if filter_sql:
-            sql += f" WHERE {filter_sql}"
-        sql += f" LIMIT {limit}"
+            sql += f" WHERE {safe_predicate(filter_sql)}"
+        sql += f" LIMIT {int(limit)}"
 
         df = con.execute(sql).df()
         

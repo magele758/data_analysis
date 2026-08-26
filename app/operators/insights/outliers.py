@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from app.cluster.session_manager import SessionManager
+from app.engine.sql_guard import safe_columns, safe_ident, safe_table_ref
 
 def detect_outliers(
     session_id: str,
@@ -18,9 +19,12 @@ def detect_outliers(
         raise ValueError(f"Session '{session_id}' not found")
     con = sess.get_duckdb_conn()
 
-    dim_clause = ", ".join([f'"{d}"' for d in dimension_cols]) if dimension_cols else ""
-    select_clause = ", ".join(filter(None, [dim_clause, f'"{metric}"']))
-    df = con.execute(f'SELECT {select_clause} FROM {dataset_name} WHERE "{metric}" IS NOT NULL').df()
+    metric_col = safe_ident(metric)
+    dim_clause = safe_columns(dimension_cols) if dimension_cols else ""
+    select_clause = ", ".join(filter(None, [dim_clause, metric_col]))
+    df = con.execute(
+        f'SELECT {select_clause} FROM {safe_table_ref(dataset_name)} WHERE {metric_col} IS NOT NULL'
+    ).df()
 
     vals = df[metric].values
     mean_v = float(np.mean(vals))

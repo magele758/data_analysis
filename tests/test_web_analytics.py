@@ -1,6 +1,10 @@
 import pytest
 import time
 from fastapi.testclient import TestClient
+from app.config import settings
+
+settings.API_KEYS = "test-api-key"
+
 from app.main import app
 from app.storage.event_store import get_event_store
 from app.operators.web_analytics.funnel import calculate_funnel
@@ -9,7 +13,7 @@ from app.operators.web_analytics.retention import calculate_retention
 from app.operators.web_analytics.page_analytics import calculate_page_metrics
 from app.operators.web_analytics.trace_replay import get_trace_waterfall, get_session_action_replay
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 @pytest.fixture(autouse=True)
 def setup_test_events():

@@ -4,6 +4,7 @@ import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.stats.stattools import durbin_watson, jarque_bera
 from app.cluster.session_manager import SessionManager
+from app.engine.sql_guard import safe_columns, safe_table_ref
 
 def run_spss_regression(
     session_id: str,
@@ -19,8 +20,8 @@ def run_spss_regression(
     con = sess.get_duckdb_conn()
 
     all_vars = [dependent_var] + independent_vars
-    cols_sql = ", ".join([f'"{v}"' for v in all_vars])
-    df = con.execute(f"SELECT {cols_sql} FROM {dataset_name}").df().dropna()
+    cols_sql = safe_columns(all_vars)
+    df = con.execute(f"SELECT {cols_sql} FROM {safe_table_ref(dataset_name)}").df().dropna()
 
     Y = df[dependent_var]
     X_raw = df[independent_vars]
