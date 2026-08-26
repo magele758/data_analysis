@@ -4,6 +4,7 @@ import numpy as np
 import scipy.stats as stats
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from app.cluster.session_manager import SessionManager
+from app.engine.sql_guard import safe_ident, safe_table_ref
 
 def run_spss_hypothesis_test(
     session_id: str,
@@ -19,7 +20,8 @@ def run_spss_hypothesis_test(
         raise ValueError(f"Session '{session_id}' not found")
     con = sess.get_duckdb_conn()
 
-    df = con.execute(f'SELECT "{dependent_var}", "{group_var}" FROM {dataset_name}').df().dropna()
+    sql = f'SELECT {safe_ident(dependent_var)}, {safe_ident(group_var)} FROM {safe_table_ref(dataset_name)}'
+    df = con.execute(sql).df().dropna()
     test_t = test_type.lower()
 
     if test_t == "independent_t_test":

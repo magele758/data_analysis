@@ -4,12 +4,15 @@ import pyarrow as pa
 import duckdb
 import numpy as np
 from app.engine.schema_infer import SchemaInferencer, SemanticType
+from app.engine.sql_guard import safe_table_ref
 
 class DistributedEDA:
     """Distributed Single-Pass Sufficient Statistics Engine for Million/Billion Row Profiling."""
 
     @classmethod
     def profile_table(cls, con: duckdb.DuckDBPyConnection, table_name: str) -> Dict[str, Any]:
+        report_name = table_name
+        table_name = safe_table_ref(table_name)
         total_rows = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
         schema_map = SchemaInferencer.infer_table_schema(con.execute(f"SELECT * FROM {table_name} LIMIT 5000").arrow())
 
@@ -98,7 +101,7 @@ class DistributedEDA:
         overall_quality_score = max(20, 100 - quality_penalties)
 
         return {
-            "table_name": table_name,
+            "table_name": report_name,
             "total_rows": total_rows,
             "total_columns": len(schema_map),
             "quality_score": overall_quality_score,

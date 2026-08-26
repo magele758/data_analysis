@@ -1,3 +1,4 @@
+import math
 from typing import Dict, Any, List
 from app.storage.event_store import get_event_store
 
@@ -24,13 +25,19 @@ def calculate_page_metrics(limit: int = 20) -> Dict[str, Any]:
     rows = store.query(sql, [limit])
     pages = []
     for r in rows:
+        # avg() 在该分组无有效 dwell 值时可能产出 NaN/Inf，而两者都不是 None，
+        # 会穿过判空直接进 json.dumps 并抛 ValueError（整个端点 500）。
+        # isfinite 一次覆盖 NaN 与 ±Inf。
         dwell = r.get("avg_dwell_time_sec")
+        dwell_val = float(dwell) if dwell is not None else 0.0
+        if not math.isfinite(dwell_val):
+            dwell_val = 0.0
         pages.append({
             "page_path": r["page_path"],
             "pv": int(r["pv"]),
             "uv": int(r["uv"]),
             "sessions": int(r["sessions"]),
-            "avg_dwell_seconds": round(float(dwell), 1) if dwell is not None else 0.0
+            "avg_dwell_seconds": round(dwell_val, 1)
         })
 
     # Summary metrics

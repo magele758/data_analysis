@@ -1,6 +1,7 @@
 from typing import List, Dict, Any, Optional
 from app.storage.event_store import get_event_store
 
+
 def calculate_funnel(
     steps: List[str],
     date_from: Optional[str] = None,
@@ -17,26 +18,33 @@ def calculate_funnel(
     step_results = []
     prev_users = None
     
+    prev_params: List[Any] = []
+
     for idx, step_name in enumerate(steps):
-        where_clauses = [f"event_name = '{step_name}'"]
+        where_clauses = ["event_name = ?"]
+        step_params: List[Any] = [step_name]
         if date_from:
-            where_clauses.append(f"created_at >= '{date_from}'")
+            where_clauses.append("created_at >= ?")
+            step_params.append(date_from)
         if date_to:
-            where_clauses.append(f"created_at <= '{date_to}'")
-        
+            where_clauses.append("created_at <= ?")
+            step_params.append(date_to)
+
         where_sql = " AND ".join(where_clauses)
         users_sql = f"SELECT DISTINCT user_id FROM events WHERE {where_sql}"
-        
+
         if prev_users is None:
             sql = f"SELECT count(DISTINCT user_id) as count FROM events WHERE {where_sql}"
-            res = store.query(sql)
+            res = store.query(sql, list(step_params))
             count = res[0]["count"] if res else 0
             prev_users = users_sql
+            prev_params = list(step_params)
         else:
             sql = f"SELECT count(DISTINCT user_id) as count FROM events WHERE {where_sql} AND user_id IN ({prev_users})"
-            res = store.query(sql)
+            res = store.query(sql, list(step_params) + prev_params)
             count = res[0]["count"] if res else 0
             prev_users = f"{prev_users} INTERSECT {users_sql}"
+            prev_params = prev_params + list(step_params)
 
         step_results.append({
             "step_index": idx + 1,

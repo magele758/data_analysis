@@ -5,6 +5,11 @@ from typing import List, Optional, Dict, Any
 from fastmcp import FastMCP
 from app.cluster.session_manager import SessionManager
 from app.connectors.factory import ConnectorFactory
+from app.logging_setup import configure_logging
+
+# MCP 运行在 stdio transport，日志只能写文件或 stderr
+# configure_logging() 默认写 stdout 会污染协议流，这里先导入模块让后续代码能用 logger
+configure_logging()
 from app.operators.eda import run_eda_profile
 from app.operators.correlation import run_correlation_analysis
 from app.operators.olap import run_olap_query, run_pivot_table

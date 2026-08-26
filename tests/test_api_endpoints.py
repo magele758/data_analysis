@@ -1,10 +1,14 @@
 import pytest
 from fastapi.testclient import TestClient
 import duckdb
+from app.config import settings
+
+settings.API_KEYS = "test-api-key"
+
 from app.main import app
 from app.cluster.session_manager import SessionManager
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 def test_fastapi_health():
     response = client.get("/health")

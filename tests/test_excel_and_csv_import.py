@@ -5,13 +5,16 @@ import os
 from fastapi.testclient import TestClient
 import pyarrow as pa
 import duckdb
+from app.config import settings
+
+settings.API_KEYS = "test-api-key"
 
 from app.main import app
 from app.connectors.excel_reader import FastExcelReader
 from app.connectors.local import LocalFileConnector
 from app.mcp_server import import_excel_or_csv
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 def create_mock_excel_bytes():
     buf = io.BytesIO()

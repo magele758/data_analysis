@@ -4,6 +4,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 from app.cluster.session_manager import SessionManager
+from app.engine.sql_guard import safe_columns, safe_ident, safe_table_ref
 
 def run_kmeans_clustering(
     session_id: str,
@@ -18,8 +19,8 @@ def run_kmeans_clustering(
         raise ValueError(f"Session '{session_id}' not found")
     con = sess.get_duckdb_conn()
 
-    cols_sql = ", ".join([f'"{c}"' for c in feature_cols])
-    df = con.execute(f"SELECT {cols_sql} FROM {dataset_name}").df().dropna()
+    cols_sql = safe_columns(feature_cols)
+    df = con.execute(f"SELECT {cols_sql} FROM {safe_table_ref(dataset_name)}").df().dropna()
     
     if len(df) < 10:
         raise ValueError("At least 10 sample records required for clustering")
@@ -78,12 +79,12 @@ def run_rfm_segmentation(
 
     sql = f"""
     WITH rfm_raw AS (
-        SELECT 
-            "{user_col}" AS uid,
-            DATEDIFF('day', MAX("{date_col}"::DATE), CURRENT_DATE) AS recency,
+        SELECT
+            {safe_ident(user_col)} AS uid,
+            DATEDIFF('day', MAX({safe_ident(date_col)}::DATE), CURRENT_DATE) AS recency,
             COUNT(*) AS frequency,
-            SUM("{amount_col}") AS monetary
-        FROM {dataset_name}
+            SUM({safe_ident(amount_col)}) AS monetary
+        FROM {safe_table_ref(dataset_name)}
         GROUP BY 1
     )
     SELECT uid, recency, frequency, monetary FROM rfm_raw

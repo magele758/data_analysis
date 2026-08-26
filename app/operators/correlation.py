@@ -3,6 +3,7 @@ import duckdb
 import numpy as np
 import scipy.stats as stats
 from app.cluster.session_manager import SessionManager
+from app.engine.sql_guard import safe_columns, safe_table_ref
 
 def run_correlation_analysis(
     session_id: str,
@@ -16,8 +17,10 @@ def run_correlation_analysis(
         raise ValueError(f"Session '{session_id}' not found")
     con = sess.get_duckdb_conn()
 
+    table_ref = safe_table_ref(dataset_name)
+
     if not columns:
-        desc = con.execute(f"DESCRIBE {dataset_name}").fetchall()
+        desc = con.execute(f"DESCRIBE {table_ref}").fetchall()
         columns = [
             r[0] for r in desc
             if any(num_t in str(r[1]).lower() for num_t in ["int", "float", "double", "decimal"])
@@ -26,8 +29,8 @@ def run_correlation_analysis(
     if len(columns) < 2:
         raise ValueError("At least 2 numeric columns required for correlation analysis")
 
-    cols_sql = ", ".join([f'"{c}"' for c in columns])
-    data_table = con.execute(f"SELECT {cols_sql} FROM {dataset_name}").df().dropna()
+    cols_sql = safe_columns(columns)
+    data_table = con.execute(f"SELECT {cols_sql} FROM {table_ref}").df().dropna()
     
     n_cols = len(columns)
     corr_matrix = []

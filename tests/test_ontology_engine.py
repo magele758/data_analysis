@@ -2,6 +2,10 @@ import pytest
 import duckdb
 from fastapi.testclient import TestClient
 
+from app.config import settings
+
+settings.API_KEYS = "test-api-key"
+
 from app.main import app
 from app.cluster.session_manager import SessionManager
 from app.ontology.object_type import ObjectType, PropertyMeta
@@ -15,7 +19,7 @@ from app.mcp_server import (
     ontology_execute_action
 )
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "test-api-key"})
 
 @pytest.fixture
 def ontology_session():

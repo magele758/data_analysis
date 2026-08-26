@@ -6,6 +6,7 @@ import pyarrow.csv as pcsv
 import duckdb
 from app.connectors.base import BaseConnector, TableSchema, ColumnInfo
 from app.connectors.excel_reader import FastExcelReader
+from app.engine.sql_guard import safe_columns, safe_ident, safe_predicate, safe_table_ref
 
 class LocalFileConnector(BaseConnector):
     """Local Parquet / CSV / Excel (.xlsx, .xls) / SQLite / Arrow file connector."""
@@ -47,7 +48,7 @@ class LocalFileConnector(BaseConnector):
                 cols.append(ColumnInfo(name=field.name, physical_type=str(field.type), is_nullable=field.nullable))
         elif path.endswith(".sqlite") or path.endswith(".db"):
             con = duckdb.connect(path, read_only=True)
-            desc = con.execute(f"DESCRIBE {table_name}").fetchall()
+            desc = con.execute(f"DESCRIBE {safe_table_ref(table_name)}").fetchall()
             con.close()
             for r in desc:
                 cols.append(ColumnInfo(name=r[0], physical_type=str(r[1]).lower(), is_nullable=(r[2] == 'YES')))
@@ -75,13 +76,15 @@ class LocalFileConnector(BaseConnector):
             if select_cols or filter_sql:
                 con = duckdb.connect(":memory:")
                 con.register("excel_tmp", arrow_table)
-                cols_clause = ", ".join(select_cols) if select_cols else "*"
+                cols_clause = safe_columns(select_cols) if select_cols else "*"
                 sql = f"SELECT {cols_clause} FROM excel_tmp"
                 if filter_sql:
-                    sql += f" WHERE {filter_sql}"
+                    sql += f" WHERE {safe_predicate(filter_sql)}"
+                params = []
                 if limit:
-                    sql += f" LIMIT {limit}"
-                arrow_table = con.execute(sql).arrow()
+                    sql += " LIMIT ?"
+                    params.append(int(limit))
+                arrow_table = con.execute(sql, params).arrow()
                 if isinstance(arrow_table, pa.RecordBatchReader):
                     arrow_table = arrow_table.read_all()
                 con.close()
@@ -95,18 +98,20 @@ class LocalFileConnector(BaseConnector):
             con.execute(f"CREATE VIEW tbl AS SELECT * FROM read_csv_auto('{path}', sample_size=100000, ignore_errors=true)")
         elif path.endswith(".sqlite") or path.endswith(".db"):
             con.execute(f"ATTACH '{path}' AS sqlite_db (TYPE SQLITE)")
-            con.execute(f"CREATE VIEW tbl AS SELECT * FROM sqlite_db.{query_or_table}")
+            con.execute(f"CREATE VIEW tbl AS SELECT * FROM sqlite_db.{safe_ident(query_or_table)}")
         else:
             con.execute(f"CREATE VIEW tbl AS SELECT * FROM '{path}'")
 
-        cols_clause = ", ".join(select_cols) if select_cols else "*"
+        cols_clause = safe_columns(select_cols) if select_cols else "*"
         sql = f"SELECT {cols_clause} FROM tbl"
         if filter_sql:
-            sql += f" WHERE {filter_sql}"
+            sql += f" WHERE {safe_predicate(filter_sql)}"
+        params = []
         if limit:
-            sql += f" LIMIT {limit}"
+            sql += " LIMIT ?"
+            params.append(int(limit))
 
-        arrow_table = con.execute(sql).arrow()
+        arrow_table = con.execute(sql, params).arrow()
         if isinstance(arrow_table, pa.RecordBatchReader):
             arrow_table = arrow_table.read_all()
         con.close()

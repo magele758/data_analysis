@@ -3,6 +3,7 @@ import numpy as np
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.arima.model import ARIMA
 from app.cluster.session_manager import SessionManager
+from app.engine.sql_guard import safe_ident, safe_table_ref
 
 def run_timeseries_forecast(
     session_id: str,
@@ -18,10 +19,11 @@ def run_timeseries_forecast(
         raise ValueError(f"Session '{session_id}' not found")
     con = sess.get_duckdb_conn()
 
+    val_ref = safe_ident(value_col)
     sql = f"""
-    SELECT "{time_col}", SUM("{value_col}") AS val
-    FROM {dataset_name}
-    WHERE "{value_col}" IS NOT NULL
+    SELECT {safe_ident(time_col)}, SUM({val_ref}) AS val
+    FROM {safe_table_ref(dataset_name)}
+    WHERE {val_ref} IS NOT NULL
     GROUP BY 1
     ORDER BY 1 ASC
     """

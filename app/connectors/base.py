@@ -1,7 +1,34 @@
 import abc
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
+import duckdb
 import pyarrow as pa
+
+from app.engine.sql_guard import safe_table_ref
+
+
+def is_select(query_or_table: str) -> bool:
+    return isinstance(query_or_table, str) and query_or_table.strip().upper().startswith("SELECT")
+
+
+def safe_select(query: str) -> str:
+    """Validate a full SELECT statement, returning it unchanged."""
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError(f"Invalid query {query!r}: must be a non-empty string")
+    text = query.strip().rstrip(";")
+    if "--" in text or "/*" in text or "*/" in text:
+        raise ValueError(f"Invalid query {text!r}: SQL comments are not allowed")
+    statements = duckdb.extract_statements(text)
+    if len(statements) != 1:
+        raise ValueError(f"Invalid query {text!r}: expands to {len(statements)} statements")
+    return text
+
+
+def safe_query_or_table(query_or_table: str) -> str:
+    """Validate either a table reference or a full SELECT; returns a FROM-clause fragment."""
+    if is_select(query_or_table):
+        return f"({safe_select(query_or_table)}) AS _q"
+    return safe_table_ref(query_or_table)
 
 class ColumnInfo(BaseModel):
     name: str
