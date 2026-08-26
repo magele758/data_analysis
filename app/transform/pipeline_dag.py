@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 import duckdb
 from app.catalog.lineage_tracker import get_lineage_tracker
 from app.catalog.metadata_db import MetadataDB
+from app.engine.sql_guard import safe_ident, safe_model_sql
 
 class DAGModel(BaseModel):
     name: str
@@ -99,21 +100,25 @@ class PipelineDAG:
     def _execute_single_model(self, con: duckdb.DuckDBPyConnection, model: DAGModel) -> Dict[str, Any]:
         """Execute model with atomic shadow-table swap & rollback."""
         name = model.name
+        name_ref = safe_ident(name)
         mat_type = model.materialization.lower()
-        staging_name = f"_stg_swap_{name}"
+        if mat_type not in ("table", "view", "ephemeral"):
+            raise ValueError(f"Invalid materialization {model.materialization!r}")
+        staging_ref = safe_ident(f"_stg_swap_{name}")
+        model_sql = safe_model_sql(model.sql)
 
         start_t = time.time()
         try:
             if mat_type == "view":
-                con.execute(f"CREATE OR REPLACE VIEW {name} AS {model.sql}")
+                con.execute(f"CREATE OR REPLACE VIEW {name_ref} AS {model_sql}")
             else:
                 # 1. Build into staging table
-                con.execute(f"CREATE OR REPLACE TABLE {staging_name} AS {model.sql}")
+                con.execute(f"CREATE OR REPLACE TABLE {staging_ref} AS {model_sql}")
                 # 2. Atomic swap
-                con.execute(f"DROP TABLE IF EXISTS {name}")
-                con.execute(f"ALTER TABLE {staging_name} RENAME TO {name}")
+                con.execute(f"DROP TABLE IF EXISTS {name_ref}")
+                con.execute(f"ALTER TABLE {staging_ref} RENAME TO {name_ref}")
 
-            row_count = con.execute(f"SELECT count(*) FROM {name}").fetchone()[0]
+            row_count = con.execute(f"SELECT count(*) FROM {name_ref}").fetchone()[0]
             duration_ms = round((time.time() - start_t) * 1000, 2)
 
             return {
@@ -126,7 +131,7 @@ class PipelineDAG:
         except Exception as e:
             # Cleanup staging table on failure
             try:
-                con.execute(f"DROP TABLE IF EXISTS {staging_name}")
+                con.execute(f"DROP TABLE IF EXISTS {staging_ref}")
             except Exception:
                 pass
             raise RuntimeError(f"Model '{name}' execution failed: {str(e)}")
