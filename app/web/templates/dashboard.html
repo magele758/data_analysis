@@ -58,32 +58,62 @@
   </header>
 
   <main class="max-w-6xl mx-auto px-6 py-6 space-y-5">
-    <!-- 两个数据入口 + 一键跑通 -->
+    <!-- 概览 + 一键跑通 -->
     <section class="card p-5">
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 class="text-sm font-bold text-slate-200">数据入口（两条路，汇入同一分析引擎）</h2>
-          <p class="text-xs text-slate-400 mt-1">Path A：DB 连接器（Postgres/MySQL/MSSQL/SQLite/File/Excel/CSV）&nbsp;·&nbsp;Path B：trace 导入（OTLP/JSON/CSV/Parquet）</p>
+          <p class="text-xs text-slate-400 mt-1">Path A：DB 连接器 & 文件上传（Postgres/MySQL/MSSQL/SQLite/File/Excel/CSV）&nbsp;·&nbsp;Path B：trace 导入（OTLP/JSON/CSV/Parquet）</p>
+          <p class="text-[0.7rem] text-slate-500 mt-1">当前活跃数据集：<span id="active-ds" class="mono text-indigo-400">（无）</span></p>
         </div>
-        <button onclick="runFullPipeline()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold text-white shadow-lg shadow-indigo-600/30 whitespace-nowrap">▶ 一键跑通数据处理管道</button>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-        <button onclick="ingestTraces()" class="text-left card p-3 hover:border-indigo-500/60">
-          <div class="text-xs font-semibold text-slate-200">📥 导入示例 Trace 数据 (Path B)</div>
-          <div class="text-[0.7rem] text-slate-500 mt-0.5">把遥测 span/event 作为数据源载入会话表</div>
-        </button>
-        <button onclick="ingestBusiness()" class="text-left card p-3 hover:border-indigo-500/60">
-          <div class="text-xs font-semibold text-slate-200">🗄 建立示例业务数据 (Path A)</div>
-          <div class="text-[0.7rem] text-slate-500 mt-0.5">用 SQL 沙箱在会话内建一张业务事实表</div>
-        </button>
+        <button onclick="runFullPipeline()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold text-white shadow-lg shadow-indigo-600/30 whitespace-nowrap">▶ 用示例数据一键跑通</button>
       </div>
     </section>
 
-    <!-- 阶段面板 -->
-    <section id="pane-ingest" data-stage-pane class="card p-5 space-y-2">
-      <h3 class="text-sm font-bold text-slate-200">01 摄取 · Ingest</h3>
-      <p class="text-xs text-slate-400">将外部数据（DB / 文件 / trace）零拷贝载入内存 DuckDB 会话，成为可被后续所有算子处理的表。</p>
-      <pre id="out-ingest" class="out mono text-[0.7rem] text-emerald-400 bg-slate-900 rounded p-3 min-h-[3rem]">尚未摄取。点击上方入口或“一键跑通”。</pre>
+    <!-- 01 摄取：三个真实入口 -->
+    <section id="pane-ingest" data-stage-pane class="card p-5 space-y-4">
+      <div>
+        <h3 class="text-sm font-bold text-slate-200">01 摄取 · Ingest</h3>
+        <p class="text-xs text-slate-400 mt-0.5">将外部数据零拷贝载入内存 DuckDB 会话，成为可被后续全部算子处理的表。</p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Path A: DB 连接器 -->
+        <div class="card p-4 space-y-2">
+          <div class="text-xs font-semibold text-indigo-400">Path A · DB 连接器</div>
+          <input id="db-conn" type="text" placeholder="连接串 sqlite:///data/x.db 或 postgresql://u:p@host:5432/db" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-[0.72rem] text-slate-200 mono">
+          <input id="db-query" type="text" placeholder="表名或 SQL 查询 (如 orders 或 SELECT ...)" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-[0.72rem] text-slate-200 mono">
+          <div class="flex gap-2">
+            <input id="db-ds" type="text" value="db_dataset" placeholder="数据集名" class="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-[0.72rem] text-slate-200 mono">
+            <input id="db-limit" type="number" placeholder="limit" class="w-20 bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-[0.72rem] text-slate-200 mono">
+          </div>
+          <button onclick="connectDb()" class="w-full px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-semibold text-white">连接并载入</button>
+        </div>
+
+        <!-- Path A: 文件上传 -->
+        <div class="card p-4 space-y-2">
+          <div class="text-xs font-semibold text-indigo-400">Path A · 文件上传</div>
+          <p class="text-[0.7rem] text-slate-500">Excel / CSV / Parquet，秒级零拷贝解析建表</p>
+          <input id="file-ds" type="text" value="file_dataset" placeholder="数据集名" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-[0.72rem] text-slate-200 mono">
+          <input id="file-input" type="file" accept=".xlsx,.xls,.csv,.parquet" class="hidden" onchange="uploadFile(this)">
+          <button onclick="document.getElementById('file-input').click()" class="w-full px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-semibold text-white">📁 选择文件上传</button>
+        </div>
+
+        <!-- Path B: trace 导入 -->
+        <div class="card p-4 space-y-2">
+          <div class="text-xs font-semibold text-emerald-500">Path B · trace 导入</div>
+          <input id="trace-ds" type="text" value="traces" placeholder="数据集名" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-[0.72rem] text-slate-200 mono">
+          <input id="trace-source" type="text" placeholder="服务器可达路径 traces.json / spans.parquet" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-[0.72rem] text-slate-200 mono">
+          <div class="flex gap-2">
+            <button onclick="importTraceSource()" class="flex-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded text-xs font-semibold text-white">按路径导入</button>
+            <input id="trace-file" type="file" accept=".json,.ndjson" class="hidden" onchange="importTraceFile(this)">
+            <button onclick="document.getElementById('trace-file').click()" class="flex-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 rounded text-xs text-slate-200">上传 JSON</button>
+          </div>
+          <button onclick="ingestTraces()" class="w-full px-3 py-1 text-[0.7rem] text-slate-400 hover:text-slate-200">或载入示例 trace 数据 →</button>
+        </div>
+      </div>
+
+      <pre id="out-ingest" class="out mono text-[0.7rem] text-emerald-400 bg-slate-900 rounded p-3 min-h-[3rem]">尚未摄取。用上面任一入口载入数据，或点“用示例数据一键跑通”。</pre>
     </section>
 
     <section id="pane-transform" data-stage-pane class="card p-5 space-y-2 hidden">
