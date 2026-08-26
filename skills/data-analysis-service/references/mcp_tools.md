@@ -1,9 +1,12 @@
-# MCP Tools Specification (26 Registered Tools)
+# MCP Tools Specification (27 Registered Tools)
+
+Two ingestion paths land data in one session; all analytics run on session tables.
 
 | Tool Name | Category | Key Parameters | Return Value |
 | :--- | :--- | :--- | :--- |
-| `import_excel_or_csv` | Ingestion | `file_path`, `dataset_name`, `sheet_name`, `limit` | `session_id`, `row_count`, `column_count`, `summary` |
-| `connect_and_load_db` | Ingestion | `conn_str`, `query_or_table`, `dataset_name`, `select_cols`, `filter_sql` | `session_id`, `row_count`, `column_count`, `summary` |
+| `import_excel_or_csv` | Ingestion (Path A) | `file_path`, `dataset_name`, `sheet_name`, `limit` | `session_id`, `row_count`, `column_count`, `summary` |
+| `connect_and_load_db` | Ingestion (Path A) | `conn_str`, `query_or_table`, `dataset_name`, `select_cols`, `filter_sql` | `session_id`, `row_count`, `column_count`, `summary` |
+| `import_traces` | Ingestion (Path B) | `source` (OTLP/JSON/NDJSON/CSV/Parquet), `dataset_name`, `session_id`, `fmt` | `session_id`, `dataset_name`, `row_count`, `columns`, `summary` |
 | `ontology_list_schema` | Ontology | None | `status`, `ontology_schema` (objects, links, actions) |
 | `ontology_query_objects` | Ontology | `session_id`, `object_type`, `filters`, `properties`, `limit` | `status`, `instances` |
 | `ontology_traverse_links` | Ontology | `session_id`, `source_object_type`, `source_instance_id`, `link_name` | `status`, `traversal` (linked instances) |
@@ -15,11 +18,11 @@
 | `detect_automated_insights` | Insights | `session_id`, `dataset_name`, `metric`, `category_col`, `time_col` | `status`, `insights` |
 | `memory_olap_aggregation` | OLAP | `session_id`, `dataset_name`, `dimensions`, `metrics`, `agg_funcs`, `rollup` | `status`, `result` |
 | `duckdb_sql_sandbox` | Sandbox | `session_id`, `sql_query`, `limit` | `status`, `result` |
-| `analyze_conversion_funnel` | Telemetry | `steps`, `date_from`, `date_to` | `total_steps`, `initial_users`, `overall_conversion_rate` |
-| `analyze_user_flow` | Telemetry | `limit_paths` | `nodes`, `links`, `total_transitions` |
-| `analyze_cohort_retention` | Telemetry | `days` | `cohorts`, `days_analyzed`, `retention_matrix` |
-| `analyze_page_performance` | Telemetry | `limit` | `summary`, `pages` (PV, UV, dwell time) |
-| `inspect_trace_and_replay` | Telemetry | `trace_id`, `session_id` | `waterfall` spans, `replay` timeline |
+| `analyze_conversion_funnel` | Trace Analytics | `session_id`, `dataset_name`, `steps`, `date_from`, `date_to` | `total_steps`, `initial_users`, `overall_conversion_rate` |
+| `analyze_user_flow` | Trace Analytics | `session_id`, `dataset_name`, `limit_paths` | `nodes`, `links`, `total_transitions` |
+| `analyze_cohort_retention` | Trace Analytics | `session_id`, `dataset_name`, `days` | `cohorts`, `days_analyzed`, `retention_matrix` |
+| `analyze_page_performance` | Trace Analytics | `session_id`, `dataset_name`, `limit` | `summary`, `pages` (PV, UV, dwell time) |
+| `inspect_trace_and_replay` | Trace Analytics | `session_id`, `dataset_name`, `trace_id`, `telemetry_session_id` | `waterfall` spans, `replay` timeline |
 | `query_semantic_metric` | Catalog | `session_id`, `metric_names`, `dimensions`, `filters` | `compiled_sql`, `result` |
 | `execute_data_cleaning` | Transform | `session_id`, `source_table`, `target_table`, `dedup_keys`, `fillna_rules` | `cleaning_result` (rows, removed duplicates) |
 | `run_dag_pipeline` | Transform | `session_id` | `pipeline_execution` (order, results) |

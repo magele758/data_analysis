@@ -37,9 +37,14 @@
 * **单遍扫描数据质量断言 (Great-Expectations 风格)**：多规则动态合并为单次聚合 SQL，一次扫描完成非空、唯一、取值区间与行数校验。
 * **Schema 漂移检测**：自动比对上游表结构变更，提供阻断保护。
 
-### 7. 前端遥测 SDK 与全功能治理看板 (`/dashboard`)
-* **OpenTelemetry 前端采集 SDK (`sdk/browser-tracker/`)**：自动生成 W3C Trace Context，无埋点采集 PV/UV、点击、Web Vitals、JS 异常与操作路径序列。
-* **11 大功能治理看板**：业务本体(Ontology)、大盘概览、数据资产与血缘图、DAG 建模执行、Reverse ETL 激活、数据质量监控、Trace 瀑布流、路径复现、转化漏斗、流动桑基图、留存矩阵。
+### 7. 两条数据入口 → 一个分析引擎
+本服务是「**DB 连接器 + trace 两条路的数据分析服务**」，两条路都落进同一个内存 DuckDB 会话，共用全部管道算子：
+* **Path A · DB 连接器**：`connect_and_load_db` 接入 PostgreSQL/MySQL/MSSQL/SQLite/File，`import_excel_or_csv` 秒级导入大 Excel/CSV。
+* **Path B · trace 导入**：`import_traces` 把 trace/遥测（OTLP JSON、span JSON/NDJSON、CSV/Parquet）作为**数据源**导入会话表，随后可对其运行 EDA/OLAP/SPSS/归因/漏斗/span 瀑布/质量断言/Reverse ETL —— 与 DB 路径同一套算子。
+* trace 数据在导入时被规整为统一的 span/event schema。**本服务不自己做埋点采集**，采集是可选示例（见 `examples/telemetry-collector-demo/`），通过 `import_traces` 把数据喂进来。
+
+### 8. 数据处理管道演示看板 (`/dashboard`)
+按数据实际流向组织的六阶段管道：**摄取(Ingest) → 清洗(Transform) → 建模(Model) → 分析(Analyze) → 质量(Quality) → 激活(Activate)**，可一键在一个实时会话上跑通全链路。
 
 ---
 
@@ -51,13 +56,22 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 启动服务
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# 启动服务（本地可信开发关闭鉴权；生产需配置 DATA_AGENT_API_KEYS）
+DATA_AGENT_REQUIRE_AUTH=false uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-* **MDS & Ontology 治理看板**：`http://localhost:8000/dashboard`
-* **前端采集 SDK 联调测试页**：`http://localhost:8000/sdk/browser-tracker/index.html`
+* **数据处理管道演示看板**：`http://localhost:8000/dashboard`
 * **OpenAPI 交互式文档**：`http://localhost:8000/docs`
+
+导入 trace 数据源示例：
+```bash
+curl -X POST http://localhost:8000/api/v1/import/traces \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"traces.json","dataset_name":"traces","session_id":"s1"}'
+# 之后即可对会话 s1 的 traces 表运行 EDA / 漏斗 / span 瀑布 / 质量断言 等
+
+# 可选：遥测采集示例（独立于主服务）
+#   cd examples/telemetry-collector-demo && uvicorn demo_server:app --port 8100
 
 ### 2. 启动 FastMCP Server
 ```bash

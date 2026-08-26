@@ -1,58 +1,57 @@
-from typing import List, Dict, Any, Optional
-from app.storage.event_store import get_event_store
+from typing import Any, Dict, List, Optional
+
+from app.operators.web_analytics.session_source import CREATED_AT_TS, resolve_table
 
 
 def calculate_funnel(
+    session_id: str,
+    table_name: str,
     steps: List[str],
     date_from: Optional[str] = None,
-    date_to: Optional[str] = None
+    date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Calculate multi-step sequential conversion funnel.
-    """
-    store = get_event_store()
+    """Multi-step sequential conversion funnel over a session-resident event table."""
     if not steps:
         return {"error": "Steps cannot be empty"}
 
-    # Base query for users reaching each step in order
+    con, tbl = resolve_table(session_id, table_name)
+
     step_results = []
-    prev_users = None
-    
+    prev_users: Optional[str] = None
     prev_params: List[Any] = []
 
     for idx, step_name in enumerate(steps):
         where_clauses = ["event_name = ?"]
         step_params: List[Any] = [step_name]
         if date_from:
-            where_clauses.append("created_at >= ?")
+            where_clauses.append(f"{CREATED_AT_TS} >= ?")
             step_params.append(date_from)
         if date_to:
-            where_clauses.append("created_at <= ?")
+            where_clauses.append(f"{CREATED_AT_TS} <= ?")
             step_params.append(date_to)
 
         where_sql = " AND ".join(where_clauses)
-        users_sql = f"SELECT DISTINCT user_id FROM events WHERE {where_sql}"
+        users_sql = f"SELECT DISTINCT user_id FROM {tbl} WHERE {where_sql}"
 
         if prev_users is None:
-            sql = f"SELECT count(DISTINCT user_id) as count FROM events WHERE {where_sql}"
-            res = store.query(sql, list(step_params))
-            count = res[0]["count"] if res else 0
+            sql = f"SELECT count(DISTINCT user_id) as count FROM {tbl} WHERE {where_sql}"
+            res = con.execute(sql, list(step_params)).fetchone()
+            count = res[0] if res else 0
             prev_users = users_sql
             prev_params = list(step_params)
         else:
-            sql = f"SELECT count(DISTINCT user_id) as count FROM events WHERE {where_sql} AND user_id IN ({prev_users})"
-            res = store.query(sql, list(step_params) + prev_params)
-            count = res[0]["count"] if res else 0
+            sql = f"SELECT count(DISTINCT user_id) as count FROM {tbl} WHERE {where_sql} AND user_id IN ({prev_users})"
+            res = con.execute(sql, list(step_params) + prev_params).fetchone()
+            count = res[0] if res else 0
             prev_users = f"{prev_users} INTERSECT {users_sql}"
             prev_params = prev_params + list(step_params)
 
         step_results.append({
             "step_index": idx + 1,
             "step_name": step_name,
-            "user_count": int(count)
+            "user_count": int(count or 0),
         })
 
-    # Calculate conversion and drop-off rates
     first_count = step_results[0]["user_count"] if step_results else 0
     for idx, step in enumerate(step_results):
         if idx == 0:
@@ -70,5 +69,5 @@ def calculate_funnel(
         "initial_users": first_count,
         "final_converted_users": step_results[-1]["user_count"] if step_results else 0,
         "overall_conversion_rate": step_results[-1]["overall_conversion_rate"] if step_results else 0.0,
-        "steps": step_results
+        "steps": step_results,
     }

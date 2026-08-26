@@ -3,7 +3,7 @@ import json
 import threading
 from typing import List, Dict, Any, Optional
 import duckdb
-from app.streaming.ring_buffer import InvertedRingBuffer
+from ring_buffer import InvertedRingBuffer
 
 class EventStore:
     _instance = None

@@ -1,8 +1,25 @@
+import math
 import pyarrow as pa
 from typing import List, Dict, Any, Optional
 
 class ArrowUtils:
     """Zero-copy Arrow Table manipulation and conversion utilities."""
+
+    @staticmethod
+    def df_to_records(df) -> List[Dict[str, Any]]:
+        """DataFrame -> JSON-safe list of dicts.
+
+        pandas turns SQL NULLs in numeric columns (and all-NULL columns) into
+        float NaN, which json.dumps rejects ('Out of range float values are not
+        JSON compliant'). Collapse every NaN/Inf to None so any downstream JSON
+        response is safe regardless of how sparse the source table is.
+        """
+        records = df.to_dict(orient="records")
+        for row in records:
+            for key, val in row.items():
+                if isinstance(val, float) and not math.isfinite(val):
+                    row[key] = None
+        return records
 
     @staticmethod
     def table_to_compact_preview(table: Any, limit: int = 20) -> List[Dict[str, Any]]:

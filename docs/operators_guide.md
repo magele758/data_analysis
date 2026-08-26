@@ -71,9 +71,14 @@
 
 ---
 
-## 六、 前端遥测与用户行为分析
+## 六、 Trace / 用户行为分析（运行于会话内导入的 trace 表）
+
+> 这些算子不再连独立的采集库；它们对**导入到分析会话的 trace 数据源**（经 `import_traces` 载入）运行，
+> 因此与 DB 连接器路径共用同一分析引擎。每个算子入参含 `session_id` 与 `dataset_name`。
+> trace 数据源经 `import_traces` 接入（OTLP JSON / span JSON/NDJSON / CSV / Parquet）。
 
 ### 16. 转化漏斗算子 (`analyze_conversion_funnel`)
+* **入参**：`session_id`, `dataset_name`, `steps`, `date_from?`, `date_to?`
 * **作用**：计算多步骤有序转化漏斗、各步骤留存人数、步进流失率与总转化率。
 
 ### 17. 用户流动与桑基图算子 (`analyze_user_flow`)
@@ -86,7 +91,8 @@
 * **作用**：计算页面 PV、UV、平均停留时长与跳出分析。
 
 ### 20. 链路追踪与操作路径复现 (`inspect_trace_and_replay`)
-* **作用**：构建 OpenTelemetry Span 瀑布流，按 Session ID 还原用户点击与页面流转时间轴。
+* **入参**：`session_id`, `dataset_name`, `trace_id?`, `telemetry_session_id?`
+* **作用**：从会话内 trace 表构建 OpenTelemetry Span 瀑布流，按遥测 Session 还原用户点击与页面流转时间轴。
 
 ---
 

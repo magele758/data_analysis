@@ -85,13 +85,13 @@ def test_empty_key_header_is_401():
     "path",
     [
         "/api/v1/catalog/tables",
-        "/api/v1/analytics/pages",
+        "/api/v1/catalog/metrics",
         "/api/v1/ontology/objects",
-        "/api/v1/collect/realtime",
+        "/api/v1/ontology/schema",
     ],
 )
 def test_api_v1_paths_are_protected(path):
-    """Covers the included collector router too, not just decorated routes.
+    """Auth boundary check across representative /api/v1 routes.
 
     Asserts the auth boundary only: a valid key must get past it. The handler's
     own status is another module's concern.
