@@ -25,6 +25,7 @@ from app.schemas.requests import (
 from app.schemas.responses import AnalysisResponse
 from app.cluster.session_manager import SessionManager
 from app.connectors.factory import ConnectorFactory
+from app.connectors.trace_importer import TraceImporter
 from app.operators.eda import run_eda_profile
 from app.operators.correlation import run_correlation_analysis
 from app.operators.olap import run_olap_query, run_pivot_table
@@ -40,7 +41,6 @@ from app.operators.sandbox import run_duckdb_sql
 from app.nlg.narrative_builder import NarrativeBuilder
 from app.schemas.charts import ChartSpecBuilder
 
-from app.collector.routes import router as collector_router
 from app.operators.web_analytics.funnel import calculate_funnel
 from app.operators.web_analytics.flow import calculate_user_flow
 from app.operators.web_analytics.retention import calculate_retention
@@ -104,12 +104,11 @@ app.add_middleware(
     expose_headers=["X-Request-ID"],
 )
 
-# Mount Static Files & Collector Router
+# Static assets for the pipeline dashboard. Telemetry collection is NOT part of
+# this service; it lives in examples/telemetry-collector-demo and feeds data in
+# via the trace import endpoint below.
 os.makedirs("app/web/static", exist_ok=True)
-os.makedirs("sdk/browser-tracker", exist_ok=True)
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
-app.mount("/sdk/browser-tracker", StaticFiles(directory="sdk/browser-tracker"), name="sdk")
-app.include_router(collector_router)
 
 
 @app.middleware("http")
@@ -331,40 +330,45 @@ def api_sql(req: SQLSandboxRequest):
         metadata={"columns": res["columns"]}
     )
 
-# ----------------- Web Analytics & Trace Endpoints -----------------
+# ----------------- Trace / Web Analytics (on a session-resident table) -----------------
+# These run on an imported trace dataset inside an analytical session, the same
+# engine the DB-connector path uses. The DB path and the trace path thus share
+# one analysis core rather than each maintaining a separate silo.
 
 class FunnelRequest(BaseModel):
+    session_id: str
+    dataset_name: str
     steps: List[str]
     date_from: Optional[str] = None
     date_to: Optional[str] = None
 
 @app.post("/api/v1/analytics/funnel")
 def api_funnel(req: FunnelRequest):
-    return calculate_funnel(req.steps, req.date_from, req.date_to)
+    return calculate_funnel(req.session_id, req.dataset_name, req.steps, req.date_from, req.date_to)
 
 @app.get("/api/v1/analytics/flow")
-def api_flow(limit: int = 15):
-    return calculate_user_flow(limit_paths=limit)
+def api_flow(session_id: str, dataset_name: str, limit: int = 15):
+    return calculate_user_flow(session_id, dataset_name, limit_paths=limit)
 
 @app.get("/api/v1/analytics/retention")
-def api_retention(days: int = 7):
-    return calculate_retention(days=days)
+def api_retention(session_id: str, dataset_name: str, days: int = 7):
+    return calculate_retention(session_id, dataset_name, days=days)
 
 @app.get("/api/v1/analytics/pages")
-def api_pages(limit: int = 20):
-    return calculate_page_metrics(limit=limit)
+def api_pages(session_id: str, dataset_name: str, limit: int = 20):
+    return calculate_page_metrics(session_id, dataset_name, limit=limit)
 
 @app.get("/api/v1/analytics/trace/{trace_id}")
-def api_trace_waterfall(trace_id: str):
-    return get_trace_waterfall(trace_id)
+def api_trace_waterfall(trace_id: str, session_id: str, dataset_name: str):
+    return get_trace_waterfall(session_id, dataset_name, trace_id)
 
-@app.get("/api/v1/analytics/replay/{session_id}")
-def api_session_replay(session_id: str):
-    return get_session_action_replay(session_id)
+@app.get("/api/v1/analytics/replay/{telemetry_session_id}")
+def api_session_replay(telemetry_session_id: str, session_id: str, dataset_name: str):
+    return get_session_action_replay(session_id, dataset_name, telemetry_session_id)
 
 @app.get("/api/v1/analytics/sessions")
-def api_list_sessions(limit: int = 20):
-    return {"sessions": list_recent_sessions(limit=limit)}
+def api_list_sessions(session_id: str, dataset_name: str, limit: int = 20):
+    return {"sessions": list_recent_sessions(session_id, dataset_name, limit=limit)}
 
 # ----------------- Modern Data Stack: Catalog & Lineage -----------------
 
@@ -673,4 +677,52 @@ async def api_import_file(
         "columns": meta.column_names,
         "memory_bytes": meta.memory_bytes,
         "summary": f"Successfully loaded {os.path.basename(target_path)} ({meta.row_count:,} rows, {meta.column_count} cols) into dataset '{dataset_name}'."
+    }
+
+# ----------------- Trace Ingestion (Path B): import traces as a data source -----------------
+
+class TraceImportRequest(BaseModel):
+    source: Optional[str] = None
+    records: Optional[List[Dict[str, Any]]] = None
+    dataset_name: str = "traces"
+    session_id: Optional[str] = None
+    format: Optional[str] = None
+
+@app.post("/api/v1/import/traces")
+def api_import_traces(req: TraceImportRequest):
+    """Ingest OTLP/JSON/NDJSON/CSV/Parquet trace data into an analytical session.
+
+    Traces become an ordinary session table, so the whole MDS pipeline
+    (clean/model/EDA/OLAP/SPSS/funnel/waterfall/quality/reverse-ETL) applies —
+    the same engine used by the DB-connector path.
+    """
+    mgr = SessionManager()
+    sess = mgr.get_or_create_session(req.session_id)
+    try:
+        arrow_table = TraceImporter.load_source(source=req.source, records=req.records, fmt=req.format)
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    meta = sess.register_dataset(req.dataset_name, arrow_table, {"source": req.source or "inline", "kind": "trace"})
+
+    cat = get_meta_registry()
+    cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
+    cat.register_table(TableAsset(
+        dataset_name=req.dataset_name,
+        display_name=req.dataset_name,
+        description=f"Trace data imported from {req.source or 'inline records'}",
+        row_count=meta.row_count,
+        column_count=meta.column_count,
+        columns=cols,
+        tags=["trace", "imported"]
+    ))
+
+    return {
+        "status": "success",
+        "session_id": sess.session_id,
+        "dataset_name": req.dataset_name,
+        "row_count": meta.row_count,
+        "column_count": meta.column_count,
+        "columns": meta.column_names,
+        "summary": f"Imported {meta.row_count:,} trace spans/events into session '{sess.session_id}' (table '{req.dataset_name}'). Ready for the full MDS pipeline."
     }

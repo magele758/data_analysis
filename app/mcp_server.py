@@ -5,6 +5,8 @@ from typing import List, Optional, Dict, Any
 from fastmcp import FastMCP
 from app.cluster.session_manager import SessionManager
 from app.connectors.factory import ConnectorFactory
+from app.connectors.trace_importer import TraceImporter
+from app.catalog.meta_registry import TableAsset as _TA, ColumnMeta as _CM
 from app.logging_setup import configure_logging
 
 # MCP 运行在 stdio transport，日志只能写文件或 stderr
@@ -217,35 +219,67 @@ def duckdb_sql_sandbox(session_id: str, sql_query: str, limit: int = 100) -> str
     res = run_duckdb_sql(session_id, sql_query, limit)
     return json.dumps({"status": "success", "result": res}, ensure_ascii=False)
 
-# ---------------- Web Analytics & Trace Tools ----------------
+# ---------------- Trace Ingestion (Path B) ----------------
 
-@mcp.tool(name="analyze_conversion_funnel", description="Calculate sequential user conversion funnel, drop-off rates, and step conversion metrics.")
-def analyze_conversion_funnel(steps: List[str], date_from: Optional[str] = None, date_to: Optional[str] = None) -> str:
-    res = calculate_funnel(steps, date_from, date_to)
+@mcp.tool(name="import_traces", description="Ingest trace/telemetry data (OTLP JSON, span JSON/NDJSON array, or CSV/Parquet) as a data source into an in-memory session table, so the full MDS pipeline (clean/model/EDA/OLAP/SPSS/funnel/waterfall/quality/reverse-ETL) can run on it — the same engine as the DB-connector path.")
+def import_traces(
+    source: Optional[str] = None,
+    dataset_name: str = "traces",
+    session_id: Optional[str] = None,
+    fmt: Optional[str] = None
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_or_create_session(session_id)
+    arrow_table = TraceImporter.load_source(source=source, fmt=fmt)
+    meta = sess.register_dataset(dataset_name, arrow_table, {"source": source, "kind": "trace"})
+
+    from app.catalog.meta_registry import get_meta_registry
+    cat = get_meta_registry()
+    cols = [_CM(name=c, data_type="UNKNOWN") for c in meta.column_names]
+    cat.register_table(_TA(
+        dataset_name=dataset_name, display_name=dataset_name,
+        description=f"Trace data imported from {source}",
+        row_count=meta.row_count, column_count=meta.column_count,
+        columns=cols, tags=["trace", "imported"]
+    ))
+    return json.dumps({
+        "status": "success",
+        "session_id": sess.session_id,
+        "dataset_name": dataset_name,
+        "row_count": meta.row_count,
+        "columns": meta.column_names,
+        "summary": f"Imported {meta.row_count:,} trace spans/events into session '{sess.session_id}' (table '{dataset_name}')."
+    }, ensure_ascii=False)
+
+# ---------------- Trace / Web Analytics (on a session-resident table) ----------------
+
+@mcp.tool(name="analyze_conversion_funnel", description="Calculate sequential conversion funnel, drop-off and step conversion over a session-resident trace/event table.")
+def analyze_conversion_funnel(session_id: str, dataset_name: str, steps: List[str], date_from: Optional[str] = None, date_to: Optional[str] = None) -> str:
+    res = calculate_funnel(session_id, dataset_name, steps, date_from, date_to)
     return json.dumps({"status": "success", "funnel": res}, ensure_ascii=False)
 
-@mcp.tool(name="analyze_user_flow", description="Calculate user page navigation transition matrix and Sankey flow diagram nodes/links.")
-def analyze_user_flow(limit_paths: int = 15) -> str:
-    res = calculate_user_flow(limit_paths=limit_paths)
+@mcp.tool(name="analyze_user_flow", description="Calculate page navigation transition matrix and Sankey nodes/links over a session-resident trace/event table.")
+def analyze_user_flow(session_id: str, dataset_name: str, limit_paths: int = 15) -> str:
+    res = calculate_user_flow(session_id, dataset_name, limit_paths=limit_paths)
     return json.dumps({"status": "success", "user_flow": res}, ensure_ascii=False)
 
-@mcp.tool(name="analyze_cohort_retention", description="Calculate N-day user cohort retention grid matrix heatmap.")
-def analyze_cohort_retention(days: int = 7) -> str:
-    res = calculate_retention(days=days)
+@mcp.tool(name="analyze_cohort_retention", description="Calculate N-day cohort retention grid over a session-resident trace/event table.")
+def analyze_cohort_retention(session_id: str, dataset_name: str, days: int = 7) -> str:
+    res = calculate_retention(session_id, dataset_name, days=days)
     return json.dumps({"status": "success", "retention": res}, ensure_ascii=False)
 
-@mcp.tool(name="analyze_page_performance", description="Calculate Pageview (PV), Unique Visitors (UV), and average stay dwell duration by page path.")
-def analyze_page_performance(limit: int = 20) -> str:
-    res = calculate_page_metrics(limit=limit)
+@mcp.tool(name="analyze_page_performance", description="Calculate PV/UV and average dwell by page path over a session-resident trace/event table.")
+def analyze_page_performance(session_id: str, dataset_name: str, limit: int = 20) -> str:
+    res = calculate_page_metrics(session_id, dataset_name, limit=limit)
     return json.dumps({"status": "success", "page_metrics": res}, ensure_ascii=False)
 
-@mcp.tool(name="inspect_trace_and_replay", description="Retrieve OpenTelemetry span waterfall tree or user interaction breadcrumb timeline for session replay.")
-def inspect_trace_and_replay(trace_id: Optional[str] = None, session_id: Optional[str] = None) -> str:
+@mcp.tool(name="inspect_trace_and_replay", description="Retrieve an OpenTelemetry span waterfall (by trace_id) or a breadcrumb replay timeline (by telemetry session) from a session-resident trace table.")
+def inspect_trace_and_replay(session_id: str, dataset_name: str, trace_id: Optional[str] = None, telemetry_session_id: Optional[str] = None) -> str:
     result = {}
     if trace_id:
-        result["waterfall"] = get_trace_waterfall(trace_id)
-    if session_id:
-        result["replay"] = get_session_action_replay(session_id)
+        result["waterfall"] = get_trace_waterfall(session_id, dataset_name, trace_id)
+    if telemetry_session_id:
+        result["replay"] = get_session_action_replay(session_id, dataset_name, telemetry_session_id)
     return json.dumps({"status": "success", "data": result}, ensure_ascii=False)
 
 # ---------------- Modern Data Stack (MDS) Tools ----------------

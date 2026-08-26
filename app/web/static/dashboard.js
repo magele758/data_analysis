@@ -1,668 +1,188 @@
-let funnelChart = null;
-let flowChart = null;
-let lineageChart = null;
+// Pipeline-centric dashboard. Every stage runs against ONE analytical session, so
+// the DB-connector path and the trace path share the same engine. Telemetry
+// collection is NOT here — it is an optional demo under examples/.
+
+const SESSION_ID = 'dashboard-' + Math.random().toString(36).slice(2, 8);
+const TRACE_DS = 'demo_traces';
+const BIZ_DS = 'demo_sales';
+
+// Sample trace/telemetry spans used as the Path-B data source for the demo.
+const SAMPLE_TRACES = [
+  { event_name:'$pageview', event_type:'pageview', user_id:'u1', session_id:'s1', trace_id:'t1', span_id:'a1', page_path:'/home', timestamp_ms:1 },
+  { event_name:'view_item', event_type:'custom', user_id:'u1', session_id:'s1', trace_id:'t1', span_id:'a2', parent_span_id:'a1', page_path:'/product', timestamp_ms:2, duration_ms:120 },
+  { event_name:'add_to_cart', event_type:'custom', user_id:'u1', session_id:'s1', trace_id:'t1', span_id:'a3', parent_span_id:'a2', page_path:'/cart', timestamp_ms:3, duration_ms:80 },
+  { event_name:'purchase_success', event_type:'custom', user_id:'u1', session_id:'s1', trace_id:'t1', span_id:'a4', parent_span_id:'a3', page_path:'/success', timestamp_ms:4, duration_ms:200 },
+  { event_name:'$pageview', event_type:'pageview', user_id:'u2', session_id:'s2', trace_id:'t2', span_id:'b1', page_path:'/home', timestamp_ms:1 },
+  { event_name:'view_item', event_type:'custom', user_id:'u2', session_id:'s2', trace_id:'t2', span_id:'b2', parent_span_id:'b1', page_path:'/product', timestamp_ms:2, duration_ms:90 },
+  { event_name:'add_to_cart', event_type:'custom', user_id:'u2', session_id:'s2', trace_id:'t2', span_id:'b3', parent_span_id:'b2', page_path:'/cart', timestamp_ms:3, duration_ms:75 },
+  { event_name:'$error', event_type:'error', user_id:'u3', session_id:'s3', trace_id:'t3', span_id:'c1', page_path:'/cart', timestamp_ms:1, properties:{ message:'NullPointer' } },
+];
+
+let ingested = false;
 
 document.addEventListener('DOMContentLoaded', () => {
-  initTabs();
-  loadOverviewData();
-  startRealtimeStream();
+  document.getElementById('session-badge').textContent = SESSION_ID;
+  document.querySelectorAll('.stage-pill').forEach(p =>
+    p.addEventListener('click', () => showStage(p.dataset.stage)));
+  showStage('ingest');
 });
 
-/**
- * 两层导航：流程轨（阶段）+ 阶段内视图。
- * 阶段轨编码数据流向；切换视图会回写高亮所属阶段，
- * 使"我在管道的哪一段"始终可见。
- */
-function initTabs() {
-  const stages = document.querySelectorAll('.stage');
-  const views = document.querySelectorAll('.view-btn');
-
-  function activate(target, stage) {
-    document.querySelectorAll('.tab-pane').forEach(p => p.classList.add('hidden'));
-    const pane = document.getElementById('pane-' + target);
-    if (pane) pane.classList.remove('hidden');
-
-    stages.forEach(s => s.classList.toggle('active', s.dataset.stage === stage));
-    views.forEach(v => {
-      v.hidden = v.dataset.stage !== stage;
-      v.classList.toggle('active', v.dataset.tab === target);
-    });
-
-    // 数据加载分派（行为与改版前一致）
-    if (target === 'ontology') { loadOntologySchema(); loadOntologyAudits(); }
-    if (target === 'catalog') { loadCatalogTables(); loadSemanticMetrics(); loadLineageGraph(); }
-    if (target === 'transform') loadDagModels();
-    if (target === 'funnel') loadFunnelData();
-    if (target === 'flow') loadFlowData();
-    if (target === 'retention') loadRetentionData();
-    if (target === 'replay') loadSessionsList();
-    if (target === 'traces') loadRealtimeLogs();
-  }
-
-  stages.forEach(s => s.addEventListener('click', () => {
-    // 进入阶段 = 打开该阶段的首个视图
-    const first = document.querySelector(`.view-btn[data-stage="${s.dataset.stage}"]`);
-    if (first) activate(first.dataset.tab, s.dataset.stage);
-  }));
-
-  views.forEach(v => v.addEventListener('click', () => activate(v.dataset.tab, v.dataset.stage)));
-
-  activate('overview', 'ingest');
+function showStage(stage) {
+  document.querySelectorAll('[data-stage-pane]').forEach(p => p.classList.add('hidden'));
+  const pane = document.getElementById('pane-' + stage);
+  if (pane) pane.classList.remove('hidden');
+  document.querySelectorAll('.stage-pill').forEach(p =>
+    p.classList.toggle('active', p.dataset.stage === stage));
 }
 
-// 1. Overview
-async function loadOverviewData() {
+function markDone(stage) {
+  const pill = document.querySelector(`.stage-pill[data-stage="${stage}"]`);
+  if (pill) pill.classList.add('done');
+}
+
+function setOut(id, text, ok = true) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('text-emerald-400', ok);
+  el.classList.toggle('text-rose-500', !ok);
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || data.message || (`HTTP ${res.status}`));
+  return data;
+}
+
+function pretty(obj) { return JSON.stringify(obj, null, 2); }
+
+// ---- 01 Ingest ----
+async function ingestTraces() {
   try {
-    const res = await fetch('/api/v1/analytics/pages');
-    const data = await res.json();
-    if (data.summary) {
-      const fmt = n => (n ?? 0).toLocaleString();
-      document.getElementById('stat-events').textContent = fmt(data.summary.total_events);
-      document.getElementById('stat-uv').textContent = fmt(data.summary.total_uv);
-      document.getElementById('stat-sessions').textContent = fmt(data.summary.total_sessions);
-
-      // 告警色留给真正的告警：错误数为零时保持墨白
-      const errors = data.summary.total_errors || 0;
-      const errEl = document.getElementById('stat-errors');
-      errEl.textContent = fmt(errors);
-      errEl.classList.toggle('is-alert', errors > 0);
-    }
-
-    const tbody = document.getElementById('page-table-body');
-    tbody.innerHTML = '';
-    (data.pages || []).forEach(p => {
-      const tr = document.createElement('tr');
-      tr.className = 'border-b border-slate-700/50 hover:bg-slate-700/30 text-sm';
-      tr.innerHTML = `
-        <td class="py-3 px-4 font-mono text-sky-400">${p.page_path}</td>
-        <td class="py-3 px-4 font-semibold">${p.pv}</td>
-        <td class="py-3 px-4 text-slate-300">${p.uv}</td>
-        <td class="py-3 px-4 text-slate-300">${p.sessions}</td>
-        <td class="py-3 px-4 text-emerald-400">${p.avg_dwell_seconds}s</td>
-      `;
-      tbody.appendChild(tr);
+    const r = await api('POST', '/api/v1/import/traces', {
+      records: SAMPLE_TRACES, dataset_name: TRACE_DS, session_id: SESSION_ID,
     });
-  } catch (err) {
-    console.error('Failed to load overview:', err);
-  }
+    ingested = true;
+    markDone('ingest');
+    setOut('out-ingest', `✔ Path B: 导入 ${r.row_count} 条 trace span/event → 表 '${r.dataset_name}'\n列: ${r.columns.join(', ')}`);
+  } catch (e) { setOut('out-ingest', '✘ 摄取失败: ' + e.message, false); }
 }
 
-// 2. Catalog & Lineage
-async function loadCatalogTables() {
+async function ingestBusiness() {
   try {
-    const res = await fetch('/api/v1/catalog/tables');
-    const data = await res.json();
-    const list = document.getElementById('catalog-table-list');
-    list.innerHTML = '';
-    (data.tables || []).forEach(t => {
-      const d = document.createElement('div');
-      d.className = 'p-3 bg-slate-900/90 rounded border border-slate-800 text-xs space-y-1';
-      d.innerHTML = `
-        <div class="flex justify-between items-center">
-          <span class="font-bold text-sky-400 font-mono">${t.dataset_name}</span>
-          <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">${t.table_type}</span>
-        </div>
-        <div class="text-slate-400">${t.description || '暂无描述'}</div>
-        <div class="text-[11px] text-slate-500 font-mono">行数: ${(t.row_count ?? 0).toLocaleString()} | 列数: ${t.column_count} | 标签: ${(t.tags||[]).join(', ')}</div>
-      `;
-      list.appendChild(d);
+    // Path A demo without external DB: materialize a business fact table in-session.
+    const sql = `SELECT * FROM (VALUES
+      ('East','Electronics',120.5,3),('West','Electronics',90.0,2),
+      ('East','Grocery',200.0,5),('West','Grocery',75.5,1),
+      ('North','Electronics',300.0,7)) AS t(region, category, sales, qty)`;
+    await api('POST', '/api/v1/tools/sql', { session_id: SESSION_ID, sql_query: `CREATE OR REPLACE TABLE ${BIZ_DS} AS ${sql}`, limit: 1 })
+      .catch(async () => { await ingestTraces(); }); // sandbox blocks CREATE; fall back to trace path
+    setOut('out-ingest', `✔ Path A 示例业务表尝试建立（若沙箱只读则回退 trace 导入）。会话: ${SESSION_ID}`);
+    markDone('ingest');
+  } catch (e) { setOut('out-ingest', '业务数据入口: ' + e.message, false); }
+}
+
+async function ensureIngested() { if (!ingested) await ingestTraces(); }
+
+// ---- 02 Transform ----
+async function runTransform() {
+  try {
+    await ensureIngested();
+    const r = await api('POST', '/api/v1/transform/clean', {
+      session_id: SESSION_ID, source_table: TRACE_DS, target_table: TRACE_DS + '_clean',
+      dedup_keys: ['event_id'],
     });
-  } catch (e) {}
+    markDone('transform');
+    setOut('out-transform', '✔ 清洗完成:\n' + pretty(r));
+  } catch (e) { setOut('out-transform', '清洗: ' + e.message, false); }
 }
 
-async function loadSemanticMetrics() {
+// ---- 03 Model ----
+async function loadModel() {
   try {
-    const res = await fetch('/api/v1/catalog/metrics');
-    const data = await res.json();
-    const list = document.getElementById('semantic-metrics-list');
-    list.innerHTML = '';
-    (data.metrics || []).forEach(m => {
-      const d = document.createElement('div');
-      d.className = 'p-3 bg-slate-900/90 rounded border border-slate-800 text-xs space-y-1';
-      d.innerHTML = `
-        <div class="flex justify-between items-center">
-          <span class="font-bold text-indigo-400 font-mono">${m.name}</span>
-          <span class="px-2 py-0.5 rounded text-[10px] bg-indigo-950 text-indigo-300">${m.aggregation_type}</span>
-        </div>
-        <div class="text-slate-300 font-mono">公式: <code class="text-amber-300">${m.formula}</code> (表: ${m.table_name})</div>
-      `;
-      list.appendChild(d);
+    const tables = await api('GET', '/api/v1/catalog/tables');
+    const metrics = await api('GET', '/api/v1/catalog/metrics');
+    const el = document.getElementById('out-model');
+    const trows = (tables.tables || []).map(t =>
+      `<div class="flex justify-between border-b border-white/5 py-1"><span class="mono text-indigo-400">${t.dataset_name}</span><span class="text-slate-500">${t.row_count ?? '?'} 行 · ${(t.tags||[]).join(',')}</span></div>`).join('');
+    const mrows = (metrics.metrics || []).map(m =>
+      `<span class="inline-block px-2 py-0.5 rounded bg-slate-800 text-slate-300 mr-1 mb-1 mono">${m.name || m.metric_name}</span>`).join('') || '<span class="text-slate-500">（暂无指标）</span>';
+    el.innerHTML = `<div class="font-semibold text-slate-200 mb-1">数据资产目录</div>${trows || '<span class="text-slate-500">空</span>'}<div class="font-semibold text-slate-200 mt-3 mb-1">语义指标</div>${mrows}`;
+    markDone('model');
+  } catch (e) { document.getElementById('out-model').textContent = '建模: ' + e.message; }
+}
+
+// ---- 04 Analyze ----
+async function runEDA() {
+  try {
+    await ensureIngested();
+    const r = await api('POST', '/api/v1/tools/eda', { session_id: SESSION_ID, dataset_name: TRACE_DS });
+    markDone('analyze');
+    setOut('out-analyze', '✔ EDA 画像:\n' + (r.summary_text || pretty(r.statistics)).slice(0, 900), true);
+  } catch (e) { setOut('out-analyze', 'EDA: ' + e.message, false); }
+}
+
+async function runFunnel() {
+  try {
+    await ensureIngested();
+    const r = await api('POST', '/api/v1/analytics/funnel', {
+      session_id: SESSION_ID, dataset_name: TRACE_DS,
+      steps: ['view_item', 'add_to_cart', 'purchase_success'],
     });
-  } catch (e) {}
+    markDone('analyze');
+    setOut('out-analyze', `✔ 漏斗 (trace 数据上运行):\n总转化率 ${(r.overall_conversion_rate*100).toFixed(1)}% · 起始 ${r.initial_users} → 成单 ${r.final_converted_users}\n` + pretty(r.steps), true);
+  } catch (e) { setOut('out-analyze', '漏斗: ' + e.message, false); }
 }
 
-async function loadLineageGraph() {
+async function runWaterfall() {
   try {
-    const res = await fetch('/api/v1/catalog/lineage');
-    const data = await res.json();
-    if (!lineageChart) {
-      lineageChart = echarts.init(document.getElementById('lineage-graph-container'));
-    }
-    const option = {
-      backgroundColor: 'transparent',
-      tooltip: {},
-      series: [
-        {
-          type: 'graph',
-          layout: 'force',
-          symbolSize: 40,
-          roam: true,
-          label: { show: true, color: '#C2C9D1', fontSize: 11 },
-          edgeSymbol: ['circle', 'arrow'],
-          edgeSymbolSize: [4, 8],
-          edgeLabel: { fontSize: 10 },
-          data: data.nodes || [],
-          links: data.edges || [],
-          lineStyle: { color: '#4CC8E0', curveness: 0.2, width: 2 }
-        }
-      ]
-    };
-    lineageChart.setOption(option);
-  } catch (e) {}
+    await ensureIngested();
+    const r = await api('GET', `/api/v1/analytics/trace/t1?session_id=${SESSION_ID}&dataset_name=${TRACE_DS}`);
+    markDone('analyze');
+    setOut('out-analyze', `✔ Trace t1 span 瀑布 (${r.total_spans} spans):\n` + pretty(r.spans), true);
+  } catch (e) { setOut('out-analyze', '瀑布: ' + e.message, false); }
 }
 
-// 3. Transform DAG
-async function loadDagModels() {
+// ---- 05 Quality ----
+async function runQuality() {
   try {
-    const res = await fetch('/api/v1/transform/dag/models');
-    const data = await res.json();
-    const container = document.getElementById('dag-models-container');
-    container.innerHTML = '';
-    (data.models || []).forEach(m => {
-      const d = document.createElement('div');
-      d.className = 'p-4 bg-slate-900 rounded-lg border border-slate-800 space-y-2 text-xs';
-      d.innerHTML = `
-        <div class="font-bold text-emerald-400 font-mono text-sm">${m.name}</div>
-        <div class="text-slate-400">物化策略: <span class="uppercase text-slate-200">${m.materialization}</span></div>
-        <div class="text-slate-500">依赖模型: ${(m.depends_on || []).join(', ') || '无 (Root)'}</div>
-        <pre class="bg-slate-950 p-2 rounded text-[10px] text-slate-400 overflow-x-auto">${m.sql}</pre>
-      `;
-      container.appendChild(d);
+    await ensureIngested();
+    const r = await api('POST', '/api/v1/observability/assert', {
+      session_id: SESSION_ID, table: TRACE_DS,
+      rules: [
+        { type: 'not_null', column: 'event_id' },
+        { type: 'unique', column: 'event_id' },
+        { type: 'not_null', column: 'trace_id' },
+      ],
     });
-  } catch (e) {}
+    markDone('quality');
+    setOut('out-quality', '✔ 质量断言:\n' + pretty(r), true);
+  } catch (e) { setOut('out-quality', '质量: ' + e.message, false); }
 }
 
-async function runDagPipeline() {
+// ---- 06 Activate ----
+async function runActivate() {
   try {
-    const res = await fetch('/api/v1/transform/dag/run?session_id=default_session', { method: 'POST' });
-    const data = await res.json();
-    const box = document.getElementById('dag-execution-result');
-    box.classList.remove('hidden');
-    box.textContent = JSON.stringify(data, null, 2);
-  } catch (e) {
-    alert('DAG 执行失败，请确认 Session 状态');
-  }
-}
-
-// 4. Reverse ETL
-async function triggerReverseSync() {
-  const source = document.getElementById('retl-source-table').value;
-  const destUri = document.getElementById('retl-dest-uri').value;
-  const destTable = document.getElementById('retl-dest-table').value;
-
-  try {
-    const res = await fetch('/api/v1/retl/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: 'default_session',
-        source_table: source,
-        dest_conn_str: destUri,
-        dest_table_name: destTable
-      })
+    await ensureIngested();
+    const r = await api('POST', '/api/v1/retl/audience', {
+      session_id: SESSION_ID, source_table: TRACE_DS,
+      filter_sql: "event_type = 'error'", format_type: 'json', limit: 50,
     });
-    const data = await res.json();
-    document.getElementById('retl-sync-msg').textContent = `✅ 同步成功: 已同步 ${data.synced_rows || 0} 行至 ${destTable}`;
-  } catch (e) {
-    document.getElementById('retl-sync-msg').textContent = '❌ 同步失败: ' + e.message;
-  }
+    markDone('activate');
+    setOut('out-activate', '✔ 受众导出 (error 事件人群):\n' + pretty(r), true);
+  } catch (e) { setOut('out-activate', '激活: ' + e.message, false); }
 }
 
-async function triggerWebhookAlert() {
-  const platform = document.getElementById('webhook-platform').value;
-  const title = document.getElementById('webhook-title').value;
-  const msg = document.getElementById('webhook-msg').value;
-
-  try {
-    const res = await fetch('/api/v1/retl/alert', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        webhook_url: 'http://127.0.0.1:8000/api/v1/mock_webhook',
-        platform: platform,
-        title: title,
-        message: msg,
-        extra_metrics: { '转化率波动': '-12.5%', '核心拖累项': '华东大区-电子' }
-      })
-    });
-    const data = await res.json();
-    document.getElementById('webhook-send-msg').textContent = '✅ 告警卡片模拟下发成功 (Payload 已构建)';
-  } catch (e) {
-    document.getElementById('webhook-send-msg').textContent = '❌ 下发失败';
-  }
-}
-
-// 5. Data Quality
-async function runQualityAssertions() {
-  try {
-    const res = await fetch('/api/v1/observability/assert', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: 'default_session',
-        table: 'events',
-        rules: [
-          { type: 'not_null', column: 'event_id' },
-          { type: 'not_null', column: 'event_name' },
-          { type: 'unique', column: 'event_id' },
-          { type: 'row_count', min_rows: 1, max_rows: 1000000 }
-        ]
-      })
-    });
-    const data = await res.json();
-    const card = document.getElementById('quality-report-card');
-    card.classList.remove('hidden');
-    document.getElementById('quality-health-score').textContent = (data.data_health_score || 100) + '%';
-    
-    const list = document.getElementById('quality-rules-list');
-    list.innerHTML = '';
-    (data.assertion_results || []).forEach(r => {
-      const p = document.createElement('div');
-      p.className = 'p-2 rounded bg-slate-950 flex justify-between items-center';
-      p.innerHTML = `
-        <span class="text-slate-300">规则: ${r.assertion} (${r.column || '全表'})</span>
-        <span class="${r.passed ? 'text-emerald-400' : 'text-rose-400'} font-bold">${r.passed ? 'PASSED ✅' : 'FAILED ❌ (异常数:' + r.unexpected_count + ')'}</span>
-      `;
-      list.appendChild(p);
-    });
-  } catch (e) {}
-}
-
-// 6. Realtime Logs & Traces
-let liveInterval = null;
-function startRealtimeStream() {
-  if (liveInterval) clearInterval(liveInterval);
-  liveInterval = setInterval(loadRealtimeLogs, 3000);
-}
-
-async function loadRealtimeLogs() {
-  try {
-    const res = await fetch('/api/v1/collect/realtime?limit=30');
-    const data = await res.json();
-    const container = document.getElementById('realtime-log-container');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    (data.events || []).forEach(ev => {
-      const row = document.createElement('div');
-      row.className = 'p-2.5 bg-slate-900/90 rounded border border-slate-800 flex items-center justify-between text-xs font-mono';
-      const isErr = ev.event_type === 'error';
-      row.innerHTML = `
-        <div class="flex items-center space-x-3">
-          <span class="px-2 py-0.5 rounded text-[10px] uppercase font-bold ${isErr ? 'bg-rose-900/60 text-rose-300 border border-rose-700' : 'bg-sky-900/60 text-sky-300 border border-sky-700'}">
-            ${ev.event_type}
-          </span>
-          <span class="text-slate-200 font-medium">${ev.event_name}</span>
-          <span class="text-slate-400">${ev.page_path || '/'}</span>
-          <span class="text-slate-500 text-[11px] cursor-pointer hover:text-indigo-400" onclick="inspectTrace('${ev.trace_id}')">Trace: ${ev.trace_id ? ev.trace_id.substring(0, 10) + '...' : 'N/A'}</span>
-        </div>
-        <span class="text-slate-500">${ev.created_at || ''}</span>
-      `;
-      container.appendChild(row);
-    });
-  } catch (e) {}
-}
-
-async function inspectTrace(traceId) {
-  if (!traceId) return;
-  document.getElementById('trace-id-input').value = traceId;
-  searchTrace();
-}
-
-async function searchTrace() {
-  const traceId = document.getElementById('trace-id-input').value.trim();
-  if (!traceId) return;
-
-  try {
-    const res = await fetch(`/api/v1/analytics/trace/${traceId}`);
-    const data = await res.json();
-    const view = document.getElementById('trace-waterfall-view');
-    view.innerHTML = '';
-
-    if (!data.spans || data.spans.length === 0) {
-      view.innerHTML = '<div class="text-slate-400 text-sm p-4">未找到该 Trace 对应的 Span 链路</div>';
-      return;
-    }
-
-    data.spans.forEach((sp) => {
-      const card = document.createElement('div');
-      card.className = 'p-3 bg-slate-800 rounded-lg border border-slate-700 space-y-1';
-      card.innerHTML = `
-        <div class="flex justify-between items-center text-xs">
-          <span class="font-bold text-sky-400">Span: ${sp.name} (${sp.service_name})</span>
-          <span class="px-2 py-0.5 rounded text-[10px] ${sp.status_code === 'OK' ? 'bg-emerald-900 text-emerald-300' : 'bg-rose-900 text-rose-300'}">${sp.status_code}</span>
-        </div>
-        <div class="text-xs text-slate-400 font-mono">Span ID: ${sp.span_id} | Parent: ${sp.parent_span_id || 'Root'}</div>
-        <div class="text-xs text-slate-300">Attributes: ${JSON.stringify(sp.attributes || {})}</div>
-      `;
-      view.appendChild(card);
-    });
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-// 7. Funnel Analysis
-async function loadFunnelData() {
-  const stepsInput = document.getElementById('funnel-steps-input').value;
-  const steps = stepsInput.split(',').map(s => s.trim()).filter(Boolean);
-
-  try {
-    const res = await fetch('/api/v1/analytics/funnel', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ steps: steps })
-    });
-    const data = await res.json();
-
-    document.getElementById('funnel-overall-rate').textContent = (data.overall_conversion_rate * 100).toFixed(1) + '%';
-    document.getElementById('funnel-initial-users').textContent = data.initial_users || 0;
-    document.getElementById('funnel-final-users').textContent = data.final_converted_users || 0;
-
-    if (!funnelChart) {
-      funnelChart = echarts.init(document.getElementById('funnel-chart-container'));
-    }
-
-    const chartData = (data.steps || []).map(s => ({
-      name: `${s.step_name} (${s.user_count}人, ${(s.step_conversion_rate * 100).toFixed(1)}%)`,
-      value: s.user_count
-    }));
-
-    const option = {
-      backgroundColor: 'transparent',
-      tooltip: { trigger: 'item', formatter: '{b}' },
-      series: [
-        {
-          name: '漏斗转化',
-          type: 'funnel',
-          left: '10%',
-          top: 30,
-          bottom: 30,
-          width: '80%',
-          minSize: '15%',
-          maxSize: '100%',
-          sort: 'descending',
-          gap: 4,
-          label: { show: true, position: 'inside', color: '#121316', fontSize: 12 },
-          itemStyle: { borderColor: '#16171A', borderWidth: 2 },
-          data: chartData
-        }
-      ]
-    };
-    funnelChart.setOption(option);
-  } catch (err) {
-    console.error('Funnel error:', err);
-  }
-}
-
-// 8. User Flow (Sankey)
-async function loadFlowData() {
-  try {
-    const res = await fetch('/api/v1/analytics/flow');
-    const data = await res.json();
-
-    if (!flowChart) {
-      flowChart = echarts.init(document.getElementById('flow-chart-container'));
-    }
-
-    if (!data.nodes || data.nodes.length === 0) {
-      document.getElementById('flow-chart-container').innerHTML = '<div class="text-slate-400 p-8 text-center">暂无足够页面转移数据</div>';
-      return;
-    }
-
-    const option = {
-      backgroundColor: 'transparent',
-      tooltip: { trigger: 'item', triggerOn: 'mousemove' },
-      series: [
-        {
-          type: 'sankey',
-          layout: 'none',
-          emphasis: { focus: 'adjacency' },
-          data: data.nodes,
-          links: data.links,
-          lineStyle: { color: 'gradient', curveness: 0.5, opacity: 0.4 },
-          label: { color: '#C2C9D1', fontSize: 11 }
-        }
-      ]
-    };
-    flowChart.setOption(option);
-  } catch (err) {
-    console.error('Flow error:', err);
-  }
-}
-
-// 9. Retention Matrix
-async function loadRetentionData() {
-  try {
-    const res = await fetch('/api/v1/analytics/retention?days=7');
-    const data = await res.json();
-    const thead = document.getElementById('retention-thead');
-    const tbody = document.getElementById('retention-tbody');
-
-    thead.innerHTML = '<th class="py-3 px-4 text-left">首次活跃日期</th><th class="py-3 px-4">新用户规模</th>';
-    for (let i = 0; i <= (data.days_analyzed || 7); i++) {
-      thead.innerHTML += `<th class="py-3 px-4">第${i}天</th>`;
-    }
-
-    tbody.innerHTML = '';
-    (data.retention_matrix || []).forEach(row => {
-      let tr = `<tr class="border-b border-slate-700/50 hover:bg-slate-700/30 text-sm">`;
-      tr += `<td class="py-3 px-4 font-mono font-medium text-slate-200">${row.cohort_date}</td>`;
-      tr += `<td class="py-3 px-4 text-center font-bold text-sky-400">${row.cohort_size}</td>`;
-      for (let i = 0; i <= (data.days_analyzed || 7); i++) {
-        const item = row[`day_${i}`] || { count: 0, rate: 0 };
-        const percent = (item.rate * 100).toFixed(1);
-        const opacity = Math.min(Math.max(item.rate, 0.05), 0.9);
-        tr += `<td class="py-3 px-4 text-center text-xs font-mono" style="background-color: rgba(79, 70, 229, ${opacity}); color: #fff;">${percent}%<br><span class="text-[10px] text-slate-300">(${item.count})</span></td>`;
-      }
-      tr += `</tr>`;
-      tbody.innerHTML += tr;
-    });
-  } catch (err) {
-    console.error('Retention error:', err);
-  }
-}
-
-// 10. Session Action Replay
-async function loadSessionsList() {
-  try {
-    const res = await fetch('/api/v1/analytics/sessions');
-    const data = await res.json();
-    const sel = document.getElementById('replay-session-select');
-    sel.innerHTML = '<option value="">-- 请选择要复盘的会话 Session --</option>';
-    (data.sessions || []).forEach(s => {
-      sel.innerHTML += `<option value="${s.session_id}">${s.session_id} (${s.user_id}) - ${s.event_count}事件 ${s.error_count > 0 ? '⚠️含异常' : ''}</option>`;
-    });
-  } catch (err) {}
-}
-
-async function loadSessionTimeline() {
-  const sessionId = document.getElementById('replay-session-select').value;
-  if (!sessionId) return;
-
-  try {
-    const res = await fetch(`/api/v1/analytics/replay/${sessionId}`);
-    const data = await res.json();
-    const container = document.getElementById('replay-timeline-container');
-    container.innerHTML = '';
-
-    (data.timeline || []).forEach((act) => {
-      const isErr = act.event_type === 'error';
-      const isClick = act.event_type === 'click';
-      const isPv = act.event_type === 'pageview';
-
-      const dotColor = isErr ? 'bg-rose-500' : (isClick ? 'bg-amber-400' : (isPv ? 'bg-sky-400' : 'bg-indigo-400'));
-
-      const div = document.createElement('div');
-      div.className = 'relative pl-8 pb-6 border-l-2 border-slate-700 last:border-l-0';
-      div.innerHTML = `
-        <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full ${dotColor} ring-4 ring-slate-900 flex items-center justify-center"></div>
-        <div class="p-3 bg-slate-800/90 rounded-lg border border-slate-700 text-xs space-y-1">
-          <div class="flex justify-between text-slate-400">
-            <span class="font-bold text-slate-200 uppercase">${act.event_type}: ${act.event_name}</span>
-            <span class="font-mono text-[11px]">${act.created_at}</span>
-          </div>
-          <div class="text-slate-300">页面: <span class="text-sky-400 font-mono">${act.page_path}</span></div>
-          ${act.properties.selector ? `<div class="text-slate-400">点击元素: <code class="text-amber-300">${act.properties.selector}</code> (文本: "${act.properties.text || ''}")</div>` : ''}
-          ${act.properties.message ? `<div class="text-rose-400 font-mono font-semibold">❌ 错误信息: ${act.properties.message}</div>` : ''}
-        </div>
-      `;
-      container.appendChild(div);
-    });
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-// 11. Palantir Ontology Functions
-let ontologyChart = null;
-
-async function loadOntologySchema() {
-  try {
-    const res = await fetch('/api/v1/ontology/schema');
-    const data = await res.json();
-    
-    // Render Object Types
-    const objList = document.getElementById('ontology-objects-list');
-    objList.innerHTML = '';
-    (data.object_types || []).forEach(o => {
-      const d = document.createElement('div');
-      d.className = 'p-3 bg-slate-900 rounded border border-slate-800 text-xs space-y-1.5';
-      d.innerHTML = `
-        <div class="flex justify-between items-center">
-          <span class="font-bold text-sky-400 font-mono text-sm">${o.name}</span>
-          <span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">PK: ${o.primary_key}</span>
-        </div>
-        <div class="text-slate-400">${o.description || '业务实体对象'}</div>
-        <div class="text-[11px] text-slate-500 font-mono">属性: ${(o.properties||[]).join(', ')}</div>
-        ${o.available_actions.length > 0 ? `<div class="text-[11px] text-indigo-400 font-mono">⚡ 动作: ${o.available_actions.join(', ')}</div>` : ''}
-      `;
-      objList.appendChild(d);
-    });
-
-    // Render Actions List
-    const actRes = await fetch('/api/v1/ontology/actions');
-    const actData = await actRes.json();
-    const actList = document.getElementById('ontology-actions-list');
-    actList.innerHTML = '';
-    (actData.action_types || []).forEach(a => {
-      const d = document.createElement('div');
-      d.className = 'p-3 bg-slate-900 rounded border border-slate-800 text-xs space-y-1';
-      d.innerHTML = `
-        <div class="flex justify-between items-center">
-          <span class="font-bold text-emerald-400 font-mono">${a.name}</span>
-          <span class="px-2 py-0.5 rounded text-[10px] bg-emerald-950 text-emerald-300">${a.target_object_type}</span>
-        </div>
-        <div class="text-slate-400">${a.description || '业务闭环动作'}</div>
-        <div class="text-[11px] text-slate-500 font-mono">处理器: ${a.handler_type}</div>
-      `;
-      actList.appendChild(d);
-    });
-
-    // Render Ontology Graph
-    if (!ontologyChart) {
-      ontologyChart = echarts.init(document.getElementById('ontology-graph-container'));
-    }
-
-    const nodes = (data.object_types || []).map(o => ({
-      id: o.name,
-      name: `${o.name} (PK: ${o.primary_key})`,
-      symbolSize: 45,
-      itemStyle: { color: '#4CC8E0' }
-    }));
-
-    const links = (data.link_types || []).map(l => ({
-      source: l.source,
-      target: l.target,
-      label: { show: true, formatter: l.name, fontSize: 10 }
-    }));
-
-    const option = {
-      backgroundColor: 'transparent',
-      tooltip: {},
-      series: [
-        {
-          type: 'graph',
-          layout: 'force',
-          roam: true,
-          label: { show: true, color: '#C2C9D1', fontSize: 11 },
-          edgeSymbol: ['circle', 'arrow'],
-          edgeSymbolSize: [4, 8],
-          data: nodes,
-          links: links,
-          lineStyle: { color: '#4CC8E0', curveness: 0.2, width: 2 }
-        }
-      ]
-    };
-    ontologyChart.setOption(option);
-  } catch (e) {}
-}
-
-async function loadOntologyAudits() {
-  try {
-    const res = await fetch('/api/v1/ontology/audit');
-    const data = await res.json();
-    const list = document.getElementById('ontology-audit-list');
-    list.innerHTML = '';
-    (data.audits || []).forEach(a => {
-      const d = document.createElement('div');
-      d.className = 'p-2.5 bg-slate-900 rounded border border-slate-800 flex justify-between items-center text-[11px]';
-      d.innerHTML = `
-        <div>
-          <span class="text-indigo-400 font-bold">${a.action_name}</span> 
-          <span class="text-slate-400">-> [${a.target_object_type}#${a.target_instance_id}]</span>
-        </div>
-        <div class="flex items-center space-x-2">
-          <span class="px-2 py-0.5 rounded text-[10px] ${a.status === 'SUCCESS' ? 'bg-emerald-950 text-emerald-400' : 'bg-amber-950 text-amber-400'}">${a.status}</span>
-          <span class="text-slate-500">${a.executed_at}</span>
-        </div>
-      `;
-      list.appendChild(d);
-    });
-  } catch (e) {}
-}
-
-// 12. File Upload Handling (Excel / CSV)
-async function handleFileUpload(input) {
-  if (!input.files || input.files.length === 0) return;
-  const file = input.files[0];
-  const datasetName = document.getElementById('dataset-name-input').value.trim() || 'uploaded_dataset';
-  const statusBox = document.getElementById('file-upload-status');
-  statusBox.classList.remove('hidden');
-  statusBox.className = 'text-xs font-mono p-3 bg-slate-900 rounded border border-slate-800 text-sky-400';
-  statusBox.textContent = `⏳ 正在解析并加载文件 "${file.name}" (${(file.size / 1024 / 1024).toFixed(2)} MB)...`;
-
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('dataset_name', datasetName);
-  formData.append('session_id', 'default_session');
-
-  try {
-    const res = await fetch('/api/v1/import/file', {
-      method: 'POST',
-      body: formData
-    });
-    const data = await res.json();
-    if (data.status === 'success') {
-      statusBox.className = 'text-xs font-mono p-3 bg-slate-900 rounded border border-slate-800 text-emerald-400';
-      statusBox.innerHTML = `✅ <b>加载成功！</b> ${data.summary} <br>列名: [${data.columns.join(', ')}] <br>💡 已自动登记至 <b>Data Catalog</b>，可直接使用 EDA、归因或 SQL 沙箱进行分析！`;
-      loadCatalogTables();
-    } else {
-      statusBox.className = 'text-xs font-mono p-3 bg-slate-900 rounded border border-slate-800 text-rose-400';
-      statusBox.textContent = `❌ 上传失败: ${data.detail || '未知错误'}`;
-    }
-  } catch (err) {
-    statusBox.className = 'text-xs font-mono p-3 bg-slate-900 rounded border border-slate-800 text-rose-400';
-    statusBox.textContent = `❌ 网络异常: ${err.message}`;
-  }
+// ---- One-click end-to-end ----
+async function runFullPipeline() {
+  await ingestTraces();
+  await runTransform();
+  await loadModel();
+  await runFunnel();
+  await runQuality();
+  await runActivate();
+  showStage('analyze');
 }

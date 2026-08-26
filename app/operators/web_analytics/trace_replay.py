@@ -1,45 +1,49 @@
 import json
-from typing import Dict, Any, List, Optional
-from app.storage.event_store import get_event_store
+from typing import Any, Dict, List
 
-def get_trace_waterfall(trace_id: str) -> Dict[str, Any]:
-    """
-    Construct OpenTelemetry waterfall spans tree for a given trace_id.
-    """
-    store = get_event_store()
-    sql = """
-    SELECT 
-        span_id, trace_id, parent_span_id, name, service_name, 
-        status_code, duration_ms, start_time, attributes
-    FROM traces_spans
-    WHERE trace_id = ?
-    ORDER BY start_time ASC
-    """
-    spans = store.query(sql, [trace_id])
-    return {
-        "trace_id": trace_id,
-        "total_spans": len(spans),
-        "spans": spans
-    }
+from app.operators.web_analytics.session_source import resolve_table
 
-def get_session_action_replay(session_id: str) -> Dict[str, Any]:
+
+def get_trace_waterfall(session_id: str, table_name: str, trace_id: str) -> Dict[str, Any]:
+    """Reconstruct an OpenTelemetry span waterfall for a trace_id from a session table."""
+    con, tbl = resolve_table(session_id, table_name)
+    sql = f"""
+    SELECT
+        span_id, trace_id, parent_span_id,
+        event_name AS name, service_name,
+        COALESCE(status_code, 'OK') AS status_code,
+        COALESCE(duration_ms, 0.0) AS duration_ms,
+        created_at AS start_time,
+        properties AS attributes
+    FROM {tbl}
+    WHERE trace_id = ? AND span_id IS NOT NULL
+    ORDER BY timestamp_ms ASC, created_at ASC
     """
-    Reconstruct chronological user interaction breadcrumbs for session replay.
-    """
-    store = get_event_store()
-    sql = """
-    SELECT 
+    spans = con.execute(sql, [trace_id]).df().to_dict(orient="records")
+    return {"trace_id": trace_id, "total_spans": len(spans), "spans": spans}
+
+
+def get_session_action_replay(session_id: str, table_name: str, telemetry_session_id: str) -> Dict[str, Any]:
+    """Chronological breadcrumb timeline for one telemetry session from a session table."""
+    con, tbl = resolve_table(session_id, table_name)
+    sql = f"""
+    SELECT
         event_id, trace_id, event_type, event_name, page_path, page_url,
-        properties, breadcrumbs, created_at, timestamp_ms
-    FROM events
+        properties, created_at, timestamp_ms
+    FROM {tbl}
     WHERE session_id = ?
     ORDER BY timestamp_ms ASC
     """
-    events = store.query(sql, [session_id])
-    
+    events = con.execute(sql, [telemetry_session_id]).df().to_dict(orient="records")
+
     actions = []
     for ev in events:
-        props = json.loads(ev["properties"]) if isinstance(ev["properties"], str) else ev["properties"]
+        props = ev.get("properties")
+        if isinstance(props, str):
+            try:
+                props = json.loads(props)
+            except (ValueError, TypeError):
+                props = {}
         actions.append({
             "event_id": ev["event_id"],
             "event_type": ev["event_type"],
@@ -47,22 +51,21 @@ def get_session_action_replay(session_id: str) -> Dict[str, Any]:
             "page_path": ev["page_path"],
             "created_at": str(ev["created_at"]),
             "timestamp_ms": ev["timestamp_ms"],
-            "properties": props or {}
+            "properties": props or {},
         })
 
     return {
-        "session_id": session_id,
+        "session_id": telemetry_session_id,
         "action_count": len(actions),
-        "timeline": actions
+        "timeline": actions,
     }
 
-def list_recent_sessions(limit: int = 20) -> List[Dict[str, Any]]:
-    """
-    List recent active user sessions with event counts and error flags.
-    """
-    store = get_event_store()
-    sql = """
-    SELECT 
+
+def list_recent_sessions(session_id: str, table_name: str, limit: int = 20) -> List[Dict[str, Any]]:
+    """List recent telemetry sessions with event counts and error flags."""
+    con, tbl = resolve_table(session_id, table_name)
+    sql = f"""
+    SELECT
         session_id,
         user_id,
         min(created_at) as start_time,
@@ -71,9 +74,10 @@ def list_recent_sessions(limit: int = 20) -> List[Dict[str, Any]]:
         count(CASE WHEN event_type = 'error' THEN 1 END) as error_count,
         min(page_path) as entry_path,
         max(page_path) as exit_path
-    FROM events
+    FROM {tbl}
+    WHERE session_id IS NOT NULL
     GROUP BY session_id, user_id
     ORDER BY max(created_at) DESC
     LIMIT ?
     """
-    return store.query(sql, [limit])
+    return con.execute(sql, [limit]).df().to_dict(orient="records")

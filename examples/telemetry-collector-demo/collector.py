@@ -3,7 +3,7 @@ import time
 from fastapi import APIRouter, Request, HTTPException, Query
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
-from app.storage.event_store import get_event_store
+from event_store import get_event_store
 
 router = APIRouter(prefix="/api/v1/collect", tags=["Telemetry & Event Collector"])
 
