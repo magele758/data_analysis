@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, List
 
-from app.operators.web_analytics.session_source import resolve_table
+from app.operators.web_analytics.session_source import records, resolve_table
 
 
 def get_trace_waterfall(session_id: str, table_name: str, trace_id: str) -> Dict[str, Any]:
@@ -19,7 +19,7 @@ def get_trace_waterfall(session_id: str, table_name: str, trace_id: str) -> Dict
     WHERE trace_id = ? AND span_id IS NOT NULL
     ORDER BY timestamp_ms ASC, created_at ASC
     """
-    spans = con.execute(sql, [trace_id]).df().to_dict(orient="records")
+    spans = records(con.execute(sql, [trace_id]))
     return {"trace_id": trace_id, "total_spans": len(spans), "spans": spans}
 
 
@@ -34,7 +34,7 @@ def get_session_action_replay(session_id: str, table_name: str, telemetry_sessio
     WHERE session_id = ?
     ORDER BY timestamp_ms ASC
     """
-    events = con.execute(sql, [telemetry_session_id]).df().to_dict(orient="records")
+    events = records(con.execute(sql, [telemetry_session_id]))
 
     actions = []
     for ev in events:
@@ -80,4 +80,4 @@ def list_recent_sessions(session_id: str, table_name: str, limit: int = 20) -> L
     ORDER BY max(created_at) DESC
     LIMIT ?
     """
-    return con.execute(sql, [limit]).df().to_dict(orient="records")
+    return records(con.execute(sql, [limit]))

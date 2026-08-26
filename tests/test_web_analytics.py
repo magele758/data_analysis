@@ -97,6 +97,25 @@ def test_page_metrics_rest_endpoint():
     assert resp.json()["summary"]["total_events"] > 0
 
 
+def test_trace_waterfall_rest_is_json_safe():
+    # Sparse trace tables have all-NULL columns (e.g. service_name); pandas turns
+    # those into NaN, which must be sanitized or the JSON response 500s.
+    resp = client.get(f"/api/v1/analytics/trace/trace_100?session_id={WA_SESSION}&dataset_name={WA_TABLE}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_spans"] >= 4
+    assert body["spans"][0]["service_name"] is None
+
+
+def test_audience_export_rest_is_json_safe():
+    resp = client.post("/api/v1/retl/audience", json={
+        "session_id": WA_SESSION, "source_table": WA_TABLE,
+        "filter_sql": "event_type = 'custom'", "format_type": "json", "limit": 50,
+    })
+    assert resp.status_code == 200
+    assert resp.json()["total_audience_count"] > 0
+
+
 def test_dashboard_endpoint():
     resp = client.get("/dashboard")
     assert resp.status_code == 200

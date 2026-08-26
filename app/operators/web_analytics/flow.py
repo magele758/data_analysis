@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from app.operators.web_analytics.session_source import resolve_table
+from app.operators.web_analytics.session_source import records, resolve_table
 
 
 def calculate_user_flow(session_id: str, table_name: str, limit_paths: int = 15) -> Dict[str, Any]:
@@ -27,7 +27,7 @@ def calculate_user_flow(session_id: str, table_name: str, limit_paths: int = 15)
     LIMIT ?
     """
 
-    raw_flows = con.execute(sql, [limit_paths]).df().to_dict(orient="records")
+    raw_flows = records(con.execute(sql, [limit_paths]))
 
     nodes_set = set()
     links = []

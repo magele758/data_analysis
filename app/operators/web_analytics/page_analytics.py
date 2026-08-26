@@ -1,7 +1,7 @@
 import math
 from typing import Any, Dict
 
-from app.operators.web_analytics.session_source import resolve_table
+from app.operators.web_analytics.session_source import records, resolve_table
 
 
 def calculate_page_metrics(session_id: str, table_name: str, limit: int = 20) -> Dict[str, Any]:
@@ -22,7 +22,7 @@ def calculate_page_metrics(session_id: str, table_name: str, limit: int = 20) ->
     LIMIT ?
     """
 
-    rows = con.execute(sql, [limit]).df().to_dict(orient="records")
+    rows = records(con.execute(sql, [limit]))
     pages = []
     for r in rows:
         # avg() over a group with no valid dwell values yields NaN/Inf, neither of
@@ -47,7 +47,7 @@ def calculate_page_metrics(session_id: str, table_name: str, limit: int = 20) ->
         count(CASE WHEN event_type = 'error' THEN 1 END) as total_errors
     FROM {tbl}
     """
-    summary = con.execute(summary_sql).df().to_dict(orient="records")
+    summary = records(con.execute(summary_sql))
     sum_data = summary[0] if summary else {}
 
     return {

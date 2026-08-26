@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional
 import duckdb
 import json
 
+from app.engine.arrow_utils import ArrowUtils
 from app.engine.sql_guard import safe_columns, safe_predicate, safe_table_ref
 
 class AudienceExporter:
@@ -28,7 +29,7 @@ class AudienceExporter:
         if format_type.lower() == "csv":
             content = df.to_csv(index=False)
         else:
-            content = df.to_dict(orient="records")
+            content = ArrowUtils.df_to_records(df)
 
         return {
             "source_table": source_table,

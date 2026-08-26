@@ -8,6 +8,7 @@ session, so the DB-connector path and the trace path share one analysis engine.
 from typing import Any, Dict, List, Optional
 
 from app.cluster.session_manager import SessionManager
+from app.engine.arrow_utils import ArrowUtils
 from app.engine.sql_guard import safe_table_ref
 
 # created_at arrives as an ISO string from import; TRY_CAST tolerates the trailing
@@ -24,9 +25,6 @@ def resolve_table(session_id: str, table_name: str):
     return sess.get_duckdb_conn(), safe_table_ref(table_name)
 
 
-def query(session_id: str, table_name: str, sql: str, params: Optional[list] = None) -> List[Dict[str, Any]]:
-    """Run parameterized SQL against a session table, returning list-of-dicts."""
-    con, _ = resolve_table(session_id, table_name)
-    cur = con.execute(sql, params) if params else con.execute(sql)
-    df = cur.df()
-    return df.to_dict(orient="records")
+def records(cur) -> List[Dict[str, Any]]:
+    """DuckDB cursor -> JSON-safe list of dicts (NaN/Inf collapsed to None)."""
+    return ArrowUtils.df_to_records(cur.df())
