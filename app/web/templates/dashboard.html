@@ -175,10 +175,12 @@
       <div><h3 class="text-sm font-bold text-slate-200">04 分析 · Analyze <span class="text-slate-500 text-xs">BI / 统计 / 归因</span></h3>
         <p class="text-xs text-slate-400 mt-0.5">EDA 画像、OLAP、SPSS 检验、归因、挖掘；trace 也能跑漏斗 / span 瀑布——同一套算子。</p></div>
       <div class="flex gap-2 flex-wrap">
+        <button onclick="runInsights()" class="btn btn-p">🔮 一键洞察 (Insight Copilot)</button>
         <button onclick="runEDA()" class="btn btn-s">EDA 画像</button>
         <button onclick="runFunnel()" class="btn btn-s">转化漏斗 (trace)</button>
         <button onclick="runWaterfall()" class="btn btn-s">Trace 瀑布</button>
       </div>
+      <p class="text-[0.7rem] text-slate-500">Insight Copilot：编排异常/相关/集中/趋势等 Analysis Actions，产出结构化洞察 + 洞察图谱 + 数据叙事。</p>
       <pre id="out-analyze" class="out mono text-[0.7rem] text-slate-300 bg-slate-900 rounded p-3 min-h-[2.5rem]">—</pre>
     </section>
 
