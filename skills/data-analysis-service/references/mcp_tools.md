@@ -1,6 +1,7 @@
-# MCP Tools Specification (27 Registered Tools)
+# MCP Tools Specification (33 Registered Tools)
 
 Two ingestion paths land data in one session; all analytics run on session tables.
+Catalog / metrics / DAG / lineage are scoped per `session_id` (isolated across sessions).
 
 | Tool Name | Category | Key Parameters | Return Value |
 | :--- | :--- | :--- | :--- |
@@ -18,6 +19,12 @@ Two ingestion paths land data in one session; all analytics run on session table
 | `detect_automated_insights` | Insights | `session_id`, `dataset_name`, `metric`, `category_col`, `time_col` | `status`, `insights` |
 | `memory_olap_aggregation` | OLAP | `session_id`, `dataset_name`, `dimensions`, `metrics`, `agg_funcs`, `rollup` | `status`, `result` |
 | `duckdb_sql_sandbox` | Sandbox | `session_id`, `sql_query`, `limit` | `status`, `result` |
+| `correlation_analysis` | Analysis | `session_id`, `dataset_name`, `columns`, `method` | `correlation` (matrix, high_correlation_pairs) |
+| `pivot_table` | Analysis | `session_id`, `dataset_name`, `rows`, `columns`, `values`, `agg_func` | `pivot` (records, schema) |
+| `kmeans_clustering` | Mining | `session_id`, `dataset_name`, `feature_cols`, `n_clusters`, `auto_k_range` | `clustering` (optimal_k, silhouette) |
+| `rfm_segmentation` | Mining | `session_id`, `dataset_name`, `user_col`, `date_col`, `amount_col` | `rfm` (segments) |
+| `timeseries_forecast` | Mining | `session_id`, `dataset_name`, `time_col`, `value_col`, `horizon`, `model_type` | `forecast` |
+| `discover_insights` | Insight Copilot | `session_id`, `dataset_name`, `intent`, `target_metric`, `category_col`, `time_col` | `insight_report` (insights, insight_graph, narrative) |
 | `analyze_conversion_funnel` | Trace Analytics | `session_id`, `dataset_name`, `steps`, `date_from`, `date_to` | `total_steps`, `initial_users`, `overall_conversion_rate` |
 | `analyze_user_flow` | Trace Analytics | `session_id`, `dataset_name`, `limit_paths` | `nodes`, `links`, `total_transitions` |
 | `analyze_cohort_retention` | Trace Analytics | `session_id`, `dataset_name`, `days` | `cohorts`, `days_analyzed`, `retention_matrix` |
