@@ -24,6 +24,7 @@ from app.operators.insights.dominance import detect_dominance
 from app.operators.mining.clustering import run_kmeans_clustering, run_rfm_segmentation
 from app.operators.mining.timeseries import run_timeseries_forecast
 from app.operators.sandbox import run_duckdb_sql
+from app.copilot.insight_engine import discover_insights as _discover_insights
 from app.nlg.narrative_builder import NarrativeBuilder
 from app.schemas.charts import ChartSpecBuilder
 
@@ -72,7 +73,7 @@ def connect_and_load_db(
     meta = sess.register_dataset(dataset_name, arrow_table, {"conn_str": conn_str, "source": query_or_table})
     
     # Auto-register into Data Catalog
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=dataset_name,
@@ -219,6 +220,36 @@ def duckdb_sql_sandbox(session_id: str, sql_query: str, limit: int = 100) -> str
     res = run_duckdb_sql(session_id, sql_query, limit)
     return json.dumps({"status": "success", "result": res}, ensure_ascii=False)
 
+@mcp.tool(name="correlation_analysis", description="Compute a Pearson/Spearman correlation matrix and surface strongly-correlated column pairs.")
+def correlation_analysis(session_id: str, dataset_name: str, columns: Optional[List[str]] = None, method: str = "pearson") -> str:
+    res = run_correlation_analysis(session_id, dataset_name, columns, method)
+    return json.dumps({"status": "success", "correlation": res}, ensure_ascii=False)
+
+@mcp.tool(name="pivot_table", description="Build a multi-dimensional pivot table (rows x columns aggregated by a measure).")
+def pivot_table(session_id: str, dataset_name: str, rows: List[str], columns: str, values: str, agg_func: str = "SUM", filters: Optional[str] = None, limit: int = 100) -> str:
+    res = run_pivot_table(session_id, dataset_name, rows, columns, values, agg_func, filters, limit)
+    return json.dumps({"status": "success", "pivot": res}, ensure_ascii=False)
+
+@mcp.tool(name="kmeans_clustering", description="KMeans clustering with optional automatic k selection (silhouette) over feature columns.")
+def kmeans_clustering(session_id: str, dataset_name: str, feature_cols: List[str], n_clusters: Optional[int] = None, auto_k_range: Optional[List[int]] = None) -> str:
+    res = run_kmeans_clustering(session_id, dataset_name, feature_cols, n_clusters, auto_k_range or [2, 6])
+    return json.dumps({"status": "success", "clustering": res}, ensure_ascii=False)
+
+@mcp.tool(name="rfm_segmentation", description="RFM (Recency/Frequency/Monetary) customer value segmentation.")
+def rfm_segmentation(session_id: str, dataset_name: str, user_col: str, date_col: str, amount_col: str) -> str:
+    res = run_rfm_segmentation(session_id, dataset_name, user_col, date_col, amount_col)
+    return json.dumps({"status": "success", "rfm": res}, ensure_ascii=False)
+
+@mcp.tool(name="timeseries_forecast", description="Time-series forecast (ARIMA-family) for a value column over a horizon.")
+def timeseries_forecast(session_id: str, dataset_name: str, time_col: str, value_col: str, horizon: int = 12, model_type: str = "arima") -> str:
+    res = run_timeseries_forecast(session_id, dataset_name, time_col, value_col, horizon, model_type)
+    return json.dumps({"status": "success", "forecast": res}, ensure_ascii=False)
+
+@mcp.tool(name="discover_insights", description="Automated insight discovery: orchestrates Analysis Actions (anomaly/correlation/dominance/trend) over a dataset into ranked structured insights, an Insight Graph (relationships between findings), and a coherent data-story narrative. Optional 'intent' lightly biases which actions run; deeper NLU/agent reasoning is the caller's job.")
+def discover_insights(session_id: str, dataset_name: str, intent: Optional[str] = None, target_metric: Optional[str] = None, category_col: Optional[str] = None, time_col: Optional[str] = None, max_insights: int = 8) -> str:
+    res = _discover_insights(session_id, dataset_name, intent=intent, target_metric=target_metric, category_col=category_col, time_col=time_col, max_insights=max_insights)
+    return json.dumps({"status": "success", "insight_report": res}, ensure_ascii=False)
+
 # ---------------- Trace Ingestion (Path B) ----------------
 
 @mcp.tool(name="import_traces", description="Ingest trace/telemetry data (OTLP JSON, span JSON/NDJSON array, or CSV/Parquet) as a data source into an in-memory session table, so the full MDS pipeline (clean/model/EDA/OLAP/SPSS/funnel/waterfall/quality/reverse-ETL) can run on it — the same engine as the DB-connector path.")
@@ -234,7 +265,7 @@ def import_traces(
     meta = sess.register_dataset(dataset_name, arrow_table, {"source": source, "kind": "trace"})
 
     from app.catalog.meta_registry import get_meta_registry
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [_CM(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(_TA(
         dataset_name=dataset_name, display_name=dataset_name,
@@ -293,7 +324,7 @@ def query_semantic_metric(
     order_by: Optional[str] = None,
     limit: int = 100
 ) -> str:
-    store = get_semantic_store()
+    store = get_semantic_store(session_id)
     sql = store.compile_query(metric_names, dimensions, filters, order_by, limit)
     res = run_duckdb_sql(session_id, sql, limit=limit)
     return json.dumps({"status": "success", "compiled_sql": sql, "result": res}, ensure_ascii=False)
@@ -322,7 +353,7 @@ def run_dag_pipeline(session_id: str) -> str:
     if not sess:
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
-    pipe = get_pipeline_engine()
+    pipe = get_pipeline_engine(session_id)
     res = pipe.run_pipeline(con)
     return json.dumps({"status": "success", "pipeline_execution": res}, ensure_ascii=False)
 
@@ -470,7 +501,7 @@ def import_excel_or_csv(
     meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": file_path})
 
     # Register into Catalog
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=dataset_name,

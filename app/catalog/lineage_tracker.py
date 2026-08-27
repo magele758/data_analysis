@@ -109,5 +109,13 @@ class LineageTracker:
                 "affected_tables": list(visited)
             }
 
-def get_lineage_tracker() -> LineageTracker:
-    return LineageTracker.get_instance()
+_lineage_session_instances: Dict[str, "LineageTracker"] = {}
+
+
+def get_lineage_tracker(session_id: str = "_global") -> LineageTracker:
+    with LineageTracker._lock:
+        inst = _lineage_session_instances.get(session_id)
+        if inst is None:
+            inst = LineageTracker()
+            _lineage_session_instances[session_id] = inst
+        return inst

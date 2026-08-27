@@ -24,18 +24,6 @@ class Settings(BaseSettings):
     MAX_MEMORY_PER_SESSION_MB: int = 4096
     DUCKDB_MEMORY_LIMIT: str = "16GB"
     DUCKDB_THREADS: int = Field(default_factory=lambda: max(1, os.cpu_count() or 4))
-    
-    # Ray Cluster Settings
-    ENABLE_RAY: bool = False
-    RAY_ADDRESS: Optional[str] = None
-    
-    # Arrow Flight Server
-    FLIGHT_HOST: str = "0.0.0.0"
-    FLIGHT_PORT: int = 8815
-    
-    # CDC & Streaming Buffer
-    RING_BUFFER_CAPACITY: int = 100000
-    STREAM_BATCH_INTERVAL_MS: int = 500
 
     # ----------------- Security: API key auth -----------------
     # Comma-separated list of accepted keys. Parsed via api_key_list, not as a

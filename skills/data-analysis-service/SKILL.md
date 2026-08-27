@@ -29,11 +29,16 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 * **Data Cleaning**: Invoke `execute_data_cleaning` to deduplicate, fill missing values (mean/median/mode), and clip outliers.
 * **DAG Pipeline**: Register SQL models and call `run_dag_pipeline` for transactional dbt-like topological modeling.
 
-### 5. Analytics, Attribution & SPSS Testing
+### 5. Analytics, Attribution, Mining & SPSS Testing
 * **EDA Profiling**: Invoke `eda_profile` for semantic types, distribution stats, and data quality scores.
 * **Driver Attribution**: Invoke `driver_attribution_analysis` to drill down root-cause drivers with Shapley contributions.
 * **SPSS Testing & Regression**: Use `spss_hypothesis_test` and `spss_regression_analysis` for formal inference.
+* **Correlation / OLAP Pivot**: `correlation_analysis` (Pearson/Spearman matrix + strong pairs), `pivot_table` (rows × columns aggregation).
+* **Data Mining**: `kmeans_clustering` (auto-k), `rfm_segmentation` (customer value), `timeseries_forecast` (ARIMA-family).
 * **Trace & Web Analytics (on the imported trace table)**: Use `analyze_conversion_funnel`, `analyze_user_flow`, `analyze_cohort_retention`, `analyze_page_performance`, `inspect_trace_and_replay` — each takes `session_id` + `dataset_name` and runs on the session-resident trace/event table (not a separate store).
+
+### 5b. Insight Copilot (Automated Insight Discovery)
+* **Discover Insights**: Invoke `discover_insights` to orchestrate the operators above as *Analysis Actions* (anomaly/correlation/dominance/trend), returning ranked structured insights, an **Insight Graph** (relationships between findings), and a **data-story narrative**. An optional `intent` string lightly biases which actions run. This is the local-deterministic slice of the modern automated-insight paradigm (InsightPilot / DataSage style); deeper NLU intent parsing and multi-agent reasoning are the calling Agent's job.
 
 ### 6. Reverse ETL & Operational Activation
 * **Destination Sync**: Invoke `reverse_sync_destination` to stream sync analytical results back to PostgreSQL/MySQL/SQLite/Parquet.
@@ -44,7 +49,11 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 * **Quality Assertions**: Invoke `assert_data_quality` for declarative single-pass validations (nulls, uniqueness, ranges, row counts).
 * **Schema Drift**: Call `detect_table_schema_drift` to compare against baseline schema.
 
+## Notes
+
+- **Session isolation**: Data Catalog, semantic metrics, DAG models, and lineage are scoped per `session_id`. Distinct sessions never see each other's datasets/metrics/models; a DAG run only materializes its own session's models.
+
 ## Reference Documentation
 
-- [Operators Guide](references/operators.md) - Mathematical formulations and detailed parameter options for all 26 operators.
-- [MCP Tools Reference](references/mcp_tools.md) - Exact schema and payload definitions for all 26 MCP tools.
+- [Operators Guide](references/operators.md) - Mathematical formulations and detailed parameter options.
+- [MCP Tools Reference](references/mcp_tools.md) - Exact schema and payload definitions for all 33 MCP tools.

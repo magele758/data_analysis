@@ -22,6 +22,9 @@
 * **自动化数据清洗**：去重、空值智能填充（均值/中位数/众数/常数）、极值缩尾截断。
 * **事务性与分层并行 SQL DAG 编排**：基于 Kahn 拓扑排序算法，同层模型并发物化，采用影子表原子切换（Staging Swap）与失败自动回滚。
 
+### 4b. Insight Copilot（自动洞察发现编排层, `app/copilot/`）
+* **`discover_insights`**：把 EDA/异常/相关/集中/趋势等确定性算子当作 **Analysis Actions** 编排，产出 ①排序后的结构化洞察 ②**洞察图谱 (Insight Graph)** ——洞察间关系网络 ③**数据叙事 (data story)**。可选 `intent` 轻量偏置要跑的动作。这是新一代自动洞察范式（InsightPilot / DataSage 风格）中**可本地确定性实现**的部分；语义意图理解与多智能体推理交给调用方 Agent（符合"算法本地自研、LLM 高层编排"的边界）。
+
 ### 4. 专业数理统计、异动归因与自动化洞察
 * **SPSS 级假设检验**：独立/配对 t 检验（Levene 方差齐性与 Welch 校正）、单/双因素 ANOVA + Tukey HSD、卡方独立性检验。
 * **计量经济学回归**：OLS 多元回归全报告（$R^2$、F检验、VIF 多重共线性预警、Durbin-Watson 残差检验）。

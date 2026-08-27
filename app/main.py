@@ -38,6 +38,7 @@ from app.operators.insights.dominance import detect_dominance
 from app.operators.mining.clustering import run_kmeans_clustering, run_rfm_segmentation
 from app.operators.mining.timeseries import run_timeseries_forecast
 from app.operators.sandbox import run_duckdb_sql
+from app.copilot.insight_engine import discover_insights
 from app.nlg.narrative_builder import NarrativeBuilder
 from app.schemas.charts import ChartSpecBuilder
 
@@ -201,7 +202,7 @@ def connect_db(req: ConnectDBRequest):
     meta = sess.register_dataset(req.dataset_name, arrow_table, {"conn_str": req.conn_str, "source": req.query_or_table})
     
     # Auto-register into Data Catalog
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=req.dataset_name,
@@ -330,6 +331,78 @@ def api_sql(req: SQLSandboxRequest):
         metadata={"columns": res["columns"]}
     )
 
+# ----------------- Analysis operators (correlation / pivot / mining) -----------------
+
+@app.post("/api/v1/tools/correlation", response_model=AnalysisResponse)
+def api_correlation(req: CorrelationRequest):
+    res = run_correlation_analysis(req.session_id, req.dataset_name, req.columns, req.method)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"{req.method} correlation over {len(res['columns'])} columns; {len(res['high_correlation_pairs'])} strong pairs.",
+        statistics=res,
+    )
+
+@app.post("/api/v1/tools/pivot", response_model=AnalysisResponse)
+def api_pivot(req: PivotRequest):
+    res = run_pivot_table(req.session_id, req.dataset_name, req.rows, req.columns, req.values, req.agg_func, req.filters, req.limit)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text="Pivot table computed.",
+        data_preview=res.get("records"), statistics=res,
+    )
+
+@app.post("/api/v1/tools/clustering", response_model=AnalysisResponse)
+def api_clustering(req: ClusteringRequest):
+    res = run_kmeans_clustering(req.session_id, req.dataset_name, req.feature_cols, req.n_clusters, req.auto_k_range)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"KMeans clustering into {res.get('optimal_k', res.get('n_clusters', '?'))} clusters.",
+        statistics=res,
+    )
+
+class RFMRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    user_col: str
+    date_col: str
+    amount_col: str
+
+@app.post("/api/v1/tools/rfm", response_model=AnalysisResponse)
+def api_rfm(req: RFMRequest):
+    res = run_rfm_segmentation(req.session_id, req.dataset_name, req.user_col, req.date_col, req.amount_col)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text="RFM segmentation computed.", statistics=res,
+    )
+
+@app.post("/api/v1/tools/timeseries", response_model=AnalysisResponse)
+def api_timeseries(req: TimeSeriesRequest):
+    res = run_timeseries_forecast(req.session_id, req.dataset_name, req.time_col, req.value_col, req.horizon, req.model_type)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"{req.model_type} forecast for {req.horizon} periods.", statistics=res,
+    )
+
+# ----------------- Insight Copilot: automated insight discovery -----------------
+
+class InsightDiscoverRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    intent: Optional[str] = None
+    target_metric: Optional[str] = None
+    category_col: Optional[str] = None
+    time_col: Optional[str] = None
+    max_insights: int = 8
+
+@app.post("/api/v1/insights/discover")
+def api_discover_insights(req: InsightDiscoverRequest):
+    """Orchestrate Analysis Actions into structured insights + an Insight Graph + a data story."""
+    return discover_insights(
+        req.session_id, req.dataset_name, intent=req.intent,
+        target_metric=req.target_metric, category_col=req.category_col,
+        time_col=req.time_col, max_insights=req.max_insights,
+    )
+
 # ----------------- Trace / Web Analytics (on a session-resident table) -----------------
 # These run on an imported trace dataset inside an analytical session, the same
 # engine the DB-connector path uses. The DB path and the trace path thus share
@@ -373,28 +446,28 @@ def api_list_sessions(session_id: str, dataset_name: str, limit: int = 20):
 # ----------------- Modern Data Stack: Catalog & Lineage -----------------
 
 @app.get("/api/v1/catalog/tables")
-def api_list_catalog_tables(tag: Optional[str] = None, keyword: Optional[str] = None):
-    cat = get_meta_registry()
+def api_list_catalog_tables(tag: Optional[str] = None, keyword: Optional[str] = None, session_id: str = "_global"):
+    cat = get_meta_registry(session_id)
     return {"tables": cat.list_tables(tag=tag, keyword=keyword)}
 
 @app.post("/api/v1/catalog/tables")
-def api_register_catalog_table(asset: TableAsset):
-    cat = get_meta_registry()
+def api_register_catalog_table(asset: TableAsset, session_id: str = "_global"):
+    cat = get_meta_registry(session_id)
     return cat.register_table(asset)
 
 @app.get("/api/v1/catalog/lineage")
-def api_get_lineage():
-    lineage = get_lineage_tracker()
+def api_get_lineage(session_id: str = "_global"):
+    lineage = get_lineage_tracker(session_id)
     return lineage.get_lineage_graph()
 
 @app.get("/api/v1/catalog/metrics")
-def api_list_semantic_metrics():
-    store = get_semantic_store()
+def api_list_semantic_metrics(session_id: str = "_global"):
+    store = get_semantic_store(session_id)
     return {"metrics": store.list_metrics()}
 
 @app.post("/api/v1/catalog/metrics")
-def api_register_semantic_metric(metric: MetricDefinition):
-    store = get_semantic_store()
+def api_register_semantic_metric(metric: MetricDefinition, session_id: str = "_global"):
+    store = get_semantic_store(session_id)
     return store.register_metric(metric)
 
 class SemanticQueryRequest(BaseModel):
@@ -407,7 +480,7 @@ class SemanticQueryRequest(BaseModel):
 
 @app.post("/api/v1/catalog/metrics/query")
 def api_query_semantic_metrics(req: SemanticQueryRequest):
-    store = get_semantic_store()
+    store = get_semantic_store(req.session_id)
     sql = store.compile_query(req.metric_names, req.dimensions, req.filters, req.order_by, req.limit)
     res = run_duckdb_sql(req.session_id, sql, limit=req.limit)
     return {"compiled_sql": sql, "data": res["data"], "columns": res["columns"]}
@@ -433,13 +506,13 @@ def api_clean_table(req: CleanTableRequest):
     return res
 
 @app.post("/api/v1/transform/dag/models")
-def api_register_dag_model(model: DAGModel):
-    pipe = get_pipeline_engine()
+def api_register_dag_model(model: DAGModel, session_id: str = "_global"):
+    pipe = get_pipeline_engine(session_id)
     return pipe.register_model(model)
 
 @app.get("/api/v1/transform/dag/models")
-def api_list_dag_models():
-    pipe = get_pipeline_engine()
+def api_list_dag_models(session_id: str = "_global"):
+    pipe = get_pipeline_engine(session_id)
     return {"models": pipe.list_models(), "execution_order": pipe.get_execution_order() if pipe.list_models() else []}
 
 @app.post("/api/v1/transform/dag/run")
@@ -449,7 +522,7 @@ def api_run_dag_pipeline(session_id: str):
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
-    pipe = get_pipeline_engine()
+    pipe = get_pipeline_engine(session_id)
     return pipe.run_pipeline(con)
 
 # ----------------- Modern Data Stack: Reverse ETL & Activation -----------------
@@ -656,7 +729,7 @@ async def api_import_file(
     meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": target_path})
 
     # Register into Catalog
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=dataset_name,
@@ -705,7 +778,7 @@ def api_import_traces(req: TraceImportRequest):
 
     meta = sess.register_dataset(req.dataset_name, arrow_table, {"source": req.source or "inline", "kind": "trace"})
 
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=req.dataset_name,
