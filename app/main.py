@@ -330,6 +330,58 @@ def api_sql(req: SQLSandboxRequest):
         metadata={"columns": res["columns"]}
     )
 
+# ----------------- Analysis operators (correlation / pivot / mining) -----------------
+
+@app.post("/api/v1/tools/correlation", response_model=AnalysisResponse)
+def api_correlation(req: CorrelationRequest):
+    res = run_correlation_analysis(req.session_id, req.dataset_name, req.columns, req.method)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"{req.method} correlation over {len(res['columns'])} columns; {len(res['high_correlation_pairs'])} strong pairs.",
+        statistics=res,
+    )
+
+@app.post("/api/v1/tools/pivot", response_model=AnalysisResponse)
+def api_pivot(req: PivotRequest):
+    res = run_pivot_table(req.session_id, req.dataset_name, req.rows, req.columns, req.values, req.agg_func, req.filters, req.limit)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text="Pivot table computed.",
+        data_preview=res.get("records"), statistics=res,
+    )
+
+@app.post("/api/v1/tools/clustering", response_model=AnalysisResponse)
+def api_clustering(req: ClusteringRequest):
+    res = run_kmeans_clustering(req.session_id, req.dataset_name, req.feature_cols, req.n_clusters, req.auto_k_range)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"KMeans clustering into {res.get('optimal_k', res.get('n_clusters', '?'))} clusters.",
+        statistics=res,
+    )
+
+class RFMRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    user_col: str
+    date_col: str
+    amount_col: str
+
+@app.post("/api/v1/tools/rfm", response_model=AnalysisResponse)
+def api_rfm(req: RFMRequest):
+    res = run_rfm_segmentation(req.session_id, req.dataset_name, req.user_col, req.date_col, req.amount_col)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text="RFM segmentation computed.", statistics=res,
+    )
+
+@app.post("/api/v1/tools/timeseries", response_model=AnalysisResponse)
+def api_timeseries(req: TimeSeriesRequest):
+    res = run_timeseries_forecast(req.session_id, req.dataset_name, req.time_col, req.value_col, req.horizon, req.model_type)
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"{req.model_type} forecast for {req.horizon} periods.", statistics=res,
+    )
+
 # ----------------- Trace / Web Analytics (on a session-resident table) -----------------
 # These run on an imported trace dataset inside an analytical session, the same
 # engine the DB-connector path uses. The DB path and the trace path thus share
