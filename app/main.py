@@ -38,6 +38,7 @@ from app.operators.insights.dominance import detect_dominance
 from app.operators.mining.clustering import run_kmeans_clustering, run_rfm_segmentation
 from app.operators.mining.timeseries import run_timeseries_forecast
 from app.operators.sandbox import run_duckdb_sql
+from app.copilot.insight_engine import discover_insights
 from app.nlg.narrative_builder import NarrativeBuilder
 from app.schemas.charts import ChartSpecBuilder
 
@@ -380,6 +381,26 @@ def api_timeseries(req: TimeSeriesRequest):
     return AnalysisResponse(
         status="success", session_id=req.session_id,
         summary_text=f"{req.model_type} forecast for {req.horizon} periods.", statistics=res,
+    )
+
+# ----------------- Insight Copilot: automated insight discovery -----------------
+
+class InsightDiscoverRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    intent: Optional[str] = None
+    target_metric: Optional[str] = None
+    category_col: Optional[str] = None
+    time_col: Optional[str] = None
+    max_insights: int = 8
+
+@app.post("/api/v1/insights/discover")
+def api_discover_insights(req: InsightDiscoverRequest):
+    """Orchestrate Analysis Actions into structured insights + an Insight Graph + a data story."""
+    return discover_insights(
+        req.session_id, req.dataset_name, intent=req.intent,
+        target_metric=req.target_metric, category_col=req.category_col,
+        time_col=req.time_col, max_insights=req.max_insights,
     )
 
 # ----------------- Trace / Web Analytics (on a session-resident table) -----------------

@@ -254,6 +254,22 @@ async function runWaterfall() {
     markDone('analyze'); setOut('out-analyze', `✔ Trace t1 span 瀑布 (${r.total_spans} spans):\n` + pretty(r.spans));
   } catch (e) { setOut('out-analyze', '瀑布: ' + e.message, false); }
 }
+async function runInsights() {
+  try { await ensureIngested();
+    setOut('out-analyze', '⏳ Insight Copilot 编排分析中…');
+    const r = await api('POST', '/api/v1/insights/discover', { session_id: SESSION_ID, dataset_name: ds() });
+    markDone('analyze');
+    const nar = r.narrative || {};
+    const lines = [
+      `✔ Insight Copilot（${r.total_insights} 条洞察，图谱 ${r.insight_graph.nodes.length} 节点/${r.insight_graph.edges.length} 关系）`,
+      '', nar.headline || '', ...(nar.sections || []),
+      '', '洞察清单:',
+      ...r.insights.map(i => `  · [${i.type}] ${i.title} (severity ${i.severity})`),
+      '', '建议: ' + (nar.recommendation || '—'),
+    ];
+    setOut('out-analyze', lines.join('\n'));
+  } catch (e) { setOut('out-analyze', 'Insight Copilot: ' + e.message, false); }
+}
 
 // ---------- 05 Quality ----------
 async function runQuality() {

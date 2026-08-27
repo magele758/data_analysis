@@ -24,6 +24,7 @@ from app.operators.insights.dominance import detect_dominance
 from app.operators.mining.clustering import run_kmeans_clustering, run_rfm_segmentation
 from app.operators.mining.timeseries import run_timeseries_forecast
 from app.operators.sandbox import run_duckdb_sql
+from app.copilot.insight_engine import discover_insights as _discover_insights
 from app.nlg.narrative_builder import NarrativeBuilder
 from app.schemas.charts import ChartSpecBuilder
 
@@ -243,6 +244,11 @@ def rfm_segmentation(session_id: str, dataset_name: str, user_col: str, date_col
 def timeseries_forecast(session_id: str, dataset_name: str, time_col: str, value_col: str, horizon: int = 12, model_type: str = "arima") -> str:
     res = run_timeseries_forecast(session_id, dataset_name, time_col, value_col, horizon, model_type)
     return json.dumps({"status": "success", "forecast": res}, ensure_ascii=False)
+
+@mcp.tool(name="discover_insights", description="Automated insight discovery: orchestrates Analysis Actions (anomaly/correlation/dominance/trend) over a dataset into ranked structured insights, an Insight Graph (relationships between findings), and a coherent data-story narrative. Optional 'intent' lightly biases which actions run; deeper NLU/agent reasoning is the caller's job.")
+def discover_insights(session_id: str, dataset_name: str, intent: Optional[str] = None, target_metric: Optional[str] = None, category_col: Optional[str] = None, time_col: Optional[str] = None, max_insights: int = 8) -> str:
+    res = _discover_insights(session_id, dataset_name, intent=intent, target_metric=target_metric, category_col=category_col, time_col=time_col, max_insights=max_insights)
+    return json.dumps({"status": "success", "insight_report": res}, ensure_ascii=False)
 
 # ---------------- Trace Ingestion (Path B) ----------------
 
