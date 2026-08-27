@@ -219,6 +219,31 @@ def duckdb_sql_sandbox(session_id: str, sql_query: str, limit: int = 100) -> str
     res = run_duckdb_sql(session_id, sql_query, limit)
     return json.dumps({"status": "success", "result": res}, ensure_ascii=False)
 
+@mcp.tool(name="correlation_analysis", description="Compute a Pearson/Spearman correlation matrix and surface strongly-correlated column pairs.")
+def correlation_analysis(session_id: str, dataset_name: str, columns: Optional[List[str]] = None, method: str = "pearson") -> str:
+    res = run_correlation_analysis(session_id, dataset_name, columns, method)
+    return json.dumps({"status": "success", "correlation": res}, ensure_ascii=False)
+
+@mcp.tool(name="pivot_table", description="Build a multi-dimensional pivot table (rows x columns aggregated by a measure).")
+def pivot_table(session_id: str, dataset_name: str, rows: List[str], columns: str, values: str, agg_func: str = "SUM", filters: Optional[str] = None, limit: int = 100) -> str:
+    res = run_pivot_table(session_id, dataset_name, rows, columns, values, agg_func, filters, limit)
+    return json.dumps({"status": "success", "pivot": res}, ensure_ascii=False)
+
+@mcp.tool(name="kmeans_clustering", description="KMeans clustering with optional automatic k selection (silhouette) over feature columns.")
+def kmeans_clustering(session_id: str, dataset_name: str, feature_cols: List[str], n_clusters: Optional[int] = None, auto_k_range: Optional[List[int]] = None) -> str:
+    res = run_kmeans_clustering(session_id, dataset_name, feature_cols, n_clusters, auto_k_range or [2, 6])
+    return json.dumps({"status": "success", "clustering": res}, ensure_ascii=False)
+
+@mcp.tool(name="rfm_segmentation", description="RFM (Recency/Frequency/Monetary) customer value segmentation.")
+def rfm_segmentation(session_id: str, dataset_name: str, user_col: str, date_col: str, amount_col: str) -> str:
+    res = run_rfm_segmentation(session_id, dataset_name, user_col, date_col, amount_col)
+    return json.dumps({"status": "success", "rfm": res}, ensure_ascii=False)
+
+@mcp.tool(name="timeseries_forecast", description="Time-series forecast (ARIMA-family) for a value column over a horizon.")
+def timeseries_forecast(session_id: str, dataset_name: str, time_col: str, value_col: str, horizon: int = 12, model_type: str = "arima") -> str:
+    res = run_timeseries_forecast(session_id, dataset_name, time_col, value_col, horizon, model_type)
+    return json.dumps({"status": "success", "forecast": res}, ensure_ascii=False)
+
 # ---------------- Trace Ingestion (Path B) ----------------
 
 @mcp.tool(name="import_traces", description="Ingest trace/telemetry data (OTLP JSON, span JSON/NDJSON array, or CSV/Parquet) as a data source into an in-memory session table, so the full MDS pipeline (clean/model/EDA/OLAP/SPSS/funnel/waterfall/quality/reverse-ETL) can run on it — the same engine as the DB-connector path.")
