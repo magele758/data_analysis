@@ -166,7 +166,7 @@ async function ingestTraces() {
 // ---------- 03 Data Catalog ----------
 async function loadCatalog() {
   try {
-    const data = await api('GET', '/api/v1/catalog/tables');
+    const data = await api('GET', `/api/v1/catalog/tables?session_id=${SESSION_ID}`);
     const rows = (data.tables || []).map(t =>
       `<tr><td class="mono text-indigo-400">${esc(t.dataset_name)}</td><td>${t.row_count ?? '?'}</td><td>${t.column_count ?? '?'}</td><td class="text-slate-500">${esc((t.tags||[]).join(', '))}</td><td class="text-slate-500">${esc(t.description || '')}</td></tr>`).join('');
     const body = document.getElementById('catalog-tbody');
@@ -176,7 +176,7 @@ async function loadCatalog() {
 
 async function loadLineage() {
   try {
-    const g = await api('GET', '/api/v1/catalog/lineage');
+    const g = await api('GET', `/api/v1/catalog/lineage?session_id=${SESSION_ID}`);
     const el = document.getElementById('lineage-view');
     if (!g.nodes || !g.nodes.length) { el.textContent = '（暂无血缘；执行 DAG 或语义查询后生成）'; return; }
     const nodes = g.nodes.map(n => `<span class="inline-block px-2 py-0.5 rounded bg-slate-800 text-slate-300 mr-1 mb-1 mono">${esc(n.name)}</span>`).join('');
@@ -187,7 +187,7 @@ async function loadLineage() {
 
 async function loadMetrics() {
   try {
-    const data = await api('GET', '/api/v1/catalog/metrics');
+    const data = await api('GET', `/api/v1/catalog/metrics?session_id=${SESSION_ID}`);
     const el = document.getElementById('metrics-view');
     const items = (data.metrics || []).map(m =>
       `<div class="mono">${esc(m.name || m.metric_name)} <span class="text-slate-500">= ${esc(m.formula || m.aggregation_type || '')}</span> <span class="text-slate-600">(${esc(m.table_name||'')})</span></div>`).join('');
@@ -200,7 +200,7 @@ async function registerMetric() {
   const formula = document.getElementById('metric-formula').value.trim();
   if (!name || !formula) { alert('请填写指标名与公式'); return; }
   try {
-    await api('POST', '/api/v1/catalog/metrics', { name, formula, table_name: ds(), aggregation_type: 'CUSTOM' });
+    await api('POST', `/api/v1/catalog/metrics?session_id=${SESSION_ID}`, { name, formula, table_name: ds(), aggregation_type: 'CUSTOM' });
     markDone('model'); loadMetrics();
   } catch (e) { document.getElementById('metrics-view').textContent = '注册失败: ' + e.message; }
 }
@@ -220,7 +220,7 @@ async function registerDag() {
   const sql = document.getElementById('dag-sql').value.trim();
   if (!name || !sql) { setOut('out-dag', '✘ 请填写模型名与 SQL', false); return; }
   try {
-    await api('POST', '/api/v1/transform/dag/models', { name, sql, materialization: 'table' });
+    await api('POST', `/api/v1/transform/dag/models?session_id=${SESSION_ID}`, { name, sql, materialization: 'table' });
     setOut('out-dag', `✔ 已注册模型 '${name}'。点“物化执行 DAG”运行。`);
   } catch (e) { setOut('out-dag', '注册失败: ' + e.message, false); }
 }

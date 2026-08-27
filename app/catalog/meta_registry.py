@@ -27,36 +27,48 @@ class TableAsset(BaseModel):
     updated_at: str = Field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
 
 class MetaRegistry:
+    """Data Catalog registry. The default ("_global") namespace is DB-backed and
+    shared; a per-session namespace keeps assets in-memory and isolated so
+    multiple tenants/sessions do not see each other's datasets."""
+
     _instance = None
     _lock = threading.RLock()
+    _session_instances: Dict[str, "MetaRegistry"] = {}
 
-    def __init__(self):
-        self.db = MetadataDB.get_instance()
+    def __init__(self, persistent: bool = True):
+        self.persistent = persistent
+        self.db = MetadataDB.get_instance() if persistent else None
+        self._assets: Dict[str, TableAsset] = {}
 
     @classmethod
     def get_instance(cls) -> "MetaRegistry":
         with cls._lock:
             if cls._instance is None:
-                cls._instance = cls()
+                cls._instance = cls(persistent=True)
             return cls._instance
 
     def register_table(self, asset: TableAsset) -> TableAsset:
         with self._lock:
             asset.updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            self.db.save_table_asset(asset.model_dump())
+            if self.persistent:
+                self.db.save_table_asset(asset.model_dump())
+            else:
+                self._assets[asset.dataset_name] = asset
             return asset
 
     def get_table(self, dataset_name: str) -> Optional[TableAsset]:
         with self._lock:
-            data = self.db.get_table_asset(dataset_name)
-            if not data:
-                return None
-            return TableAsset(**data)
+            if self.persistent:
+                data = self.db.get_table_asset(dataset_name)
+                return TableAsset(**data) if data else None
+            return self._assets.get(dataset_name)
 
     def list_tables(self, tag: Optional[str] = None, keyword: Optional[str] = None) -> List[TableAsset]:
         with self._lock:
-            raw_list = self.db.list_table_assets()
-            assets = [TableAsset(**d) for d in raw_list]
+            if self.persistent:
+                assets = [TableAsset(**d) for d in self.db.list_table_assets()]
+            else:
+                assets = list(self._assets.values())
             if tag:
                 assets = [a for a in assets if tag in a.tags]
             if keyword:
@@ -66,8 +78,14 @@ class MetaRegistry:
 
     def delete_table(self, dataset_name: str) -> bool:
         with self._lock:
-            # Persistent delete if needed
+            if not self.persistent:
+                self._assets.pop(dataset_name, None)
             return True
 
-def get_meta_registry() -> MetaRegistry:
-    return MetaRegistry.get_instance()
+def get_meta_registry(session_id: str = "_global") -> MetaRegistry:
+    with MetaRegistry._lock:
+        inst = MetaRegistry._session_instances.get(session_id)
+        if inst is None:
+            inst = MetaRegistry(persistent=(session_id == "_global"))
+            MetaRegistry._session_instances[session_id] = inst
+        return inst

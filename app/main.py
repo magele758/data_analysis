@@ -202,7 +202,7 @@ def connect_db(req: ConnectDBRequest):
     meta = sess.register_dataset(req.dataset_name, arrow_table, {"conn_str": req.conn_str, "source": req.query_or_table})
     
     # Auto-register into Data Catalog
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=req.dataset_name,
@@ -446,28 +446,28 @@ def api_list_sessions(session_id: str, dataset_name: str, limit: int = 20):
 # ----------------- Modern Data Stack: Catalog & Lineage -----------------
 
 @app.get("/api/v1/catalog/tables")
-def api_list_catalog_tables(tag: Optional[str] = None, keyword: Optional[str] = None):
-    cat = get_meta_registry()
+def api_list_catalog_tables(tag: Optional[str] = None, keyword: Optional[str] = None, session_id: str = "_global"):
+    cat = get_meta_registry(session_id)
     return {"tables": cat.list_tables(tag=tag, keyword=keyword)}
 
 @app.post("/api/v1/catalog/tables")
-def api_register_catalog_table(asset: TableAsset):
-    cat = get_meta_registry()
+def api_register_catalog_table(asset: TableAsset, session_id: str = "_global"):
+    cat = get_meta_registry(session_id)
     return cat.register_table(asset)
 
 @app.get("/api/v1/catalog/lineage")
-def api_get_lineage():
-    lineage = get_lineage_tracker()
+def api_get_lineage(session_id: str = "_global"):
+    lineage = get_lineage_tracker(session_id)
     return lineage.get_lineage_graph()
 
 @app.get("/api/v1/catalog/metrics")
-def api_list_semantic_metrics():
-    store = get_semantic_store()
+def api_list_semantic_metrics(session_id: str = "_global"):
+    store = get_semantic_store(session_id)
     return {"metrics": store.list_metrics()}
 
 @app.post("/api/v1/catalog/metrics")
-def api_register_semantic_metric(metric: MetricDefinition):
-    store = get_semantic_store()
+def api_register_semantic_metric(metric: MetricDefinition, session_id: str = "_global"):
+    store = get_semantic_store(session_id)
     return store.register_metric(metric)
 
 class SemanticQueryRequest(BaseModel):
@@ -480,7 +480,7 @@ class SemanticQueryRequest(BaseModel):
 
 @app.post("/api/v1/catalog/metrics/query")
 def api_query_semantic_metrics(req: SemanticQueryRequest):
-    store = get_semantic_store()
+    store = get_semantic_store(req.session_id)
     sql = store.compile_query(req.metric_names, req.dimensions, req.filters, req.order_by, req.limit)
     res = run_duckdb_sql(req.session_id, sql, limit=req.limit)
     return {"compiled_sql": sql, "data": res["data"], "columns": res["columns"]}
@@ -506,13 +506,13 @@ def api_clean_table(req: CleanTableRequest):
     return res
 
 @app.post("/api/v1/transform/dag/models")
-def api_register_dag_model(model: DAGModel):
-    pipe = get_pipeline_engine()
+def api_register_dag_model(model: DAGModel, session_id: str = "_global"):
+    pipe = get_pipeline_engine(session_id)
     return pipe.register_model(model)
 
 @app.get("/api/v1/transform/dag/models")
-def api_list_dag_models():
-    pipe = get_pipeline_engine()
+def api_list_dag_models(session_id: str = "_global"):
+    pipe = get_pipeline_engine(session_id)
     return {"models": pipe.list_models(), "execution_order": pipe.get_execution_order() if pipe.list_models() else []}
 
 @app.post("/api/v1/transform/dag/run")
@@ -522,7 +522,7 @@ def api_run_dag_pipeline(session_id: str):
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
-    pipe = get_pipeline_engine()
+    pipe = get_pipeline_engine(session_id)
     return pipe.run_pipeline(con)
 
 # ----------------- Modern Data Stack: Reverse ETL & Activation -----------------
@@ -729,7 +729,7 @@ async def api_import_file(
     meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": target_path})
 
     # Register into Catalog
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=dataset_name,
@@ -778,7 +778,7 @@ def api_import_traces(req: TraceImportRequest):
 
     meta = sess.register_dataset(req.dataset_name, arrow_table, {"source": req.source or "inline", "kind": "trace"})
 
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=req.dataset_name,

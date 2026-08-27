@@ -73,7 +73,7 @@ def connect_and_load_db(
     meta = sess.register_dataset(dataset_name, arrow_table, {"conn_str": conn_str, "source": query_or_table})
     
     # Auto-register into Data Catalog
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=dataset_name,
@@ -265,7 +265,7 @@ def import_traces(
     meta = sess.register_dataset(dataset_name, arrow_table, {"source": source, "kind": "trace"})
 
     from app.catalog.meta_registry import get_meta_registry
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [_CM(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(_TA(
         dataset_name=dataset_name, display_name=dataset_name,
@@ -324,7 +324,7 @@ def query_semantic_metric(
     order_by: Optional[str] = None,
     limit: int = 100
 ) -> str:
-    store = get_semantic_store()
+    store = get_semantic_store(session_id)
     sql = store.compile_query(metric_names, dimensions, filters, order_by, limit)
     res = run_duckdb_sql(session_id, sql, limit=limit)
     return json.dumps({"status": "success", "compiled_sql": sql, "result": res}, ensure_ascii=False)
@@ -353,7 +353,7 @@ def run_dag_pipeline(session_id: str) -> str:
     if not sess:
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
-    pipe = get_pipeline_engine()
+    pipe = get_pipeline_engine(session_id)
     res = pipe.run_pipeline(con)
     return json.dumps({"status": "success", "pipeline_execution": res}, ensure_ascii=False)
 
@@ -501,7 +501,7 @@ def import_excel_or_csv(
     meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": file_path})
 
     # Register into Catalog
-    cat = get_meta_registry()
+    cat = get_meta_registry(sess.session_id)
     cols = [ColumnMeta(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(TableAsset(
         dataset_name=dataset_name,
