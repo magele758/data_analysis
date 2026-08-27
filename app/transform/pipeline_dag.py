@@ -16,24 +16,33 @@ class DAGModel(BaseModel):
     description: Optional[str] = ""
 
 class PipelineDAG:
+    """dbt-style DAG engine. The default ("_global") namespace persists models to
+    the shared DB; per-session namespaces are in-memory and isolated so a
+    pipeline run only materializes that session's own models (never another
+    tenant's models against this session's connection)."""
+
     _instance = None
     _lock = threading.RLock()
+    _session_instances: Dict[str, "PipelineDAG"] = {}
 
-    def __init__(self):
+    def __init__(self, session_id: str = "_global", persistent: bool = True):
+        self.session_id = session_id
+        self.persistent = persistent
         self._models: Dict[str, DAGModel] = {}
-        self.db = MetadataDB.get_instance()
-        self._restore_from_db()
+        self.db = MetadataDB.get_instance() if persistent else None
+        if persistent:
+            self._restore_from_db()
 
     @classmethod
     def get_instance(cls) -> "PipelineDAG":
         with cls._lock:
             if cls._instance is None:
-                cls._instance = cls()
+                cls._instance = cls(persistent=True)
             return cls._instance
 
     def _restore_from_db(self):
         saved = self.db.list_dag_models()
-        lineage = get_lineage_tracker()
+        lineage = get_lineage_tracker(self.session_id)
         for d in saved:
             m = DAGModel(**d)
             self._models[m.name] = m
@@ -43,9 +52,10 @@ class PipelineDAG:
     def register_model(self, model: DAGModel) -> DAGModel:
         with self._lock:
             self._models[model.name] = model
-            self.db.save_dag_model(model.model_dump())
-            # Record in lineage tracker
-            lineage = get_lineage_tracker()
+            if self.persistent:
+                self.db.save_dag_model(model.model_dump())
+            # Record in this session's lineage tracker
+            lineage = get_lineage_tracker(self.session_id)
             for dep in model.depends_on:
                 lineage.record_dependency(dep, model.name)
             return model
@@ -167,5 +177,10 @@ class PipelineDAG:
             "results": all_results
         }
 
-def get_pipeline_engine() -> PipelineDAG:
-    return PipelineDAG.get_instance()
+def get_pipeline_engine(session_id: str = "_global") -> PipelineDAG:
+    with PipelineDAG._lock:
+        inst = PipelineDAG._session_instances.get(session_id)
+        if inst is None:
+            inst = PipelineDAG(session_id=session_id, persistent=(session_id == "_global"))
+            PipelineDAG._session_instances[session_id] = inst
+        return inst

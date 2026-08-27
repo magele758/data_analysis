@@ -16,35 +16,45 @@ class MetricDefinition(BaseModel):
     format: str = "number" # number, currency, percentage
 
 class SemanticMetricStore:
+    """Semantic metric layer. Default ("_global") namespace is DB-backed; per-session
+    namespaces are in-memory and isolated."""
+
     _instance = None
     _lock = threading.RLock()
+    _session_instances: Dict[str, "SemanticMetricStore"] = {}
 
-    def __init__(self):
-        self.db = MetadataDB.get_instance()
+    def __init__(self, persistent: bool = True):
+        self.persistent = persistent
+        self.db = MetadataDB.get_instance() if persistent else None
+        self._metrics: Dict[str, MetricDefinition] = {}
 
     @classmethod
     def get_instance(cls) -> "SemanticMetricStore":
         with cls._lock:
             if cls._instance is None:
-                cls._instance = cls()
+                cls._instance = cls(persistent=True)
             return cls._instance
 
     def register_metric(self, metric: MetricDefinition) -> MetricDefinition:
         with self._lock:
-            self.db.save_metric(metric.model_dump())
+            if self.persistent:
+                self.db.save_metric(metric.model_dump())
+            else:
+                self._metrics[metric.name] = metric
             return metric
 
     def get_metric(self, metric_name: str) -> Optional[MetricDefinition]:
         with self._lock:
-            data = self.db.get_metric(metric_name)
-            if not data:
-                return None
-            return MetricDefinition(**data)
+            if self.persistent:
+                data = self.db.get_metric(metric_name)
+                return MetricDefinition(**data) if data else None
+            return self._metrics.get(metric_name)
 
     def list_metrics(self) -> List[MetricDefinition]:
         with self._lock:
-            rows = self.db.list_metrics()
-            return [MetricDefinition(**r) for r in rows]
+            if self.persistent:
+                return [MetricDefinition(**r) for r in self.db.list_metrics()]
+            return list(self._metrics.values())
 
     def compile_query(
         self,
@@ -101,5 +111,10 @@ class SemanticMetricStore:
             sql += f" LIMIT {int(limit)}"
             return sql
 
-def get_semantic_store() -> SemanticMetricStore:
-    return SemanticMetricStore.get_instance()
+def get_semantic_store(session_id: str = "_global") -> SemanticMetricStore:
+    with SemanticMetricStore._lock:
+        inst = SemanticMetricStore._session_instances.get(session_id)
+        if inst is None:
+            inst = SemanticMetricStore(persistent=(session_id == "_global"))
+            SemanticMetricStore._session_instances[session_id] = inst
+        return inst
