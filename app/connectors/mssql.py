@@ -53,7 +53,8 @@ class MSSQLConnector(BaseConnector):
         select_cols: Optional[List[str]] = None,
         partition_col: Optional[str] = None,
         num_partitions: int = 1,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        mode: str = "materialize"  # no DuckDB mssql scanner; always ConnectorX
     ) -> pa.Table:
         cols_clause = safe_columns(select_cols) if select_cols else "*"
         if is_select(query_or_table):

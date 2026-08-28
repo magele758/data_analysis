@@ -2,6 +2,7 @@ from typing import List, Optional
 import pyarrow as pa
 import connectorx as cx
 from app.connectors.base import BaseConnector, TableSchema, ColumnInfo, is_select, safe_select
+from app.connectors.duckdb_scanner import fetch_via_scanner
 from app.engine.sql_guard import safe_columns, safe_ident, safe_predicate, safe_table_ref
 
 class MySQLConnector(BaseConnector):
@@ -48,7 +49,8 @@ class MySQLConnector(BaseConnector):
         select_cols: Optional[List[str]] = None,
         partition_col: Optional[str] = None,
         num_partitions: int = 1,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        mode: str = "materialize"
     ) -> pa.Table:
         cols_clause = safe_columns(select_cols) if select_cols else "*"
         if is_select(query_or_table):
@@ -61,6 +63,10 @@ class MySQLConnector(BaseConnector):
 
         if limit:
             base_sql += f" LIMIT {int(limit)}"
+
+        # scanner mode: DuckDB ATTACHes the MySQL DB and reads with pushdown.
+        if mode == "scanner":
+            return fetch_via_scanner("mysql", self.conn_str, base_sql)
 
         if partition_col and num_partitions > 1:
             return cx.read_sql(

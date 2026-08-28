@@ -3,6 +3,7 @@ import pyarrow as pa
 import connectorx as cx
 import duckdb
 from app.connectors.base import BaseConnector, TableSchema, ColumnInfo, is_select, safe_select
+from app.connectors.duckdb_scanner import fetch_via_scanner
 from app.engine.sql_guard import safe_columns, safe_ident, safe_predicate, safe_table_ref
 
 class PostgresConnector(BaseConnector):
@@ -58,7 +59,8 @@ class PostgresConnector(BaseConnector):
         select_cols: Optional[List[str]] = None,
         partition_col: Optional[str] = None,
         num_partitions: int = 1,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        mode: str = "materialize"
     ) -> pa.Table:
         # Construct query with predicate pushdown
         cols_clause = safe_columns(select_cols) if select_cols else "*"
@@ -72,6 +74,10 @@ class PostgresConnector(BaseConnector):
 
         if limit:
             base_sql += f" LIMIT {int(limit)}"
+
+        # scanner mode: DuckDB ATTACHes the Postgres DB and reads with pushdown.
+        if mode == "scanner":
+            return fetch_via_scanner("postgres", self.conn_str, base_sql)
 
         if partition_col and num_partitions > 1:
             return cx.read_sql(

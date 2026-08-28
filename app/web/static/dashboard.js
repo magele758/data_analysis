@@ -99,9 +99,10 @@ async function connectDb() {
   const query_or_table = document.getElementById('db-query').value.trim();
   const dataset_name = document.getElementById('db-ds').value.trim() || 'db_source';
   const limitRaw = document.getElementById('db-limit').value.trim();
+  const mode = (document.getElementById('db-mode') || {}).value || 'materialize';
   if (!conn_str || !query_or_table) { setOut('out-ingest', '✘ 请填写连接串与表名/查询', false); return; }
   try {
-    const body = { conn_str, query_or_table, dataset_name, session_id: SESSION_ID };
+    const body = { conn_str, query_or_table, dataset_name, session_id: SESSION_ID, mode };
     if (limitRaw) body.limit = parseInt(limitRaw, 10);
     const r = await api('POST', '/api/v1/connect', body);
     addSource(dataset_name, 'db'); setActive(dataset_name); markDone('ingest');

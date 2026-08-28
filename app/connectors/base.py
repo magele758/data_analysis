@@ -72,7 +72,14 @@ class BaseConnector(abc.ABC):
         select_cols: Optional[List[str]] = None,
         partition_col: Optional[str] = None,
         num_partitions: int = 1,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        mode: str = "materialize"
     ) -> pa.Table:
-        """Fetch records from source DB directly into PyArrow Table in parallel."""
+        """Fetch records from source DB into a PyArrow Table.
+
+        mode: "materialize" (default) pulls the result via the connector's client
+        (e.g. ConnectorX); "scanner" ATTACHes the source in DuckDB and reads it via
+        the native scanner with predicate pushdown. Connectors without a scanner
+        path treat any mode as materialize.
+        """
         pass

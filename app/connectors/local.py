@@ -61,7 +61,8 @@ class LocalFileConnector(BaseConnector):
         select_cols: Optional[List[str]] = None,
         partition_col: Optional[str] = None,
         num_partitions: int = 1,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        mode: str = "materialize"  # local files are read via DuckDB already; mode is a no-op
     ) -> pa.Table:
         path = self.conn_str.replace("file://", "").replace("sqlite://", "")
         

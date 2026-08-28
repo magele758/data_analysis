@@ -11,6 +11,7 @@ class ConnectDBRequest(BaseModel):
     partition_col: Optional[str] = Field(None, description="Column for parallel partition loading")
     num_partitions: int = Field(1, ge=1, le=32, description="Number of parallel partitions to load")
     limit: Optional[int] = Field(None, description="Limit rows to fetch")
+    mode: str = Field("materialize", description="'materialize' (ConnectorX, default) or 'scanner' (DuckDB ATTACH + pushdown, PG/MySQL)")
 
 class EDARequest(BaseModel):
     session_id: str

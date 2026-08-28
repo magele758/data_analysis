@@ -47,7 +47,7 @@ from app.observability.schema_drift import SchemaDrifter
 
 mcp = FastMCP("data-analysis-service")
 
-@mcp.tool(name="connect_and_load_db", description="Connect to PostgreSQL/MySQL/MSSQL/SQLite/File, load data into in-memory session with projection & predicate pushdown.")
+@mcp.tool(name="connect_and_load_db", description="Connect to PostgreSQL/MySQL/MSSQL/SQLite/File, load data into in-memory session with projection & predicate pushdown. mode='materialize' (ConnectorX, default) or 'scanner' (DuckDB ATTACH + pushdown, PG/MySQL).")
 def connect_and_load_db(
     conn_str: str,
     query_or_table: str,
@@ -57,7 +57,8 @@ def connect_and_load_db(
     filter_sql: Optional[str] = None,
     partition_col: Optional[str] = None,
     num_partitions: int = 1,
-    limit: Optional[int] = None
+    limit: Optional[int] = None,
+    mode: str = "materialize"
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_or_create_session(session_id)
@@ -68,7 +69,8 @@ def connect_and_load_db(
         select_cols=select_cols,
         partition_col=partition_col,
         num_partitions=num_partitions,
-        limit=limit
+        limit=limit,
+        mode=mode
     )
     meta = sess.register_dataset(dataset_name, arrow_table, {"conn_str": conn_str, "source": query_or_table})
     

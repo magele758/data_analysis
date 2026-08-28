@@ -10,7 +10,7 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 ## Quick Start Workflows
 
 ### 1. Two Ingestion Paths → One Analytical Session
-* **Path A — Database Connectors**: Call `connect_and_load_db` to connect to PostgreSQL/MySQL/MSSQL/SQLite/File with projection & predicate pushdown.
+* **Path A — Database Connectors**: Call `connect_and_load_db` to connect to PostgreSQL/MySQL/MSSQL/SQLite/File with projection & predicate pushdown. `mode="materialize"` (default, ConnectorX) or `mode="scanner"` (DuckDB ATTACH + pushdown for PG/MySQL).
 * **Path A — Big Excel / CSV**: Invoke `import_excel_or_csv` with `file_path`, `dataset_name`, optional `sheet_name` to stream-parse million-row files without OOM.
 * **Path B — Trace / Telemetry Import**: Invoke `import_traces` with `source` (OTLP JSON, span JSON/NDJSON array, or CSV/Parquet) and `dataset_name` to load trace spans/events as an ordinary session table. It is normalized to a canonical span/event schema so every downstream operator applies.
 * All paths land in the same in-memory DuckDB session (`session_id`), so DB data and trace data share one analysis engine.
