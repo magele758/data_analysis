@@ -43,6 +43,7 @@
 ### 7. 两条数据入口 → 一个分析引擎
 本服务是「**DB 连接器 + trace 两条路的数据分析服务**」，两条路都落进同一个内存 DuckDB 会话，共用全部管道算子：
 * **Path A · DB 连接器**：`connect_and_load_db` 接入 PostgreSQL/MySQL/MSSQL/SQLite/File，`import_excel_or_csv` 秒级导入大 Excel/CSV。
+  * 两种抽取模式：`mode="materialize"`（默认，ConnectorX 物化）或 `mode="scanner"`（DuckDB 原生 `ATTACH` + 谓词/投影下推，PG/MySQL），后者少一层依赖、可把过滤下推到源库。
 * **Path B · trace 导入**：`import_traces` 把 trace/遥测（OTLP JSON、span JSON/NDJSON、CSV/Parquet）作为**数据源**导入会话表，随后可对其运行 EDA/OLAP/SPSS/归因/漏斗/span 瀑布/质量断言/Reverse ETL —— 与 DB 路径同一套算子。
 * trace 数据在导入时被规整为统一的 span/event schema。**本服务不自己做埋点采集**，采集是可选示例（见 `examples/telemetry-collector-demo/`），通过 `import_traces` 把数据喂进来。
 
