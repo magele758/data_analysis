@@ -90,6 +90,10 @@
             <input id="db-ds" type="text" value="db_source_1" placeholder="数据集名" class="fld mono">
             <input id="db-limit" type="number" placeholder="limit" class="fld mono" style="width:5rem">
           </div>
+          <select id="db-mode" class="fld" title="抽取模式">
+            <option value="materialize">materialize（ConnectorX 物化，默认）</option>
+            <option value="scanner">scanner（DuckDB ATTACH 直查下推，PG/MySQL）</option>
+          </select>
           <button onclick="connectDb()" class="btn btn-p w-full">连接并载入</button>
         </div>
         <div class="subcard p-4 space-y-2">

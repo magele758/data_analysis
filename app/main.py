@@ -197,7 +197,8 @@ def connect_db(req: ConnectDBRequest):
         select_cols=req.select_cols,
         partition_col=req.partition_col,
         num_partitions=req.num_partitions,
-        limit=req.limit
+        limit=req.limit,
+        mode=req.mode
     )
     meta = sess.register_dataset(req.dataset_name, arrow_table, {"conn_str": req.conn_str, "source": req.query_or_table})
     
