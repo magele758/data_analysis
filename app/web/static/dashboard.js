@@ -53,7 +53,47 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.stage-pill').forEach(p =>
     p.addEventListener('click', () => showStage(p.dataset.stage)));
   showStage('ingest');
+  loadExamples();
 });
+
+// ---------- 行业示例 (Examples) ----------
+async function loadExamples() {
+  const list = document.getElementById('examples-list');
+  if (!list) return;
+  try {
+    const data = await api('GET', '/api/v1/examples');
+    list.innerHTML = (data.examples || []).map(e => `
+      <div class="subcard p-4 space-y-2">
+        <div class="text-xs font-semibold text-slate-200">${esc(e.name)} <span class="text-slate-500">· ${esc(e.domain)}</span></div>
+        <div class="text-[0.7rem] text-slate-500">${esc(e.description)}</div>
+        <button onclick="runExample('${esc(e.id)}', this)" class="btn btn-p w-full">▶ 运行该示例管道</button>
+      </div>`).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="text-rose-500 text-xs">加载示例失败：${esc(e.message)}</div>`;
+  }
+}
+
+async function runExample(id, btn) {
+  const status = document.getElementById('examples-status');
+  const out = document.getElementById('example-report');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 运行中…'; }
+  if (status) status.textContent = `运行 ${id} 管道中…`;
+  try {
+    const r = await api('POST', `/api/v1/examples/${id}/run`, { session_id: SESSION_ID });
+    // The example's dataset now lives in THIS session — make it explorable.
+    addSource(r.dataset_name, id === 'dota2' ? 'trace' : 'db');
+    setActive(r.dataset_name, { isTrace: id === 'dota2' });
+    ['ingest', 'analyze', 'model', 'quality'].forEach(markDone);
+    out.classList.remove('hidden');
+    out.innerHTML = window.marked ? window.marked.parse(r.report_markdown) : ('<pre class="out">' + esc(r.report_markdown) + '</pre>');
+    const ins = (r.insights && r.insights.total_insights) || 0;
+    if (status) status.textContent = `✔ ${r.name} 完成 · 数据集 '${r.dataset_name}' 已载入会话 · ${ins} 条洞察`;
+  } catch (e) {
+    if (status) status.textContent = '✘ ' + e.message;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '▶ 运行该示例管道'; }
+  }
+}
 
 function showStage(stage) {
   document.querySelectorAll('[data-stage-pane]').forEach(p => p.classList.add('hidden'));
