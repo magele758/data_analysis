@@ -130,8 +130,13 @@ def discover_insights(
             try:
                 r = detect_dominance(session_id, dataset_name, cat, m)
                 gini = r.get("gini_coefficient", 0)
+                n_cats = r.get("total_categories", 0)
                 share = r.get("top_k_concentration_share_pct", 0)
-                if gini >= 0.4 or share >= 60:
+                # Only a real concentration signal: high Gini, or a genuine top-K
+                # share that isn't just "K >= number of categories" (which is ~100%
+                # and always trivially true).
+                concentrated = gini >= 0.4 or (share >= 60 and n_cats > 5)
+                if concentrated:
                     insights.append(_mk(f"i{n}", "dominance",
                         f"{m} 在 {cat} 上高度集中 (Gini={gini})",
                         f"按「{cat}」看「{m}」头部集中：Gini={gini}，{r.get('pareto_80_rule_ratio')}。",

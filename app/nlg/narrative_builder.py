@@ -17,7 +17,7 @@ class NarrativeBuilder:
         
         measures = [k for k, v in cols.items() if v.get("semantic_type") == "MEASURE"]
         categoricals = [k for k, v in cols.items() if v.get("semantic_type") == "DIMENSION_CATEGORICAL"]
-        null_issues = [f"{k} ({v.get('null_percentage')}%% 缺失)" for k, v in cols.items() if v.get("null_percentage", 0) > 5]
+        null_issues = [f"{k} ({v.get('null_percentage')}% 缺失)" for k, v in cols.items() if v.get("null_percentage", 0) > 5]
 
         parts = [
             f"【数据资产画像】数据集共包含 {total_rows:,} 行、{total_cols} 列，综合数据质量评分为 {q_score}/100 分。",
@@ -39,7 +39,7 @@ class NarrativeBuilder:
         
         direction_word = "增长" if diff > 0 else "下滑"
         parts = [
-            f"【异动归因分析】目标指标 '{metric}' 整体发生波动：{direction_word} {abs(diff):,.2f} ({rate:+.2f}%%)。"
+            f"【异动归因分析】目标指标 '{metric}' 整体发生波动：{direction_word} {abs(diff):,.2f} ({rate:+.2f}%)。"
         ]
 
         for layer in hierarchy:
@@ -50,10 +50,10 @@ class NarrativeBuilder:
             layer_strs = []
             if diff < 0 and top_neg:
                 lead = top_neg[0]
-                layer_strs.append(f"主导负向拖累项为 '{lead['dimension_value']}' (变动 {lead['diff_value']:,.2f}, 贡献率 {lead['contribution_percentage']}%%)")
+                layer_strs.append(f"主导负向拖累项为 '{lead['dimension_value']}' (变动 {lead['diff_value']:,.2f}, 贡献率 {lead['contribution_percentage']}%)")
             elif diff > 0 and top_pos:
                 lead = top_pos[0]
-                layer_strs.append(f"主导正向拉动项为 '{lead['dimension_value']}' (变动 +{lead['diff_value']:,.2f}, 贡献率 {lead['contribution_percentage']}%%)")
+                layer_strs.append(f"主导正向拉动项为 '{lead['dimension_value']}' (变动 +{lead['diff_value']:,.2f}, 贡献率 {lead['contribution_percentage']}%)")
 
             if layer_strs:
                 parts.append(f"在维度 '{dim}' 层级：{'; '.join(layer_strs)}。")
