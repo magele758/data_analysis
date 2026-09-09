@@ -50,12 +50,3 @@
 
 - 洞察图谱：7 节点 / 7 关系
 - **建议**：优先关注「profit 与 sales Strong 相关 (r=0.8299)」（严重度 0.83），建议用 driver_attribution_analysis 对相关指标做因子级归因。
-
----
-### 附：Insight Copilot 结构化洞察 (Top)
-- `[correlation]` profit 与 sales Strong 相关 (r=0.8299) — severity 0.83
-- `[correlation]` quantity 与 cogs Strong 相关 (r=0.7289) — severity 0.729
-- `[correlation]` sales 与 cogs Strong 相关 (r=0.7031) — severity 0.703
-- `[anomaly]` 指标 discount 存在 10 个异常点 — severity 0.012
-- `[anomaly]` 指标 cogs 存在 10 个异常点 — severity 0.012
-- `[anomaly]` 指标 profit 存在 5 个异常点 — severity 0.006

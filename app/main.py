@@ -39,6 +39,7 @@ from app.operators.mining.clustering import run_kmeans_clustering, run_rfm_segme
 from app.operators.mining.timeseries import run_timeseries_forecast
 from app.operators.sandbox import run_duckdb_sql
 from app.copilot.insight_engine import discover_insights
+from app import examples as builtin_examples
 from app.nlg.narrative_builder import NarrativeBuilder
 from app.schemas.charts import ChartSpecBuilder
 
@@ -403,6 +404,26 @@ def api_discover_insights(req: InsightDiscoverRequest):
         target_metric=req.target_metric, category_col=req.category_col,
         time_col=req.time_col, max_insights=req.max_insights,
     )
+
+# ----------------- Built-in runnable examples (industry demos) -----------------
+
+@app.get("/api/v1/examples")
+def api_list_examples():
+    """List built-in end-to-end analysis examples runnable from the dashboard."""
+    return {"examples": builtin_examples.list_examples()}
+
+class RunExampleRequest(BaseModel):
+    session_id: Optional[str] = None
+
+@app.post("/api/v1/examples/{example_id}/run")
+def api_run_example(example_id: str, req: RunExampleRequest = RunExampleRequest()):
+    """Generate the example dataset into a session, run the full pipeline, and
+    return a structured result (incl. a Markdown report). The data lands in the
+    given session so the user can keep exploring it in the other stages."""
+    try:
+        return builtin_examples.run_example(example_id, session_id=req.session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 # ----------------- Trace / Web Analytics (on a session-resident table) -----------------
 # These run on an imported trace dataset inside an analytical session, the same

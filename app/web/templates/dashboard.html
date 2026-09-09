@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DATA/AGENT — 现代数据栈数据处理管道</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script>
     tailwind.config = { theme: { extend: { colors: {
       slate: { 950:'#0D0E11', 900:'#14161A', 850:'#1A1D22', 800:'#21252B', 700:'#2E333A', 600:'#3C424A', 500:'#565D67', 400:'#818892', 300:'#A6ADB6', 200:'#C9CFD6', 100:'#E9ECEF' },
@@ -31,6 +32,14 @@
     .btn-s { background:#21252B; color:#C9CFD6; }
     .btn-s:hover { background:#2E333A; }
     pre.out { white-space:pre-wrap; word-break:break-word; }
+    .markdown-body h1 { font-size:1.05rem; font-weight:700; margin:.6rem 0 .3rem; }
+    .markdown-body h2 { font-size:.9rem; font-weight:700; color:#A5B4FC; margin:.9rem 0 .3rem; }
+    .markdown-body table { width:100%; font-size:.72rem; border-collapse:collapse; margin:.4rem 0; }
+    .markdown-body th, .markdown-body td { border:1px solid rgba(255,255,255,.08); padding:.25rem .5rem; text-align:left; }
+    .markdown-body blockquote { color:#818892; border-left:2px solid #2E333A; padding-left:.6rem; margin:.4rem 0; }
+    .markdown-body ul { list-style:disc; padding-left:1.1rem; }
+    .markdown-body code { background:#0D0E11; padding:0 .25rem; border-radius:3px; }
+    .markdown-body strong { color:#E9ECEF; }
     table.tbl { width:100%; font-size:.72rem; }
     table.tbl th { text-align:left; color:#818892; font-weight:600; padding:.35rem .5rem; border-bottom:1px solid rgba(255,255,255,.08); }
     table.tbl td { padding:.35rem .5rem; border-bottom:1px solid rgba(255,255,255,.04); }
@@ -75,6 +84,19 @@
         </div>
         <button onclick="runFullPipeline()" class="btn btn-p whitespace-nowrap">▶ 用示例数据一键跑通</button>
       </div>
+    </section>
+
+    <!-- 行业示例 (Examples)：一键在网页里跑真实业务分析管道 -->
+    <section id="examples-card" class="card p-5 space-y-3">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h2 class="text-sm font-bold text-slate-200">🎯 行业示例 (Examples)</h2>
+          <p class="text-xs text-slate-400 mt-1">一键在网页里跑通完整分析管道并生成报告；数据会载入当前会话，可在各阶段继续探索。</p>
+        </div>
+        <span id="examples-status" class="text-[0.7rem] mono text-slate-500"></span>
+      </div>
+      <div id="examples-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+      <div id="example-report" class="markdown-body hidden border-t border-white/[0.06] pt-4 text-[0.8rem] text-slate-200 max-h-[560px] overflow-y-auto"></div>
     </section>
 
     <!-- 01 摄取：多数据源接入 -->

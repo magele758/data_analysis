@@ -14,7 +14,7 @@
 | Team Ghost | 34 | 11 | 32.4 | 33.4 |
 | Team Hydra | 41 | 13 | 31.7 | 40.9 |
 
-- 联赛平均对局时长中位数：**39.7 min**（作为节奏型/发育型分界）
+- 联赛对局时长中位数：**39.7 min**（节奏型/发育型分界）
 
 ## 2. 选手经验与数据（Top by GPM）
 | player_name | team | role | games | kda | gpm | xpm | lh | hero_pool_size | winrate |
@@ -33,7 +33,7 @@
 | Ech_Mid | Team Echo | Mid | 43 | 3.5 | 289.0 | 291.0 | 240.0 | 4 | 41.9 |
 
 ## 3. 战队招牌英雄（习惯）
-- **Team Bravo**：Spectre, Tidehunter, Axe
+- **Team Bravo**：Spectre, Tidehunter, Io
 - **Team Cobra**：Storm Spirit, Lina, Witch Doctor
 - **Team Alpha**：Crystal Maiden, Underlord, Invoker
 - **Team Delta**：Witch Doctor, Spectre, Faceless Void
@@ -55,11 +55,11 @@
 - **建议**：优先关注「gpm 与 xpm Very Strong 相关 (r=0.9895)」（严重度 0.99），建议用 driver_attribution_analysis 对相关指标做因子级归因。
 
 ## 7. 战术指导 (Tactical Guidance)
-- **Team Bravo**（胜率 78.9% · 均时长 42.9min）：后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。 优先 ban 其招牌英雄：Spectre, Tidehunter。
-- **Team Cobra**（胜率 59.0% · 均时长 32.7min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 其招牌英雄：Storm Spirit, Lina。
-- **Team Alpha**（胜率 57.9% · 均时长 34.2min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 其招牌英雄：Crystal Maiden, Underlord。
-- **Team Delta**（胜率 50.0% · 均时长 39.7min）：后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。 优先 ban 其招牌英雄：Witch Doctor, Spectre。
-- **核心威胁（经济）**：优先针对 gank/切入 → Alp_Car(Team Alpha/Carry, GPM 494.0)；Alp_Mid(Team Alpha/Mid, GPM 490.0)；Bra_Mid(Team Bravo/Mid, GPM 425.0)。
+- **Team Bravo**（胜率 78.9% · 均时长 42.9min）：后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。 优先 ban 招牌英雄：Spectre, Tidehunter。
+- **Team Cobra**（胜率 59.0% · 均时长 32.7min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 招牌英雄：Storm Spirit, Lina。
+- **Team Alpha**（胜率 57.9% · 均时长 34.2min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 招牌英雄：Crystal Maiden, Underlord。
+- **Team Delta**（胜率 50.0% · 均时长 39.7min）：后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。 优先 ban 招牌英雄：Witch Doctor, Spectre。
+- **核心威胁（经济）**：优先 gank/切入 → Alp_Car(Team Alpha/Carry, GPM 494.0)；Alp_Mid(Team Alpha/Mid, GPM 490.0)；Bra_Mid(Team Bravo/Mid, GPM 425.0)。
 - **核心威胁（KDA）**：Gho_Car(KDA 4.16)；Bra_Mid(KDA 3.75)；Del_Car(KDA 3.74)。
-- **可预测的窄英雄池选手**（针对性 ban/针对）：Hyd_Har（英雄池 2）；Del_Har（英雄池 2）；Ech_Sup（英雄池 2）；Hyd_Car（英雄池 2）；Alp_Sup（英雄池 2）。
+- **可预测的窄英雄池选手**（针对性 ban）：Hyd_Har（池 2）；Del_Har（池 2）；Ech_Sup（池 2）；Hyd_Car（池 2）；Alp_Sup（池 2）。
 
