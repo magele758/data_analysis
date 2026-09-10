@@ -2,12 +2,20 @@
 
 用本仓库的 **data-analysis-service** 分析 Dota 2 职业比赛数据：统计战队战绩、选手经验与习惯（英雄池、打法），并产出**数据报告 + 战术指导**。
 
-## 跑起来
+## 跑起来（默认使用真实 OpenDota 数据）
 
 ```bash
 cd examples/dota2-analysis
-python generate_sample_data.py     # 生成 data/*.csv（种子固定，可复现）
-python analyze_dota2.py            # 端到端分析 → report.md
+python fetch_opendota.py            # 抓真实数据(默认 Xtreme Gaming/XG) → real_data/*.csv
+python analyze_dota2.py             # 优先用 real_data 分析 → report.md
+```
+
+仓库已内置一份抓好的真实数据（`real_data/`，来自 OpenDota，含 XG 及其对手 Team Liquid/Team Spirit/LGD 等真实职业比赛），`analyze_dota2.py` 会优先使用它；网页看板的「行业示例」也直接跑这份真实数据。
+
+离线无网络时的后备（合成样本）：
+
+```bash
+python generate_sample_data.py     # 生成 data/*.csv（合成，仅离线后备）
 ```
 
 `analyze_dota2.py` 会把比赛/选手数据载入内存会话，然后：

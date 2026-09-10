@@ -5,6 +5,7 @@ OpenDota-shaped season, lands it in a session, and drives SQL/OLAP + correlation
 + KMeans clustering + Insight Copilot, then derives rule-based tactical guidance.
 """
 
+import os
 import random
 from typing import Any, Dict, List
 
@@ -18,8 +19,14 @@ from app.copilot import discover_insights
 
 EXAMPLE_ID = "dota2"
 NAME = "Dota2 战队与选手分析"
-DOMAIN = "Esports · Dota 2 (OpenDota)"
-DESCRIPTION = "战队战绩 · 选手经验与习惯 · KMeans 打法聚类 · Insight Copilot · 战术指导"
+DOMAIN = "Esports · Dota 2 (OpenDota, 真实数据)"
+DESCRIPTION = "真实 OpenDota 数据（Xtreme Gaming）· 战队战绩 · 选手习惯 · KMeans 聚类 · Insight Copilot · 战术指导"
+
+# Real data fetched from the OpenDota API (see examples/dota2-analysis/fetch_opendota.py),
+# bundled in the repo. run_in_memory loads this by default; the synthetic generator
+# below is only an offline fallback if the real CSVs are absent.
+REAL_DATA_DIR = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "..", "examples", "dota2-analysis", "real_data"))
 
 # Xtreme Gaming (XG) is a real top-tier team; included as the strongest sample
 # team so it stands out in the report. See README for pulling real XG data from
@@ -136,10 +143,26 @@ def analyze(session_id: str, con) -> Dict[str, Any]:
             "insights": insights, "report_markdown": report}
 
 
+def _load_real_tables(con) -> bool:
+    """Load the bundled real OpenDota CSVs into the session. Returns False if absent."""
+    if not os.path.exists(os.path.join(REAL_DATA_DIR, "player_matches.csv")):
+        return False
+    for tbl in ("matches", "player_matches", "teams"):
+        path = os.path.join(REAL_DATA_DIR, f"{tbl}.csv")
+        if not os.path.exists(path):
+            continue
+        df = pd.read_csv(path)
+        con.register(f"_src_{tbl}", df)
+        con.execute(f"CREATE OR REPLACE TABLE {tbl} AS SELECT * FROM _src_{tbl}")
+        con.unregister(f"_src_{tbl}")
+    return True
+
+
 def run_in_memory(session_id: str = None, seed: int = 7) -> Dict[str, Any]:
     sess = SessionManager().get_or_create_session(session_id)
     con = sess.get_duckdb_conn()
-    register_frames(con, generate_frames(seed))
+    if not _load_real_tables(con):  # offline fallback only
+        register_frames(con, generate_frames(seed))
     return analyze(sess.session_id, con)
 
 

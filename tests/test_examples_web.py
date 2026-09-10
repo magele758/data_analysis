@@ -26,8 +26,10 @@ def test_run_erp_example_in_memory():
 
 
 def test_run_dota2_example_in_memory():
+    # Uses REAL OpenDota data bundled in examples/dota2-analysis/real_data.
     r = examples.run_example("dota2", session_id="dota2_web_test")
-    assert r["teams"] == 9 and r["players"] == 45
+    assert r["teams"] >= 5 and r["players"] >= 20
+    assert "Xtreme Gaming" in r["report_markdown"]  # real XG data
     assert "战术指导" in r["report_markdown"]
     assert "ban" in r["report_markdown"].lower()
 
