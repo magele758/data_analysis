@@ -12,6 +12,8 @@ python analyze_dota2.py             # 优先用 real_data 分析 → report.md
 
 仓库已内置一份抓好的真实数据（`real_data/`，来自 OpenDota，含 XG 及其对手 Team Liquid/Team Spirit/LGD 等真实职业比赛），`analyze_dota2.py` 会优先使用它；网页看板的「行业示例」也直接跑这份真实数据。
 
+**数据获取日期**记录在 `real_data/_meta.json`（`fetched_at` 字段），并会打印在报告头部（当前快照：**2026-09-10 UTC**）。每次 `fetch_opendota.py` 重抓都会刷新该日期。
+
 离线无网络时的后备（合成样本）：
 
 ```bash

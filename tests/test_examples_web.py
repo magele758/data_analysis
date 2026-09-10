@@ -30,6 +30,8 @@ def test_run_dota2_example_in_memory():
     r = examples.run_example("dota2", session_id="dota2_web_test")
     assert r["teams"] >= 5 and r["players"] >= 20
     assert "Xtreme Gaming" in r["report_markdown"]  # real XG data
+    assert "数据获取日期" in r["report_markdown"]  # acquisition date is cited
+    assert r.get("data_note")
     assert "战术指导" in r["report_markdown"]
     assert "ban" in r["report_markdown"].lower()
 

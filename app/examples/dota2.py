@@ -109,7 +109,7 @@ def register_frames(con, frames):
         con.unregister(f"_src_{name}")
 
 
-def analyze(session_id: str, con) -> Dict[str, Any]:
+def analyze(session_id: str, con, data_note: str = None) -> Dict[str, Any]:
     def rows(sql):
         return run_duckdb_sql(session_id, sql, limit=200)["data"]
 
@@ -136,11 +136,30 @@ def analyze(session_id: str, con) -> Dict[str, Any]:
 
     med = sorted(t["avg_duration_min"] for t in team_stats)[len(team_stats) // 2]
     guidance = _tactics(team_stats, player_stats, hero_habits, med)
-    report = _report(team_stats, player_stats, hero_habits, corr, clustering, insights, guidance, med)
+    report = _report(team_stats, player_stats, hero_habits, corr, clustering, insights, guidance, med, data_note)
     return {"example_id": EXAMPLE_ID, "name": NAME, "domain": DOMAIN,
             "session_id": session_id, "dataset_name": "player_matches",
             "teams": len(team_stats), "players": len(player_stats),
-            "insights": insights, "report_markdown": report}
+            "data_note": data_note, "insights": insights, "report_markdown": report}
+
+
+def _read_meta(data_dir: str):
+    import json
+    path = os.path.join(data_dir, "_meta.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (ValueError, OSError):
+        return None
+
+
+def data_note_from_meta(meta) -> str:
+    if meta:
+        return (f"数据来源：{meta.get('source', 'OpenDota API')} · 战队：{meta.get('team', 'Xtreme Gaming')}"
+                f"（team_id={meta.get('team_id')}）· **数据获取日期：{meta.get('fetched_at', '未知')}**")
+    return "数据来源：合成样本（离线后备，非真实数据）"
 
 
 def _load_real_tables(con) -> bool:
@@ -161,9 +180,12 @@ def _load_real_tables(con) -> bool:
 def run_in_memory(session_id: str = None, seed: int = 7) -> Dict[str, Any]:
     sess = SessionManager().get_or_create_session(session_id)
     con = sess.get_duckdb_conn()
-    if not _load_real_tables(con):  # offline fallback only
+    if _load_real_tables(con):
+        note = data_note_from_meta(_read_meta(REAL_DATA_DIR))
+    else:  # offline fallback only
         register_frames(con, generate_frames(seed))
-    return analyze(sess.session_id, con)
+        note = data_note_from_meta(None)
+    return analyze(sess.session_id, con, data_note=note)
 
 
 def _top_heroes(hero_habits, team, n=2):
@@ -202,9 +224,12 @@ def _table(rows, cols):
     return out
 
 
-def _report(team_stats, player_stats, hero_habits, corr, clustering, insights, guidance, med) -> str:
+def _report(team_stats, player_stats, hero_habits, corr, clustering, insights, guidance, med, data_note=None) -> str:
     L = ["# Dota 2 战队与选手分析报告\n",
-         "> 由 data-analysis-service 端到端生成（SQL/OLAP · 相关性 · KMeans 打法聚类 · Insight Copilot）。数据结构对齐 OpenDota。\n"]
+         "> 由 data-analysis-service 端到端生成（SQL/OLAP · 相关性 · KMeans 打法聚类 · Insight Copilot）。数据结构对齐 OpenDota。"]
+    if data_note:
+        L.append(f"> {data_note}")
+    L.append("")
     L.append("## 1. 战队战绩总览")
     L += _table(team_stats, ["team", "games", "wins", "winrate", "avg_duration_min"])
     L.append(f"\n- 联赛对局时长中位数：**{med} min**（节奏型/发育型分界）\n")
