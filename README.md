@@ -119,6 +119,21 @@ python -m app.mcp_server
 
 ---
 
+## 🐳 部署与镜像
+
+- 完整部署要求、环境变量、Docker/K8s 说明见 **[DEPLOY.md](DEPLOY.md)**。
+- 镜像发布到 **GHCR**：
+  - `main` 推送 → `ci.yml` 跑测试并构建 `:latest`（多架构）。
+  - **打语义化 tag 发版**（tag 驱动，多架构 amd64+arm64 原生构建 → GHCR，参考 tag→GHCR 模式）：
+    ```bash
+    git tag v1.2.3 && git push origin v1.2.3
+    # → ghcr.io/magele758/data_analysis:1.2.3 (+ 1.2, 1, latest)
+    ```
+- 快速运行：
+  ```bash
+  docker run --rm -p 8000:8000 -e DATA_AGENT_REQUIRE_AUTH=false ghcr.io/magele758/data_analysis:latest
+  ```
+
 ## 🧪 运行自动化测试
 ```bash
 pytest tests/ -v
