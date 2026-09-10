@@ -33,7 +33,10 @@ def run_dota2_analysis(data_dir: str, out_path: str, session_id: str = "dota2_de
     sess = SessionManager().get_or_create_session(session_id)
     con = sess.get_duckdb_conn()
     for tbl in ("matches", "player_matches", "players", "teams"):
-        path = os.path.join(data_dir, f"{tbl}.csv").replace("'", "''")
+        raw = os.path.join(data_dir, f"{tbl}.csv")
+        if not os.path.exists(raw):
+            continue  # real OpenDota export omits players.csv; analyze needs only matches + player_matches
+        path = raw.replace("'", "''")
         con.execute(f"CREATE OR REPLACE TABLE {tbl} AS SELECT * FROM read_csv_auto('{path}', header=true)")
     res = analyze(sess.session_id, con)
 
@@ -46,6 +49,11 @@ def run_dota2_analysis(data_dir: str, out_path: str, session_id: str = "dota2_de
 
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
+    # Prefer REAL OpenDota data (fetch via fetch_opendota.py); fall back to sample.
+    real_dir = os.path.join(here, "real_data")
+    data_dir = real_dir if os.path.exists(os.path.join(real_dir, "player_matches.csv")) else os.path.join(here, "data")
+    if data_dir != real_dir:
+        print("[note] real_data not found — using sample. Run 'python fetch_opendota.py' for real OpenDota data.")
     print("Dota2 analysis done:", json.dumps(
-        run_dota2_analysis(os.path.join(here, "data"), os.path.join(here, "report.md")),
+        run_dota2_analysis(data_dir, os.path.join(here, "report.md")),
         ensure_ascii=False))
