@@ -17,6 +17,7 @@ import random
 from datetime import date, timedelta
 
 TEAMS = [
+    ("Xtreme Gaming", 0.75),  # real top-tier team (XG); strongest sample team
     ("Team Alpha", 0.72), ("Team Bravo", 0.66), ("Team Cobra", 0.58),
     ("Team Delta", 0.52), ("Team Echo", 0.47), ("Team Falcon", 0.42),
     ("Team Ghost", 0.36), ("Team Hydra", 0.30),

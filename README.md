@@ -6,6 +6,16 @@
 
 ---
 
+## 🎬 示例展示 (Showcase)
+
+内置**行业示例**可在治理大盘里一键跑通完整分析管道并生成报告（`examples/` 亦提供 CLI 版本）。下图为 **Dota 2 战队与选手分析**（含真实强队 **Xtreme Gaming (XG)**）：战队战绩榜、选手经验与习惯、KMeans 打法聚类、Insight Copilot 自动洞察，以及规则化**战术指导**。
+
+![Dota 2 战队与选手分析示例](docs/assets/dota2_analysis_showcase.png)
+
+> 另有 **ERP 企业数据分析**示例（订单到收款：EDA/OLAP/质量/相关/ANOVA/RFM/归因/Insight Copilot）。打开 `/dashboard` 顶部「🎯 行业示例」卡片即可一键运行。
+
+---
+
 ## 🌟 核心功能矩阵 (25 个高信噪比 IQuery 语义算子)
 
 ### 1. Palantir 风格业务本体模型 (Agentic Ontology) (`app/ontology/`)
