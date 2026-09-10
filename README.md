@@ -12,6 +12,14 @@
 
 > 📅 **数据获取日期：2026-09-10 (UTC)**，来源 OpenDota API（获取元数据见 `examples/dota2-analysis/real_data/_meta.json`）。
 
+**▶ 演示：在治理大盘里一键运行，端到端跑通管道并生成侦察报告**
+
+![演示动图：一键运行 XG 侦察报告](docs/assets/dota2_demo.gif)
+
+> 🎬 完整演示视频：[docs/assets/dota2_demo.mp4](docs/assets/dota2_demo.mp4)
+
+静态首屏：
+
 ![Dota 2 战队与选手分析示例](docs/assets/dota2_analysis_showcase.png)
 
 > 另有 **ERP 企业数据分析**示例（订单到收款：EDA/OLAP/质量/相关/ANOVA/RFM/归因/Insight Copilot）。打开 `/dashboard` 顶部「🎯 行业示例」卡片即可一键运行。
