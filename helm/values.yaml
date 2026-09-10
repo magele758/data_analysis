@@ -1,12 +1,16 @@
 replicaCount: 3
 
 image:
-  repository: data-analysis-service
+  # Published by the tag-driven release workflow to GHCR.
+  # e.g. ghcr.io/magele758/data_analysis:1.2.3
+  repository: ghcr.io/magele758/data_analysis
   tag: latest
   pullPolicy: IfNotPresent
 
+# Legacy: the distributed engine now runs single-node in-memory DuckDB; Ray is no
+# longer required. Keep disabled unless you specifically wire up a Ray backend.
 rayCluster:
-  enabled: true
+  enabled: false
   head:
     resources:
       limits:
