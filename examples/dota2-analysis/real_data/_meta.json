@@ -1,9 +1,9 @@
 {
-  "fetched_at": "2026-09-10 UTC",
+  "fetched_at": "2026-09-10 03:14 UTC",
   "source": "OpenDota API (https://api.opendota.com)",
   "team": "Xtreme Gaming",
   "team_id": 8261500,
-  "matches": 40,
-  "player_rows": 400,
-  "teams": 17
+  "matches": 60,
+  "player_rows": 600,
+  "teams": 24
 }

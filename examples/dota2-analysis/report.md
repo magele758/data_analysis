@@ -1,78 +1,85 @@
-# Dota 2 战队与选手分析报告
+# Dota 2 战队深度分析报告 · Xtreme Gaming
 
-> 由 data-analysis-service 端到端生成（SQL/OLAP · 相关性 · KMeans 打法聚类 · Insight Copilot）。数据结构对齐 OpenDota。
-> 数据来源：OpenDota API (https://api.opendota.com) · 战队：Xtreme Gaming（team_id=8261500）· **数据获取日期：2026-09-10 UTC**
+> 由 data-analysis-service 端到端生成（SQL/OLAP · 分边/节奏/对阵 · 选手签名英雄 · 制胜因子相关 · 战术指导）。数据结构对齐 OpenDota。
+> 数据来源：OpenDota API (https://api.opendota.com) · 战队：Xtreme Gaming（team_id=8261500）· **数据获取日期：2026-09-10 03:14 UTC**
 
-## 1. 战队战绩总览
-| team | games | wins | winrate | avg_duration_min |
+## 1. XG 战绩概览
+- 样本对局：**60** 场 · 胜率 **35.0%** · 平均时长 **47.8 min**
+
+**天辉 / 夜魇 分边胜率**
+| 分边 | 场次 | 胜 | 胜率% |
+|---|---|---|---|
+| Dire (夜魇) | 33 | 11.0 | 33.3 |
+| Radiant (天辉) | 27 | 10.0 | 37.0 |
+
+## 2. 对阵各对手战绩
+| 对手 | 场次 | 胜 | 胜率% |
+|---|---|---|---|
+| Team Liquid | 7 | 3.0 | 42.9 |
+| BoomBoys | 5 | 0.0 | 0.0 |
+| GamerLegion | 4 | 2.0 | 50.0 |
+| Iron Wing | 4 | 1.0 | 25.0 |
+| LGD Gaming | 4 | 1.0 | 25.0 |
+| Tundra Esports | 3 | 2.0 | 66.7 |
+| PlayTime | 3 | 2.0 | 66.7 |
+| TEAM VISION | 3 | 1.0 | 33.3 |
+| Team Spirit | 3 | 1.0 | 33.3 |
+| Team Falcons | 3 | 0.0 | 0.0 |
+| REKONIX | 2 | 2.0 | 100.0 |
+| HULIGANI | 2 | 2.0 | 100.0 |
+
+## 3. 节奏画像（时长 ↔ 胜负）
+| 局长分档 | 场次 | 胜 | 胜率% | 均时长 |
 |---|---|---|---|---|
-| Team Resilience | 2 | 2 | 100.0 | 34.9 |
-| Team Falcons | 3 | 3 | 100.0 | 47.4 |
-| Team Yandex | 1 | 1 | 100.0 | 46.9 |
-| BoomBoys | 3 | 3 | 100.0 | 28.5 |
-| PVISION | 1 | 1 | 100.0 | 31.1 |
-| Aurora Gaming | 1 | 1 | 100.0 | 44.4 |
-| LGD Gaming | 4 | 3 | 75.0 | 48.9 |
-| Iron Wing | 4 | 3 | 75.0 | 55.2 |
-| Team Liquid | 6 | 4 | 66.7 | 59.5 |
-| Team Spirit | 3 | 2 | 66.7 | 49.2 |
-| _PowerRangers | 2 | 1 | 50.0 | 40.7 |
-| GamerLegion | 4 | 2 | 50.0 | 44.5 |
-| Rune Eaters | 2 | 1 | 50.0 | 52.4 |
-| Xtreme Gaming | 40 | 13 | 32.5 | 47.2 |
-| HULIGANI | 2 | 0 | 0.0 | 43.6 |
-| OG | 1 | 0 | 0.0 | 45.3 |
-| GLYPH | 1 | 0 | 0.0 | 48.9 |
+| 短局 (<35min) | 10 | 2.0 | 20.0 | 28.3 |
+| 长局 (>=35min) | 50 | 19.0 | 38.0 | 51.6 |
 
-- 联赛对局时长中位数：**46.9 min**（节奏型/发育型分界）
+## 4. XG 选手数据（经验与效率）
+| 选手 | 位置 | 场次 | KDA | GPM | XPM | 正补 | 英雄池 | 胜率% |
+|---|---|---|---|---|---|---|---|---|
+| Ame | Carry | 60 | 3.2 | 717.0 | 797.0 | 593.0 | 21 | 35.0 |
+| NothingToSay | Mid | 60 | 3.9 | 575.0 | 774.0 | 413.0 | 18 | 35.0 |
+| Xxs | Offlane | 60 | 3.6 | 575.0 | 750.0 | 440.0 | 17 | 35.0 |
+| fy | Offlane | 59 | 2.1 | 327.0 | 472.0 | 100.0 | 12 | 35.6 |
+| xNova | Carry | 57 | 2.2 | 315.0 | 436.0 | 78.0 | 13 | 36.8 |
+| xNova | Mid | 3 | 1.6 | 270.0 | 365.0 | 66.0 | 3 | 0.0 |
+| fy | Mid | 1 | 1.4 | 259.0 | 309.0 | 31.0 | 1 | 0.0 |
 
-## 2. 选手经验与数据（Top by GPM）
-| player_name | team | role | games | kda | gpm | xpm | lh | hero_pool_size | winrate |
-|---|---|---|---|---|---|---|---|---|---|
-| Nightfall | Aurora Gaming | Carry | 1 | 32.0 | 982.0 | 1,131.0 | 750.0 | 1 | 100.0 |
-| YSR-04E | Team Resilience | Carry | 2 | 20.5 | 833.0 | 999.0 | 475.0 | 2 | 100.0 |
-| Satanic | PVISION | Carry | 1 | 8.0 | 823.0 | 869.0 | 459.0 | 1 | 100.0 |
-| skiter | Team Falcons | Carry | 3 | 10.8 | 810.0 | 893.0 | 533.0 | 2 | 100.0 |
-| 医者watson` | Team Yandex | Carry | 1 | 21.0 | 804.0 | 1,028.0 | 586.0 | 1 | 100.0 |
-| 33 | Iron Wing | Carry | 1 | 7.2 | 796.0 | 992.0 | 923.0 | 1 | 100.0 |
-| Yatoro | Team Spirit | Carry | 3 | 5.9 | 785.0 | 959.0 | 638.0 | 2 | 66.7 |
-| 33 | Iron Wing | Offlane | 3 | 7.2 | 785.0 | 952.0 | 641.0 | 3 | 66.7 |
-| Pure | Iron Wing | Offlane | 1 | 6.0 | 783.0 | 930.0 | 639.0 | 1 | 100.0 |
-| JACKBOYS | GLYPH | Carry | 1 | 1.2 | 782.0 | 598.0 | 760.0 | 1 | 0.0 |
-| Wisper | LGD Gaming | Offlane | 4 | 8.6 | 777.0 | 974.0 | 608.0 | 3 | 75.0 |
-| m1CKe | Team Liquid | Carry | 6 | 5.1 | 774.0 | 960.0 | 692.0 | 4 | 66.7 |
+## 5. 选手签名英雄（≥3 场，按使用次数）
+- **Ame**：Drow Ranger（9场/66.7%胜/KDA3.43），Kez（6场/33.3%胜/KDA3.78），Tiny（6场/50.0%胜/KDA4.04），Terrorblade（6场/0.0%胜/KDA1.5）
+- **NothingToSay**：Pangolier（11场/45.5%胜/KDA5.44），Storm Spirit（10场/40.0%胜/KDA4.24），Puck（8场/12.5%胜/KDA2.65），Snapfire（6场/16.7%胜/KDA2.71）
+- **Xxs**：Dawnbreaker（9场/33.3%胜/KDA4.39），Timbersaw（8场/37.5%胜/KDA2.81），Centaur Warrunner（7场/28.6%胜/KDA3.42），Underlord（6场/50.0%胜/KDA4.22）
+- **fy**：Rubick（14场/35.7%胜/KDA2.12），Hoodwink（14场/35.7%胜/KDA2.23），Techies（6场/50.0%胜/KDA1.77），Lion（6场/33.3%胜/KDA1.78）
+- **xNova**：Lich（14场/64.3%胜/KDA2.24），Phoenix（12场/33.3%胜/KDA2.92），Bane（8场/25.0%胜/KDA1.79），Winter Wyvern（5场/20.0%胜/KDA1.51）
 
-## 3. 战队招牌英雄（习惯）
-- **Team Resilience**：Mirana, Invoker, Doom
-- **Team Falcons**：Clockwerk, Ember Spirit, Windranger
-- **Team Yandex**：Invoker, Hoodwink, Lich
-- **BoomBoys**：Winter Wyvern, Largo, Ringmaster
-- **PVISION**：Treant Protector, Slardar, Viper
-- **Aurora Gaming**：Axe, Nature's Prophet, Ember Spirit
+## 6. XG 英雄偏好（Top，含该英雄胜率）
+| 英雄 | 使用次数 | 胜率% |
+|---|---|---|
+| Hoodwink | 15 | 33.3 |
+| Lich | 14 | 64.3 |
+| Rubick | 14 | 35.7 |
+| Phoenix | 12 | 33.3 |
+| Pangolier | 11 | 45.5 |
+| Storm Spirit | 10 | 40.0 |
+| Snapfire | 9 | 33.3 |
+| Dawnbreaker | 9 | 33.3 |
+| Drow Ranger | 9 | 66.7 |
+| Bane | 8 | 25.0 |
+| Timbersaw | 8 | 37.5 |
+| Puck | 8 | 12.5 |
 
-## 4. 关键相关性（表现 ↔ 胜负）
-- **gpm ↔ xpm**：r=0.8858（Very Strong）
-- **gpm ↔ last_hits**：r=0.89（Very Strong）
-- **xpm ↔ kills**：r=0.7334（Strong）
-- **xpm ↔ last_hits**：r=0.7741（Strong）
+## 7. 制胜因子：各项数据与胜负的相关性
+> 相关系数越大表示该项越能区分 XG 的胜负（区别于「GPM↔XPM」这类恒相关的废话指标）。
+- 助攻：r = **0.599**
+- 经验(XPM)：r = **0.507**
+- 击杀：r = **0.45**
+- 经济(GPM)：r = **0.341**
+- 死亡：r = **-0.286**
+- 正补：r = **0.122**
 
-## 5. 选手打法聚类 (KMeans)
-- 自动最优簇数 k=**2**，轮廓系数 0.4079
-
-## 6. 自动洞察 (Insight Copilot)
-**【数据故事 · player_matches】400 行，数据质量 100/100。**
-
-- 相关性：「gpm」与「xpm」呈 Very Strong 相关（r=0.8858, p=0.0）。 「kills」与「xpm」呈 Strong 相关（r=0.7334, p=0.0）。
-- 异常：「kills」检出 4 个离群点（均值 5.03, 标准差 3.94），需关注数据质量或业务突发。 「assists」检出 4 个离群点（均值 12.12, 标准差 6.95），需关注数据质量或业务突发。 「deaths」检出 2 个离群点（均值 5.1, 标准差 3.14），需关注数据质量或业务突发。
-- 洞察关联：i4↔i3（shares:xpm）；i3↔i0（shares:kills）。多条洞察围绕同一指标/维度，提示存在共同的业务驱动因子，可进一步做归因下钻。
-- **建议**：优先关注「gpm 与 xpm Very Strong 相关 (r=0.8858)」（严重度 0.886），建议用 driver_attribution_analysis 对相关指标做因子级归因。
-
-## 7. 战术指导 (Tactical Guidance)
-- **Team Resilience**（胜率 100.0% · 均时长 34.9min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 招牌英雄：Mirana, Invoker。
-- **Team Falcons**（胜率 100.0% · 均时长 47.4min）：后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。 优先 ban 招牌英雄：Clockwerk, Ember Spirit。
-- **Team Yandex**（胜率 100.0% · 均时长 46.9min）：后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。 优先 ban 招牌英雄：Invoker, Hoodwink。
-- **BoomBoys**（胜率 100.0% · 均时长 28.5min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 招牌英雄：Winter Wyvern, Largo。
-- **核心威胁（经济）**：优先 gank/切入 → Nightfall(Aurora Gaming/Carry, GPM 982.0)；YSR-04E(Team Resilience/Carry, GPM 833.0)；Satanic(PVISION/Carry, GPM 823.0)。
-- **核心威胁（KDA）**：Nightfall(KDA 32.0)；Mikoto(KDA 28.0)；niu(KDA 23.5)。
-- **可预测的窄英雄池选手**（针对性 ban）：Echozz（池 2）；planet（池 1）；Mirage`雨（池 2）；RESPECT（池 1）；Bignum（池 2）。
+## 8. 战术指导（如何打 XG）
+- **节奏**：Xtreme Gaming 是**后期发育队**（长局胜率 38.0% > 短局 20.0%）——前期主动压制、速推逼团、别让其舒服发育。
+- **Ban 目标**：优先 ban 其高频高胜英雄 → Lich（14次/64.3%）；Drow Ranger（9次/66.7%）。
+- **核心威胁**：Carry 经济核心 **Ame**（Carry, GPM 717.0, 胜率 35.0%）——针对其发育路线 gank/封野；团战核心 **NothingToSay**（KDA 3.89）优先集火/切入。
+- **制胜因子**：Xtreme Gaming 胜负与「助攻」相关性最高（r=0.599）。
 
