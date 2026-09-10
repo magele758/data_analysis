@@ -27,7 +27,7 @@ def test_run_erp_example_in_memory():
 
 def test_run_dota2_example_in_memory():
     r = examples.run_example("dota2", session_id="dota2_web_test")
-    assert r["teams"] == 8 and r["players"] == 40
+    assert r["teams"] == 9 and r["players"] == 45
     assert "战术指导" in r["report_markdown"]
     assert "ban" in r["report_markdown"].lower()
 

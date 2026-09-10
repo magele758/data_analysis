@@ -21,8 +21,12 @@ NAME = "Dota2 战队与选手分析"
 DOMAIN = "Esports · Dota 2 (OpenDota)"
 DESCRIPTION = "战队战绩 · 选手经验与习惯 · KMeans 打法聚类 · Insight Copilot · 战术指导"
 
-_TEAMS = [("Team Alpha", 0.72), ("Team Bravo", 0.66), ("Team Cobra", 0.58), ("Team Delta", 0.52),
-          ("Team Echo", 0.47), ("Team Falcon", 0.42), ("Team Ghost", 0.36), ("Team Hydra", 0.30)]
+# Xtreme Gaming (XG) is a real top-tier team; included as the strongest sample
+# team so it stands out in the report. See README for pulling real XG data from
+# the OpenDota /teams/{team_id} endpoints.
+_TEAMS = [("Xtreme Gaming", 0.75), ("Team Alpha", 0.72), ("Team Bravo", 0.66), ("Team Cobra", 0.58),
+          ("Team Delta", 0.52), ("Team Echo", 0.47), ("Team Falcon", 0.42), ("Team Ghost", 0.36),
+          ("Team Hydra", 0.30)]
 _ROLES = ["Carry", "Mid", "Offlane", "Support", "HardSupport"]
 _HEROES = {
     "Carry": ["Faceless Void", "Juggernaut", "Phantom Assassin", "Terrorblade", "Spectre", "Medusa"],

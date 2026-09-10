@@ -48,6 +48,8 @@ for m in pro[:200]:
 
 英雄 ID→英雄名、role/lane 解析可用 [dotaconstants](https://github.com/odota/dotaconstants)。也可用历史 **OpenDota 数据转储**（PostgreSQL 表 `matches`/`player_matches`）批量导入。把抓到的数据写成上表三张 CSV，`analyze_dota2.py` 即可直接分析。
 
+> 样本中内置了真实强队 **Xtreme Gaming (XG)** 作为最强战队示例。要拉 XG 的真实数据，先用 `GET /teams` 查到 XG 的 `team_id`，再取 `GET /teams/{team_id}/matches`、`/teams/{team_id}/players`、`/teams/{team_id}/heroes`，写入上表 CSV 即可。
+
 ## 报告包含
 
 战队战绩总览、选手经验与数据、战队招牌英雄、关键相关性、KMeans 打法聚类、Insight Copilot 洞察，以及一段**可执行的战术指导**（针对每支强队的 ban/pick 与打法建议、核心威胁选手、窄英雄池针对）。

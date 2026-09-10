@@ -40,8 +40,8 @@ def test_dota2_example_end_to_end(tmp_path):
     m = _load("examples/dota2-analysis/analyze_dota2.py", "analyze_dota2")
     out = tmp_path / "report.md"
     res = m.run_dota2_analysis(str(tmp_path / "data"), str(out))
-    assert res["teams"] == 8
-    assert res["players"] == 40
+    assert res["teams"] == 9
+    assert res["players"] == 45
     text = out.read_text(encoding="utf-8")
     assert "Dota 2 战队与选手分析报告" in text
     for section in ("战队战绩总览", "KMeans", "Insight Copilot", "战术指导"):
