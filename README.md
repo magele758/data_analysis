@@ -10,6 +10,8 @@
 
 内置**行业示例**可在治理大盘里一键跑通完整分析管道并生成报告（`examples/` 亦提供 CLI 版本）。下图为 **Dota 2 战队与选手分析**，数据来自 **OpenDota API 的真实职业比赛**（**Xtreme Gaming / XG** 及其对手，抓取脚本见 `examples/dota2-analysis/fetch_opendota.py`）：战队战绩榜、选手经验与习惯、KMeans 打法聚类、Insight Copilot 自动洞察，以及规则化**战术指导**。
 
+> 📅 **数据获取日期：2026-09-10 (UTC)**，来源 OpenDota API（获取元数据见 `examples/dota2-analysis/real_data/_meta.json`）。
+
 ![Dota 2 战队与选手分析示例](docs/assets/dota2_analysis_showcase.png)
 
 > 另有 **ERP 企业数据分析**示例（订单到收款：EDA/OLAP/质量/相关/ANOVA/RFM/归因/Insight Copilot）。打开 `/dashboard` 顶部「🎯 行业示例」卡片即可一键运行。

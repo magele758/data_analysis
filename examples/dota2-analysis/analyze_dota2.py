@@ -18,7 +18,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from app.cluster.session_manager import SessionManager
-from app.examples.dota2 import analyze
+from app.examples.dota2 import analyze, data_note_from_meta, _read_meta
 
 
 def run_dota2_analysis(data_dir: str, out_path: str, session_id: str = "dota2_demo") -> dict:
@@ -38,7 +38,8 @@ def run_dota2_analysis(data_dir: str, out_path: str, session_id: str = "dota2_de
             continue  # real OpenDota export omits players.csv; analyze needs only matches + player_matches
         path = raw.replace("'", "''")
         con.execute(f"CREATE OR REPLACE TABLE {tbl} AS SELECT * FROM read_csv_auto('{path}', header=true)")
-    res = analyze(sess.session_id, con)
+    note = data_note_from_meta(_read_meta(data_dir))
+    res = analyze(sess.session_id, con, data_note=note)
 
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:

@@ -1,27 +1,28 @@
 # Dota 2 战队与选手分析报告
 
 > 由 data-analysis-service 端到端生成（SQL/OLAP · 相关性 · KMeans 打法聚类 · Insight Copilot）。数据结构对齐 OpenDota。
+> 数据来源：OpenDota API (https://api.opendota.com) · 战队：Xtreme Gaming（team_id=8261500）· **数据获取日期：2026-09-10 UTC**
 
 ## 1. 战队战绩总览
 | team | games | wins | winrate | avg_duration_min |
 |---|---|---|---|---|
-| BoomBoys | 3 | 3 | 100.0 | 28.5 |
-| Team Yandex | 1 | 1 | 100.0 | 46.9 |
-| PVISION | 1 | 1 | 100.0 | 31.1 |
-| Aurora Gaming | 1 | 1 | 100.0 | 44.4 |
 | Team Resilience | 2 | 2 | 100.0 | 34.9 |
 | Team Falcons | 3 | 3 | 100.0 | 47.4 |
-| Iron Wing | 4 | 3 | 75.0 | 55.2 |
+| Team Yandex | 1 | 1 | 100.0 | 46.9 |
+| BoomBoys | 3 | 3 | 100.0 | 28.5 |
+| PVISION | 1 | 1 | 100.0 | 31.1 |
+| Aurora Gaming | 1 | 1 | 100.0 | 44.4 |
 | LGD Gaming | 4 | 3 | 75.0 | 48.9 |
+| Iron Wing | 4 | 3 | 75.0 | 55.2 |
 | Team Liquid | 6 | 4 | 66.7 | 59.5 |
 | Team Spirit | 3 | 2 | 66.7 | 49.2 |
-| Rune Eaters | 2 | 1 | 50.0 | 52.4 |
-| GamerLegion | 4 | 2 | 50.0 | 44.5 |
 | _PowerRangers | 2 | 1 | 50.0 | 40.7 |
+| GamerLegion | 4 | 2 | 50.0 | 44.5 |
+| Rune Eaters | 2 | 1 | 50.0 | 52.4 |
 | Xtreme Gaming | 40 | 13 | 32.5 | 47.2 |
-| GLYPH | 1 | 0 | 0.0 | 48.9 |
 | HULIGANI | 2 | 0 | 0.0 | 43.6 |
 | OG | 1 | 0 | 0.0 | 45.3 |
+| GLYPH | 1 | 0 | 0.0 | 48.9 |
 
 - 联赛对局时长中位数：**46.9 min**（节奏型/发育型分界）
 
@@ -42,12 +43,12 @@
 | m1CKe | Team Liquid | Carry | 6 | 5.1 | 774.0 | 960.0 | 692.0 | 4 | 66.7 |
 
 ## 3. 战队招牌英雄（习惯）
-- **BoomBoys**：Winter Wyvern, Kez, Earth Spirit
-- **Team Yandex**：Lich, Windranger, Slardar
-- **PVISION**：Slardar, Io, Juggernaut
-- **Aurora Gaming**：Hoodwink, Clockwerk, Ember Spirit
-- **Team Resilience**：Mirana, Necrophos, Doom
-- **Team Falcons**：Ember Spirit, Clockwerk, Windranger
+- **Team Resilience**：Mirana, Invoker, Doom
+- **Team Falcons**：Clockwerk, Ember Spirit, Windranger
+- **Team Yandex**：Invoker, Hoodwink, Lich
+- **BoomBoys**：Winter Wyvern, Largo, Ringmaster
+- **PVISION**：Treant Protector, Slardar, Viper
+- **Aurora Gaming**：Axe, Nature's Prophet, Ember Spirit
 
 ## 4. 关键相关性（表现 ↔ 胜负）
 - **gpm ↔ xpm**：r=0.8858（Very Strong）
@@ -67,11 +68,11 @@
 - **建议**：优先关注「gpm 与 xpm Very Strong 相关 (r=0.8858)」（严重度 0.886），建议用 driver_attribution_analysis 对相关指标做因子级归因。
 
 ## 7. 战术指导 (Tactical Guidance)
-- **BoomBoys**（胜率 100.0% · 均时长 28.5min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 招牌英雄：Winter Wyvern, Kez。
-- **Team Yandex**（胜率 100.0% · 均时长 46.9min）：后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。 优先 ban 招牌英雄：Lich, Windranger。
-- **PVISION**（胜率 100.0% · 均时长 31.1min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 招牌英雄：Slardar, Io。
-- **Aurora Gaming**（胜率 100.0% · 均时长 44.4min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 招牌英雄：Hoodwink, Clockwerk。
+- **Team Resilience**（胜率 100.0% · 均时长 34.9min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 招牌英雄：Mirana, Invoker。
+- **Team Falcons**（胜率 100.0% · 均时长 47.4min）：后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。 优先 ban 招牌英雄：Clockwerk, Ember Spirit。
+- **Team Yandex**（胜率 100.0% · 均时长 46.9min）：后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。 优先 ban 招牌英雄：Invoker, Hoodwink。
+- **BoomBoys**（胜率 100.0% · 均时长 28.5min）：早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。 优先 ban 招牌英雄：Winter Wyvern, Largo。
 - **核心威胁（经济）**：优先 gank/切入 → Nightfall(Aurora Gaming/Carry, GPM 982.0)；YSR-04E(Team Resilience/Carry, GPM 833.0)；Satanic(PVISION/Carry, GPM 823.0)。
 - **核心威胁（KDA）**：Nightfall(KDA 32.0)；Mikoto(KDA 28.0)；niu(KDA 23.5)。
-- **可预测的窄英雄池选手**（针对性 ban）：fy（池 1）；zzq（池 1）；planet（池 1）；ssnovv1（池 2）；Cr1t-（池 2）。
+- **可预测的窄英雄池选手**（针对性 ban）：Echozz（池 2）；planet（池 1）；Mirage`雨（池 2）；RESPECT（池 1）；Bignum（池 2）。
 

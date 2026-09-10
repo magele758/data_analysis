@@ -96,8 +96,21 @@ def fetch(team_id: int, limit: int, out_dir: str, sleep: float = 1.2):
     _write(out_dir, "matches.csv", matches)
     _write(out_dir, "player_matches.csv", pms)
     _write(out_dir, "teams.csv", [{"team_id": k, "name": v} for k, v in seen_teams.items()])
+
+    # Record the acquisition metadata (crucially, the fetch date) so the report and
+    # README can cite exactly when this real snapshot was pulled from OpenDota.
+    import json
+    meta = {
+        "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "source": "OpenDota API (https://api.opendota.com)",
+        "team": team_name, "team_id": team_id,
+        "matches": len(matches), "player_rows": len(pms), "teams": len(seen_teams),
+    }
+    with open(os.path.join(out_dir, "_meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
     print(f"Wrote {len(matches)} matches, {len(pms)} player rows, {len(seen_teams)} teams -> {out_dir}")
-    return {"matches": len(matches), "player_rows": len(pms), "teams": len(seen_teams)}
+    print(f"Fetched at: {meta['fetched_at']}")
+    return meta
 
 
 def _write(out_dir, name, rows):
