@@ -12,15 +12,16 @@ from typing import Any, Dict, List
 import pandas as pd
 
 from app.cluster.session_manager import SessionManager
-from app.operators.sandbox import run_duckdb_sql
-from app.operators.correlation import run_correlation_analysis
-from app.operators.mining.clustering import run_kmeans_clustering
-from app.copilot import discover_insights
 
 EXAMPLE_ID = "dota2"
-NAME = "Dota2 战队与选手分析"
+NAME = "Dota2 战队深度分析（Xtreme Gaming）"
 DOMAIN = "Esports · Dota 2 (OpenDota, 真实数据)"
-DESCRIPTION = "真实 OpenDota 数据（Xtreme Gaming）· 战队战绩 · 选手习惯 · KMeans 聚类 · Insight Copilot · 战术指导"
+DESCRIPTION = "真实 OpenDota 数据 · XG 战绩/天辉夜魇/对阵/节奏 · 选手签名英雄与胜率 · 制胜因子 · 战术指导"
+
+# The analysis subject: everything is framed around this team so the report is a
+# focused scouting report rather than a meaningless league-wide winrate table
+# (opponents only appear a few times in a team-centric pull -> small-sample noise).
+FOCUS_TEAM = "Xtreme Gaming"
 
 # Real data fetched from the OpenDota API (see examples/dota2-analysis/fetch_opendota.py),
 # bundled in the repo. run_in_memory loads this by default; the synthetic generator
@@ -109,38 +110,65 @@ def register_frames(con, frames):
         con.unregister(f"_src_{name}")
 
 
-def analyze(session_id: str, con, data_note: str = None) -> Dict[str, Any]:
-    def rows(sql):
-        return run_duckdb_sql(session_id, sql, limit=200)["data"]
+def analyze(session_id: str, con, data_note: str = None, focus: str = FOCUS_TEAM) -> Dict[str, Any]:
+    def q(sql, params=None):
+        cur = con.execute(sql, params) if params else con.execute(sql)
+        return cur.df().to_dict("records")
 
-    team_stats = rows("""
-        SELECT pm.team, count(DISTINCT pm.match_id) AS games,
-               count(DISTINCT CASE WHEN pm.win=1 THEN pm.match_id END) AS wins,
-               round(100.0*count(DISTINCT CASE WHEN pm.win=1 THEN pm.match_id END)/count(DISTINCT pm.match_id),1) AS winrate,
-               round(avg(m.duration_min),1) AS avg_duration_min
-        FROM player_matches pm JOIN matches m ON pm.match_id=m.match_id
-        GROUP BY pm.team ORDER BY winrate DESC""")
-    player_stats = rows("""
-        SELECT player_name, team, role, count(*) AS games,
-               round((avg(kills)+avg(assists))/greatest(avg(deaths),1),2) AS kda,
-               round(avg(gpm)) AS gpm, round(avg(xpm)) AS xpm, round(avg(last_hits)) AS lh,
-               count(DISTINCT hero) AS hero_pool_size, round(avg(win)*100,1) AS winrate
-        FROM player_matches GROUP BY player_name, team, role""")
-    hero_habits = rows("SELECT team, hero, count(*) AS picks FROM player_matches GROUP BY team, hero ORDER BY team, picks DESC")
+    def _wr(rows):  # add winrate% from games/wins
+        for r in rows:
+            r["winrate"] = round(100.0 * r["wins"] / r["games"], 1) if r["games"] else 0.0
+        return rows
 
-    corr = run_correlation_analysis(session_id, "player_matches",
-                                    columns=["gpm", "xpm", "kills", "assists", "last_hits", "win"])
-    clustering = run_kmeans_clustering(session_id, "player_matches",
-                                       feature_cols=["gpm", "xpm", "kills", "assists", "last_hits"])
-    insights = discover_insights(session_id, "player_matches", target_metric="gpm", category_col="role")
+    overall = q("""SELECT count(*) games, sum(CASE WHEN winner=? THEN 1 ELSE 0 END) wins,
+                          round(avg(duration_min),1) avg_dur
+                   FROM matches WHERE radiant_team=? OR dire_team=?""", [focus, focus, focus])[0]
+    xg_games = int(overall["games"] or 0)
+    xg_winrate = round(100.0 * (overall["wins"] or 0) / xg_games, 1) if xg_games else 0.0
 
-    med = sorted(t["avg_duration_min"] for t in team_stats)[len(team_stats) // 2]
-    guidance = _tactics(team_stats, player_stats, hero_habits, med)
-    report = _report(team_stats, player_stats, hero_habits, corr, clustering, insights, guidance, med, data_note)
+    sides = _wr(q("""SELECT CASE WHEN radiant_team=? THEN 'Radiant (天辉)' ELSE 'Dire (夜魇)' END side,
+                            count(*) games, sum(CASE WHEN winner=? THEN 1 ELSE 0 END) wins
+                     FROM matches WHERE radiant_team=? OR dire_team=? GROUP BY 1 ORDER BY 1""",
+                  [focus, focus, focus, focus]))
+    opponents = _wr(q("""SELECT CASE WHEN radiant_team=? THEN dire_team ELSE radiant_team END opponent,
+                                count(*) games, sum(CASE WHEN winner=? THEN 1 ELSE 0 END) wins
+                         FROM matches WHERE radiant_team=? OR dire_team=?
+                         GROUP BY 1 ORDER BY games DESC, wins DESC""", [focus, focus, focus, focus]))
+    tempo = _wr(q("""SELECT CASE WHEN duration_min<35 THEN '短局 (<35min)' ELSE '长局 (>=35min)' END bucket,
+                            count(*) games, sum(CASE WHEN winner=? THEN 1 ELSE 0 END) wins,
+                            round(avg(duration_min),1) avg_dur
+                     FROM matches WHERE radiant_team=? OR dire_team=? GROUP BY 1 ORDER BY 1""",
+                  [focus, focus, focus]))
+    players = q("""SELECT player_name, role, count(*) games,
+                          round((avg(kills)+avg(assists))/greatest(avg(deaths),1),2) kda,
+                          round(avg(kills),1) k, round(avg(deaths),1) d, round(avg(assists),1) a,
+                          round(avg(gpm)) gpm, round(avg(xpm)) xpm, round(avg(last_hits)) lh,
+                          count(DISTINCT hero) hero_pool, round(avg(win)*100,1) winrate
+                   FROM player_matches WHERE team=? GROUP BY player_name, role
+                   ORDER BY gpm DESC""", [focus])
+    signatures = q("""SELECT player_name, hero, count(*) games, round(avg(win)*100,1) winrate,
+                             round((avg(kills)+avg(assists))/greatest(avg(deaths),1),2) kda
+                      FROM player_matches WHERE team=? GROUP BY player_name, hero
+                      HAVING count(*)>=3 ORDER BY player_name, games DESC""", [focus])
+    hero_pref = q("""SELECT hero, count(*) picks, round(avg(win)*100,1) winrate
+                     FROM player_matches WHERE team=? GROUP BY hero HAVING count(*)>=3
+                     ORDER BY picks DESC LIMIT 12""", [focus])
+    wc = q("""SELECT round(corr(gpm,win),3) gpm, round(corr(xpm,win),3) xpm,
+                     round(corr(kills,win),3) kills, round(corr(deaths,win),3) deaths,
+                     round(corr(assists,win),3) assists, round(corr(last_hits,win),3) last_hits
+              FROM player_matches WHERE team=?""", [focus])[0]
+
+    n_teams = int(q("SELECT count(DISTINCT team) c FROM player_matches")[0]["c"])
+    n_players = int(q("SELECT count(DISTINCT player_name) c FROM player_matches")[0]["c"])
+
+    guidance = _tactics(focus, xg_winrate, sides, tempo, opponents, players, hero_pref, wc)
+    report = _report(focus, xg_games, xg_winrate, overall, sides, opponents, tempo,
+                     players, signatures, hero_pref, wc, guidance, data_note)
     return {"example_id": EXAMPLE_ID, "name": NAME, "domain": DOMAIN,
             "session_id": session_id, "dataset_name": "player_matches",
-            "teams": len(team_stats), "players": len(player_stats),
-            "data_note": data_note, "insights": insights, "report_markdown": report}
+            "focus_team": focus, "focus_games": xg_games, "focus_winrate": xg_winrate,
+            "teams": n_teams, "players": n_players,
+            "data_note": data_note, "report_markdown": report}
 
 
 def _read_meta(data_dir: str):
@@ -188,26 +216,8 @@ def run_in_memory(session_id: str = None, seed: int = 7) -> Dict[str, Any]:
     return analyze(sess.session_id, con, data_note=note)
 
 
-def _top_heroes(hero_habits, team, n=2):
-    hs = sorted([h for h in hero_habits if h["team"] == team], key=lambda x: x["picks"], reverse=True)
-    return [h["hero"] for h in hs[:n]]
-
-
-def _tactics(team_stats, player_stats, hero_habits, med) -> List[str]:
-    g = []
-    for t in team_stats[:4]:
-        tempo = t["avg_duration_min"] < med
-        plan = ("早期节奏型（平均时长偏短）：建议前期抱团压制、封野入侵、抢符抢盾，避免被拖入后期。" if tempo
-                else "后期发育型（平均时长偏长）：建议速推分带、压制打钱节奏、逼其提前团战。")
-        g.append(f"**{t['team']}**（胜率 {t['winrate']}% · 均时长 {t['avg_duration_min']}min）：{plan} 优先 ban 招牌英雄：{', '.join(_top_heroes(hero_habits, t['team'], 2))}。")
-    by_gpm = sorted(player_stats, key=lambda p: p["gpm"], reverse=True)[:3]
-    by_kda = sorted(player_stats, key=lambda p: p["kda"], reverse=True)[:3]
-    g.append("**核心威胁（经济）**：优先 gank/切入 → " + "；".join(f"{p['player_name']}({p['team']}/{p['role']}, GPM {p['gpm']})" for p in by_gpm) + "。")
-    g.append("**核心威胁（KDA）**：" + "；".join(f"{p['player_name']}(KDA {p['kda']})" for p in by_kda) + "。")
-    narrow = [p for p in player_stats if p["hero_pool_size"] <= 2]
-    if narrow:
-        g.append("**可预测的窄英雄池选手**（针对性 ban）：" + "；".join(f"{p['player_name']}（池 {p['hero_pool_size']}）" for p in narrow[:5]) + "。")
-    return g
+_CORR_LABEL = {"gpm": "经济(GPM)", "xpm": "经验(XPM)", "kills": "击杀", "deaths": "死亡",
+               "assists": "助攻", "last_hits": "正补"}
 
 
 def _f(n):
@@ -217,46 +227,104 @@ def _f(n):
         return str(n)
 
 
-def _table(rows, cols):
-    out = ["| " + " | ".join(cols) + " |", "|" + "|".join(["---"] * len(cols)) + "|"]
+def _table(rows, cols, headers=None):
+    head = headers or cols
+    out = ["| " + " | ".join(head) + " |", "|" + "|".join(["---"] * len(head)) + "|"]
     for r in rows:
         out.append("| " + " | ".join(_f(r.get(c)) for c in cols) + " |")
     return out
 
 
-def _report(team_stats, player_stats, hero_habits, corr, clustering, insights, guidance, med, data_note=None) -> str:
-    L = ["# Dota 2 战队与选手分析报告\n",
-         "> 由 data-analysis-service 端到端生成（SQL/OLAP · 相关性 · KMeans 打法聚类 · Insight Copilot）。数据结构对齐 OpenDota。"]
+def _best_side(sides):
+    return max(sides, key=lambda s: s["winrate"]) if sides else None
+
+
+def _tactics(focus, winrate, sides, tempo, opponents, players, hero_pref, wc) -> List[str]:
+    g = []
+    # Side preference
+    if len(sides) == 2:
+        hi, lo = max(sides, key=lambda s: s["winrate"]), min(sides, key=lambda s: s["winrate"])
+        if hi["winrate"] - lo["winrate"] >= 10:
+            g.append(f"**分边**：{focus} 在 {hi['side']} 胜率 {hi['winrate']}% 明显高于 {lo['side']} {lo['winrate']}%——BP 阶段争夺其弱势边（{lo['side']}）或抢其强势边。")
+    # Tempo
+    if len(tempo) == 2:
+        short = next((t for t in tempo if t["bucket"].startswith("短")), None)
+        long = next((t for t in tempo if t["bucket"].startswith("长")), None)
+        if short and long:
+            if short["winrate"] > long["winrate"] + 5:
+                g.append(f"**节奏**：{focus} 是**前期节奏队**（短局胜率 {short['winrate']}% > 长局 {long['winrate']}%）——稳住前中期、拖入后期可降低其胜率。")
+            elif long["winrate"] > short["winrate"] + 5:
+                g.append(f"**节奏**：{focus} 是**后期发育队**（长局胜率 {long['winrate']}% > 短局 {short['winrate']}%）——前期主动压制、速推逼团、别让其舒服发育。")
+    # Ban targets: high pick + high winrate signature heroes
+    bans = sorted([h for h in hero_pref if h["winrate"] >= 55], key=lambda h: (h["picks"], h["winrate"]), reverse=True)[:4]
+    if bans:
+        g.append("**Ban 目标**：优先 ban 其高频高胜英雄 → " + "；".join(f"{b['hero']}（{b['picks']}次/{b['winrate']}%）" for b in bans) + "。")
+    # Key threat players
+    if players:
+        core = sorted(players, key=lambda p: p["gpm"], reverse=True)[0]
+        pk = sorted(players, key=lambda p: p["kda"], reverse=True)[0]
+        g.append(f"**核心威胁**：Carry 经济核心 **{core['player_name']}**（{core['role']}, GPM {core['gpm']}, 胜率 {core['winrate']}%）——针对其发育路线 gank/封野；团战核心 **{pk['player_name']}**（KDA {pk['kda']}）优先集火/切入。")
+    # Win factor from correlations (exclude near-1 trivial pairs by design: these are vs win)
+    factors = {k: v for k, v in wc.items() if v is not None}
+    if factors:
+        top = max(factors.items(), key=lambda kv: abs(kv[1]))
+        low_death = factors.get("deaths")
+        msg = f"**制胜因子**：{focus} 胜负与「{_CORR_LABEL.get(top[0], top[0])}」相关性最高（r={top[1]}）"
+        if low_death is not None and low_death <= -0.3:
+            msg += f"；死亡数与胜负负相关（r={low_death}）——通过多线牵制、抓落单制造其死亡即可有效降低其胜率"
+        g.append(msg + "。")
+    return g
+
+
+def _report(focus, xg_games, xg_winrate, overall, sides, opponents, tempo,
+            players, signatures, hero_pref, wc, guidance, data_note=None) -> str:
+    L = [f"# Dota 2 战队深度分析报告 · {focus}\n",
+         "> 由 data-analysis-service 端到端生成（SQL/OLAP · 分边/节奏/对阵 · 选手签名英雄 · 制胜因子相关 · 战术指导）。数据结构对齐 OpenDota。"]
     if data_note:
         L.append(f"> {data_note}")
     L.append("")
-    L.append("## 1. 战队战绩总览")
-    L += _table(team_stats, ["team", "games", "wins", "winrate", "avg_duration_min"])
-    L.append(f"\n- 联赛对局时长中位数：**{med} min**（节奏型/发育型分界）\n")
-    L.append("## 2. 选手经验与数据（Top by GPM）")
-    L += _table(sorted(player_stats, key=lambda p: p["gpm"], reverse=True)[:12],
-                ["player_name", "team", "role", "games", "kda", "gpm", "xpm", "lh", "hero_pool_size", "winrate"])
+
+    L.append("## 1. XG 战绩概览")
+    L.append(f"- 样本对局：**{xg_games}** 场 · 胜率 **{xg_winrate}%** · 平均时长 **{overall.get('avg_dur')} min**")
     L.append("")
-    L.append("## 3. 战队招牌英雄（习惯）")
-    for t in team_stats[:6]:
-        L.append(f"- **{t['team']}**：{', '.join(_top_heroes(hero_habits, t['team'], 3))}")
+    L.append("**天辉 / 夜魇 分边胜率**")
+    L += _table(sides, ["side", "games", "wins", "winrate"], ["分边", "场次", "胜", "胜率%"])
     L.append("")
-    L.append("## 4. 关键相关性（表现 ↔ 胜负）")
-    for p in corr.get("high_correlation_pairs", []) or [{"col1": "-", "col2": "-", "r": "-", "strength": "无强相关"}]:
-        L.append(f"- **{p['col1']} ↔ {p['col2']}**：r={p['r']}（{p['strength']}）")
+
+    L.append("## 2. 对阵各对手战绩")
+    L += _table(opponents[:12], ["opponent", "games", "wins", "winrate"], ["对手", "场次", "胜", "胜率%"])
     L.append("")
-    L.append("## 5. 选手打法聚类 (KMeans)")
-    L.append(f"- 自动最优簇数 k=**{clustering.get('optimal_k', clustering.get('n_clusters','?'))}**，轮廓系数 {clustering.get('silhouette_score','N/A')}")
+
+    L.append("## 3. 节奏画像（时长 ↔ 胜负）")
+    L += _table(tempo, ["bucket", "games", "wins", "winrate", "avg_dur"], ["局长分档", "场次", "胜", "胜率%", "均时长"])
     L.append("")
-    L.append("## 6. 自动洞察 (Insight Copilot)")
-    nar = insights.get("narrative", {})
-    L.append(f"**{nar.get('headline','')}**\n")
-    for s in nar.get("sections", []):
-        L.append(f"- {s}")
-    if nar.get("recommendation"):
-        L.append(f"- **建议**：{nar['recommendation']}")
+
+    L.append("## 4. XG 选手数据（经验与效率）")
+    L += _table(players, ["player_name", "role", "games", "kda", "gpm", "xpm", "lh", "hero_pool", "winrate"],
+                ["选手", "位置", "场次", "KDA", "GPM", "XPM", "正补", "英雄池", "胜率%"])
     L.append("")
-    L.append("## 7. 战术指导 (Tactical Guidance)")
+
+    L.append("## 5. 选手签名英雄（≥3 场，按使用次数）")
+    by_player = {}
+    for s in signatures:
+        by_player.setdefault(s["player_name"], []).append(s)
+    for name, rows in by_player.items():
+        top = sorted(rows, key=lambda x: x["games"], reverse=True)[:4]
+        L.append(f"- **{name}**：" + "，".join(f"{r['hero']}（{r['games']}场/{r['winrate']}%胜/KDA{r['kda']}）" for r in top))
+    L.append("")
+
+    L.append("## 6. XG 英雄偏好（Top，含该英雄胜率）")
+    L += _table(hero_pref, ["hero", "picks", "winrate"], ["英雄", "使用次数", "胜率%"])
+    L.append("")
+
+    L.append("## 7. 制胜因子：各项数据与胜负的相关性")
+    L.append("> 相关系数越大表示该项越能区分 XG 的胜负（区别于「GPM↔XPM」这类恒相关的废话指标）。")
+    order = sorted([(k, v) for k, v in wc.items() if v is not None], key=lambda kv: abs(kv[1]), reverse=True)
+    for k, v in order:
+        L.append(f"- {_CORR_LABEL.get(k, k)}：r = **{v}**")
+    L.append("")
+
+    L.append("## 8. 战术指导（如何打 XG）")
     for item in guidance:
         L.append(f"- {item}")
     L.append("")

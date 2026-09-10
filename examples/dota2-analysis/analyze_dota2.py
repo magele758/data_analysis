@@ -45,7 +45,8 @@ def run_dota2_analysis(data_dir: str, out_path: str, session_id: str = "dota2_de
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(res["report_markdown"])
     return {"teams": res["teams"], "players": res["players"],
-            "report": out_path, "insights": res["insights"]["total_insights"]}
+            "focus_team": res.get("focus_team"), "focus_games": res.get("focus_games"),
+            "focus_winrate": res.get("focus_winrate"), "report": out_path}
 
 
 if __name__ == "__main__":

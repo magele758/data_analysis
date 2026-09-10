@@ -39,12 +39,13 @@ def test_erp_example_end_to_end(tmp_path):
 def test_dota2_example_end_to_end(tmp_path):
     m = _load("examples/dota2-analysis/analyze_dota2.py", "analyze_dota2")
     out = tmp_path / "report.md"
+    # tmp has no real data -> synthesizes sample (9 teams incl. Xtreme Gaming).
     res = m.run_dota2_analysis(str(tmp_path / "data"), str(out))
     assert res["teams"] == 9
     assert res["players"] == 45
+    assert res["focus_team"] == "Xtreme Gaming" and res["focus_games"] > 0
     text = out.read_text(encoding="utf-8")
-    assert "Dota 2 战队与选手分析报告" in text
-    for section in ("战队战绩总览", "KMeans", "Insight Copilot", "战术指导"):
+    assert "Dota 2 战队深度分析报告" in text and "Xtreme Gaming" in text
+    for section in ("XG 战绩概览", "对阵各对手", "节奏画像", "签名英雄", "制胜因子", "战术指导"):
         assert section in text
-    # Tactical guidance must name concrete ban targets.
     assert "ban" in text.lower()

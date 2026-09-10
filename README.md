@@ -8,7 +8,7 @@
 
 ## 🎬 示例展示 (Showcase)
 
-内置**行业示例**可在治理大盘里一键跑通完整分析管道并生成报告（`examples/` 亦提供 CLI 版本）。下图为 **Dota 2 战队与选手分析**，数据来自 **OpenDota API 的真实职业比赛**（**Xtreme Gaming / XG** 及其对手，抓取脚本见 `examples/dota2-analysis/fetch_opendota.py`）：战队战绩榜、选手经验与习惯、KMeans 打法聚类、Insight Copilot 自动洞察，以及规则化**战术指导**。
+内置**行业示例**可在治理大盘里一键跑通完整分析管道并生成报告（`examples/` 亦提供 CLI 版本）。下图为 **Dota 2 战队深度分析（Xtreme Gaming / XG）**，数据来自 **OpenDota API 的真实职业比赛**（抓取脚本见 `examples/dota2-analysis/fetch_opendota.py`）。这是一份以 XG 为主体的**侦察报告**：战绩概览与天辉/夜魇分边、对阵各对手战绩、节奏画像（前期/后期队判定）、选手数据与**签名英雄及其胜率**、英雄偏好、**制胜因子（各项数据与胜负的相关性，剔除 GPM↔XPM 这类恒相关噪声）**，以及可执行的**战术指导（如何打 XG）**。
 
 > 📅 **数据获取日期：2026-09-10 (UTC)**，来源 OpenDota API（获取元数据见 `examples/dota2-analysis/real_data/_meta.json`）。
 
