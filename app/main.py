@@ -249,7 +249,9 @@ def api_driver_analysis(req: DriverAnalysisRequest):
         base_filter=req.base_filter,
         current_filter=req.current_filter,
         agg_func=req.agg_func,
-        top_k=req.top_k
+        top_k=req.top_k,
+        rate_col=req.rate_col,
+        volume_col=req.volume_col,
     )
     summary = NarrativeBuilder.generate_driver_narrative(res)
     chart_data = []
@@ -273,7 +275,8 @@ def api_spss_test(req: HypothesisTestRequest):
         test_type=req.test_type,
         dependent_var=req.dependent_var,
         group_var=req.group_var,
-        alpha=req.alpha
+        alpha=req.alpha,
+        factor_b=req.factor_b,
     )
     summary = NarrativeBuilder.generate_spss_narrative(res)
     return AnalysisResponse(
@@ -337,7 +340,7 @@ def api_sql(req: SQLSandboxRequest):
 
 @app.post("/api/v1/tools/correlation", response_model=AnalysisResponse)
 def api_correlation(req: CorrelationRequest):
-    res = run_correlation_analysis(req.session_id, req.dataset_name, req.columns, req.method)
+    res = run_correlation_analysis(req.session_id, req.dataset_name, req.columns, req.method, group_col=req.group_col)
     return AnalysisResponse(
         status="success", session_id=req.session_id,
         summary_text=f"{req.method} correlation over {len(res['columns'])} columns; {len(res['high_correlation_pairs'])} strong pairs.",
@@ -503,9 +506,16 @@ class SemanticQueryRequest(BaseModel):
 @app.post("/api/v1/catalog/metrics/query")
 def api_query_semantic_metrics(req: SemanticQueryRequest):
     store = get_semantic_store(req.session_id)
-    sql = store.compile_query(req.metric_names, req.dimensions, req.filters, req.order_by, req.limit)
-    res = run_duckdb_sql(req.session_id, sql, limit=req.limit)
-    return {"compiled_sql": sql, "data": res["data"], "columns": res["columns"]}
+    sql = store.compile_governed(req.metric_names, req.dimensions, req.filters, req.order_by, req.limit)
+    res = run_duckdb_sql(req.session_id, sql, limit=req.limit, governed=True)
+    versions = {name: store.metric_version(name) for name in req.metric_names}
+    return {
+        "compiled_sql": sql,
+        "data": res["data"],
+        "columns": res["columns"],
+        "governed": True,
+        "metric_versions": versions,
+    }
 
 # ----------------- Modern Data Stack: Transform & ELT DAG -----------------
 

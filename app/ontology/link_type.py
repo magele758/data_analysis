@@ -12,4 +12,8 @@ class LinkType(BaseModel):
     # Join specification: how source table relates to target table
     source_join_key: str # e.g. "customer_id" in Customer
     target_join_key: str # e.g. "customer_id" in Order
+    # MANY_TO_MANY goes through an association table. Direct joins stay the default.
+    junction_table: Optional[str] = None
+    junction_source_key: Optional[str] = None
+    junction_target_key: Optional[str] = None
     created_at: str = Field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))

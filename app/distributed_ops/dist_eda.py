@@ -1,109 +1,163 @@
-import math
-from typing import Dict, Any, List, Optional
-import pyarrow as pa
+from typing import Any, Dict, List
+
 import duckdb
-import numpy as np
+
+from app.engine.evidence import Stopwatch, evidence
 from app.engine.schema_infer import SchemaInferencer, SemanticType
-from app.engine.sql_guard import safe_table_ref
+from app.engine.sql_guard import safe_ident, safe_table_ref
+
+_SAMPLE_ROWS = 5000
+
 
 class DistributedEDA:
-    """Distributed Single-Pass Sufficient Statistics Engine for Million/Billion Row Profiling."""
+    """Single-pass sufficient statistics for table profiling.
+
+    One aggregate query covers nulls, distinct counts, and numeric moments.
+    A second query, only when categorical columns exist, collects top values.
+    Type roles still come from a bounded sample and are labeled as such.
+    """
 
     @classmethod
     def profile_table(cls, con: duckdb.DuckDBPyConnection, table_name: str) -> Dict[str, Any]:
+        clock = Stopwatch()
         report_name = table_name
-        table_name = safe_table_ref(table_name)
-        total_rows = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
-        schema_map = SchemaInferencer.infer_table_schema(con.execute(f"SELECT * FROM {table_name} LIMIT 5000").arrow())
+        table_ref = safe_table_ref(table_name)
+        sample_sql = f"SELECT * FROM {table_ref} LIMIT {_SAMPLE_ROWS}"
+        sample = con.execute(sample_sql).arrow()
+        schema_map = SchemaInferencer.infer_table_schema(sample)
 
-        column_reports = {}
+        count_sql = f"SELECT COUNT(*) FROM {table_ref}"
+        total_hint = int(con.execute(count_sql).fetchone()[0] or 0)
+        use_approx = total_hint > 100_000
+        distinct_method = "approx_count_distinct" if use_approx else "exact"
+        select_parts = ["COUNT(*) AS __n"]
+        indexed: List[tuple] = []
+        for i, (col_name, meta) in enumerate(schema_map.items()):
+            quoted = safe_ident(col_name)
+            select_parts.append(f'COUNT(*) - COUNT({quoted}) AS "__null_{i}"')
+            dist_expr = f"approx_count_distinct({quoted})" if use_approx else f"COUNT(DISTINCT {quoted})"
+            select_parts.append(f'{dist_expr} AS "__dist_{i}"')
+            if meta["semantic_type"] == SemanticType.MEASURE.value:
+                select_parts.extend([
+                    f'AVG({quoted}) AS "__mean_{i}"',
+                    f'STDDEV_SAMP({quoted}) AS "__std_{i}"',
+                    f'MIN({quoted}) AS "__min_{i}"',
+                    f'MAX({quoted}) AS "__max_{i}"',
+                    f'MEDIAN({quoted}) AS "__p50_{i}"',
+                    f'QUANTILE_CONT({quoted}, 0.25) AS "__p25_{i}"',
+                    f'QUANTILE_CONT({quoted}, 0.75) AS "__p75_{i}"',
+                    f'QUANTILE_CONT({quoted}, 0.95) AS "__p95_{i}"',
+                    f'QUANTILE_CONT({quoted}, 0.99) AS "__p99_{i}"',
+                    f'SKEWNESS({quoted}) AS "__skew_{i}"',
+                    f'KURTOSIS({quoted}) AS "__kurt_{i}"',
+                ])
+            indexed.append((i, col_name, meta))
+
+        profile_sql = f"SELECT {', '.join(select_parts)} FROM {table_ref}"
+        rel = con.execute(profile_sql)
+        names = [d[0] for d in rel.description]
+        stats = dict(zip(names, rel.fetchone()))
+        total_rows = int(stats["__n"] or 0)
+
+        cat_cols = [
+            (i, col_name)
+            for i, col_name, meta in indexed
+            if meta["semantic_type"] == SemanticType.DIMENSION_CATEGORICAL.value
+        ]
+        top_by_col: Dict[str, List[Dict[str, Any]]] = {name: [] for _, name in cat_cols}
+        cat_sql = None
+        if cat_cols and total_rows:
+            unions = []
+            for i, col_name in cat_cols:
+                quoted = safe_ident(col_name)
+                label = col_name.replace("'", "''")
+                unions.append(
+                    f"""SELECT '{label}' AS col, CAST({quoted} AS VARCHAR) AS val, COUNT(*) AS cnt
+                        FROM {table_ref} WHERE {quoted} IS NOT NULL GROUP BY 2"""
+                )
+            cat_sql = " UNION ALL ".join(unions)
+            for col, val, cnt in con.execute(cat_sql).fetchall():
+                top_by_col.setdefault(col, []).append((cnt, val))
+            for col, pairs in top_by_col.items():
+                pairs.sort(key=lambda p: p[0], reverse=True)
+                top_by_col[col] = [
+                    {
+                        "value": str(val),
+                        "count": int(cnt),
+                        "percentage": round(cnt * 100.0 / total_rows, 2),
+                    }
+                    for cnt, val in pairs[:10]
+                ]
+
+        column_reports: Dict[str, Any] = {}
         quality_penalties = 0
-
-        for col_name, meta in schema_map.items():
-            sem_t = meta["semantic_type"]
-            phy_t = meta["physical_type"]
-            
-            null_distinct_sql = f"""
-            SELECT 
-                COUNT(*) - COUNT("{col_name}") AS null_cnt,
-                COUNT(DISTINCT "{col_name}") AS distinct_cnt
-            FROM {table_name}
-            """
-            null_cnt, dist_cnt = con.execute(null_distinct_sql).fetchone()
+        for i, col_name, meta in indexed:
+            null_cnt = int(stats.get(f"__null_{i}") or 0)
+            dist_cnt = int(stats.get(f"__dist_{i}") or 0)
             null_rate = (null_cnt / max(1, total_rows)) * 100
-
             if null_rate > 30:
                 quality_penalties += 10
             elif null_rate > 5:
                 quality_penalties += 3
-
-            report = {
+            report: Dict[str, Any] = {
                 "column_name": col_name,
-                "physical_type": phy_t,
-                "semantic_type": sem_t,
+                "physical_type": meta["physical_type"],
+                "semantic_type": meta["semantic_type"],
                 "total_rows": total_rows,
                 "null_count": null_cnt,
                 "null_percentage": round(null_rate, 2),
                 "distinct_count": dist_cnt,
+                "distinct_count_method": distinct_method,
             }
+            if meta["semantic_type"] == SemanticType.MEASURE.value and stats.get(f"__mean_{i}") is not None:
+                def _num(key: str):
+                    value = stats.get(key)
+                    return round(float(value), 4) if value is not None else None
 
-            if sem_t == SemanticType.MEASURE.value:
-                num_sql = f"""
-                SELECT 
-                    AVG("{col_name}") AS mean_val,
-                    STDDEV_SAMP("{col_name}") AS std_val,
-                    MIN("{col_name}") AS min_v,
-                    MAX("{col_name}") AS max_v,
-                    MEDIAN("{col_name}") AS p50,
-                    QUANTILE_CONT("{col_name}", 0.25) AS p25,
-                    QUANTILE_CONT("{col_name}", 0.75) AS p75,
-                    QUANTILE_CONT("{col_name}", 0.95) AS p95,
-                    QUANTILE_CONT("{col_name}", 0.99) AS p99,
-                    SKEWNESS("{col_name}") AS skewness,
-                    KURTOSIS("{col_name}") AS kurtosis
-                FROM {table_name}
-                WHERE "{col_name}" IS NOT NULL
-                """
-                row = con.execute(num_sql).fetchone()
-                if row and row[0] is not None:
-                    report.update({
-                        "mean": round(float(row[0]), 4),
-                        "std": round(float(row[1]) if row[1] is not None else 0.0, 4),
-                        "min": round(float(row[2]), 4),
-                        "max": round(float(row[3]), 4),
-                        "quantiles": {
-                            "p25": round(float(row[5]), 4) if row[5] is not None else None,
-                            "p50": round(float(row[4]), 4) if row[4] is not None else None,
-                            "p75": round(float(row[6]), 4) if row[6] is not None else None,
-                            "p95": round(float(row[7]), 4) if row[7] is not None else None,
-                            "p99": round(float(row[8]), 4) if row[8] is not None else None,
-                        },
-                        "skewness": round(float(row[9]), 4) if row[9] is not None else 0.0,
-                        "kurtosis": round(float(row[10]), 4) if row[10] is not None else 0.0,
-                    })
-            elif sem_t == SemanticType.DIMENSION_CATEGORICAL.value:
-                cat_sql = f"""
-                SELECT "{col_name}" AS val, COUNT(*) AS cnt, ROUND(COUNT(*) * 100.0 / {total_rows}, 2) AS pct
-                FROM {table_name}
-                WHERE "{col_name}" IS NOT NULL
-                GROUP BY 1
-                ORDER BY cnt DESC
-                LIMIT 10
-                """
-                top_cats = [
-                    {"value": str(r[0]), "count": r[1], "percentage": r[2]}
-                    for r in con.execute(cat_sql).fetchall()
-                ]
-                report["top_categories"] = top_cats
-
+                report.update({
+                    "mean": _num(f"__mean_{i}"),
+                    "std": _num(f"__std_{i}") or 0.0,
+                    "min": _num(f"__min_{i}"),
+                    "max": _num(f"__max_{i}"),
+                    "quantiles": {
+                        "p25": _num(f"__p25_{i}"),
+                        "p50": _num(f"__p50_{i}"),
+                        "p75": _num(f"__p75_{i}"),
+                        "p95": _num(f"__p95_{i}"),
+                        "p99": _num(f"__p99_{i}"),
+                    },
+                    "skewness": _num(f"__skew_{i}") or 0.0,
+                    "kurtosis": _num(f"__kurt_{i}") or 0.0,
+                })
+            elif meta["semantic_type"] == SemanticType.DIMENSION_CATEGORICAL.value:
+                report["top_categories"] = top_by_col.get(col_name, [])
             column_reports[col_name] = report
 
-        overall_quality_score = max(20, 100 - quality_penalties)
-
+        sqls = [sample_sql, count_sql, profile_sql]
+        if cat_sql:
+            sqls.append(cat_sql)
         return {
             "table_name": report_name,
             "total_rows": total_rows,
             "total_columns": len(schema_map),
-            "quality_score": overall_quality_score,
-            "columns": column_reports
+            "quality_score": max(20, 100 - quality_penalties),
+            "type_inference_sample_rows": min(_SAMPLE_ROWS, total_rows),
+            "profile_scans": len(sqls),
+            "columns": column_reports,
+            "evidence": evidence(
+                operator="eda_profile",
+                sql=sqls,
+                rows_scanned=total_rows,
+                rows_used=total_rows,
+                duration_ms=clock.ms(),
+                method="single_pass_aggregates",
+                caveats=[
+                    f"Semantic types were inferred from the first {min(_SAMPLE_ROWS, total_rows)} rows.",
+                    (
+                        "distinct_count uses DuckDB approx_count_distinct because the table has more than 100,000 rows."
+                        if use_approx
+                        else "distinct_count is an exact COUNT(DISTINCT). Tables over 100,000 rows switch to approx_count_distinct."
+                    ),
+                ],
+            ),
         }

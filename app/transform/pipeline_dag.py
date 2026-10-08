@@ -4,16 +4,19 @@ from typing import Dict, List, Set, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
 import duckdb
-from app.catalog.lineage_tracker import get_lineage_tracker
+from app.catalog.lineage_tracker import _lineage_sources, get_lineage_tracker
 from app.catalog.metadata_db import MetadataDB
 from app.engine.sql_guard import safe_ident, safe_model_sql
 
 class DAGModel(BaseModel):
     name: str
     sql: str
-    materialization: str = "table" # table, view, ephemeral
+    materialization: str = "table" # table, view, ephemeral, incremental
     depends_on: List[str] = Field(default_factory=list)
     description: Optional[str] = ""
+    # Rows whose unique_key appears in the new SQL replace the stored row.
+    # Without it, incremental does a full refresh.
+    unique_key: Optional[str] = None
 
 class PipelineDAG:
     """dbt-style DAG engine. The default ("_global") namespace persists models to
@@ -51,6 +54,16 @@ class PipelineDAG:
 
     def register_model(self, model: DAGModel) -> DAGModel:
         with self._lock:
+            if not model.depends_on:
+                inferred = []
+                seen = set()
+                for name in _lineage_sources(model.sql):
+                    if name.lower() == model.name.lower() or name.lower() in seen:
+                        continue
+                    seen.add(name.lower())
+                    inferred.append(name)
+                if inferred:
+                    model = model.model_copy(update={"depends_on": inferred})
             self._models[model.name] = model
             if self.persistent:
                 self.db.save_dag_model(model.model_dump())
@@ -112,15 +125,19 @@ class PipelineDAG:
         name = model.name
         name_ref = safe_ident(name)
         mat_type = model.materialization.lower()
-        if mat_type not in ("table", "view", "ephemeral"):
+        if mat_type not in ("table", "view", "ephemeral", "incremental"):
             raise ValueError(f"Invalid materialization {model.materialization!r}")
         staging_ref = safe_ident(f"_stg_swap_{name}")
         model_sql = safe_model_sql(model.sql)
 
         start_t = time.time()
         try:
-            if mat_type == "view":
+            merge_mode = None
+            if mat_type in ("view", "ephemeral"):
+                # Ephemeral is a view: downstream models read it, nothing is stored as a table.
                 con.execute(f"CREATE OR REPLACE VIEW {name_ref} AS {model_sql}")
+            elif mat_type == "incremental":
+                merge_mode = self._materialize_incremental(con, model, name_ref, staging_ref, model_sql)
             else:
                 # 1. Build into staging table
                 con.execute(f"CREATE OR REPLACE TABLE {staging_ref} AS {model_sql}")
@@ -131,13 +148,16 @@ class PipelineDAG:
             row_count = con.execute(f"SELECT count(*) FROM {name_ref}").fetchone()[0]
             duration_ms = round((time.time() - start_t) * 1000, 2)
 
-            return {
+            result = {
                 "model_name": name,
                 "materialization": mat_type,
                 "row_count": row_count,
                 "duration_ms": duration_ms,
                 "status": "SUCCESS"
             }
+            if merge_mode:
+                result["incremental_mode"] = merge_mode
+            return result
         except Exception as e:
             # Cleanup staging table on failure
             try:
@@ -145,6 +165,30 @@ class PipelineDAG:
             except Exception:
                 pass
             raise RuntimeError(f"Model '{name}' execution failed: {str(e)}")
+
+    def _materialize_incremental(self, con, model: DAGModel, name_ref: str, staging_ref: str, model_sql: str) -> str:
+        """Merge on unique_key when the target already exists. Otherwise full refresh."""
+        exists = _relation_exists(con, name_ref)
+        if not exists or not model.unique_key:
+            con.execute(f"CREATE OR REPLACE TABLE {staging_ref} AS {model_sql}")
+            con.execute(f"DROP TABLE IF EXISTS {name_ref}")
+            con.execute(f"ALTER TABLE {staging_ref} RENAME TO {name_ref}")
+            return "full_refresh"
+        key = safe_ident(model.unique_key)
+        con.execute(f"CREATE OR REPLACE TABLE {staging_ref} AS {model_sql}")
+        described = con.execute(f"DESCRIBE {staging_ref}").fetchall()
+        cols = ", ".join(safe_ident(row[0]) for row in described)
+        con.execute("BEGIN TRANSACTION")
+        try:
+            con.execute(f"DELETE FROM {name_ref} WHERE {key} IN (SELECT {key} FROM {staging_ref})")
+            con.execute(f"INSERT INTO {name_ref} ({cols}) SELECT {cols} FROM {staging_ref}")
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+        finally:
+            con.execute(f"DROP TABLE IF EXISTS {staging_ref}")
+        return "merge"
 
     def clear_models(self):
         with self._lock:
@@ -176,6 +220,14 @@ class PipelineDAG:
             "total_duration_ms": total_duration,
             "results": all_results
         }
+
+def _relation_exists(con: duckdb.DuckDBPyConnection, name_ref: str) -> bool:
+    try:
+        con.execute(f"SELECT 1 FROM {name_ref} LIMIT 0")
+        return True
+    except duckdb.Error:
+        return False
+
 
 def get_pipeline_engine(session_id: str = "_global") -> PipelineDAG:
     with PipelineDAG._lock:

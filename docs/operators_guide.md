@@ -13,10 +13,10 @@
 * **作用**：从底层 DuckDB 数据表中检索具体业务实体（如 `Customer`、`Order`），支持属性投影与动态过滤条件。
 
 ### 3. 实体关系多跳遍历算子 (`ontology_traverse_links`)
-* **作用**：沿着实体拓扑关系链执行图遍历（如从客户 `C01` 出发，通过 `customer_orders` 遍历出所有关联订单）。
+* **作用**：沿着实体拓扑关系链执行图遍历（如从客户 `C01` 出发，通过 `customer_orders` 遍历出所有关联订单）。返回 `path`、`hops` 和每一跳的 `hop_counts`。$N:M$ 经关联表连接，关联表字段会写入目录库。
 
 ### 4. 业务动作闭环执行算子 (`ontology_execute_action`)
-* **作用**：执行业务实体上的原子动作（如升级客户等级、重路由订单、下发优惠券），自动执行参数校验、调度 Reverse ETL / Webhook 并生成审计记录（Audit Trail）。
+* **作用**：执行业务实体上的原子动作。审计结果带执行前、执行后和 `statement_hash`。`REVERSE_ETL_SYNC` 在 `handler_config` 提供 `dest_conn_str`、`dest_table_name`、`source_table` 时调用 `DestinationSync`；缺配置时返回失败，不假装同步成功。MCP 默认 `dry_run=true`。
 
 ---
 
@@ -26,14 +26,14 @@
 * **作用**：连接外部 PostgreSQL / MySQL / SQL Server / SQLite / Parquet 文件，按需抽取并加载至当前 Session 内存空间，并自动登记至 Data Catalog。
 
 ### 6. DuckDB 安全 SQL 沙箱 (`duckdb_sql_sandbox`)
-* **作用**：允许 Agent 直接下发原生 DuckDB SQL 表达复杂分析意图，内置安全只读保护与自动分页限制。
+* **作用**：允许 Agent 直接下发原生 DuckDB SQL 表达复杂分析意图。只允许单条 SELECT/EXPLAIN，拒绝 `read_csv`、`read_parquet`、`postgres_scan` 等外部表函数，并在该条语句执行期间关闭 `enable_external_access`。指标编译出的 SQL 标记 `governed=true`；自由 SQL 标记 `ungoverned_sql=true`。
 
 ---
 
 ## 三、 资产目录与统一指标语义层
 
 ### 7. 统一指标语义查询算子 (`query_semantic_metric`)
-* **作用**：根据 Semantic Metric Store 中标准化的指标公式与维度定义，自动编译为标准 DuckDB 执行 SQL 并返回结果。
+* **作用**：根据 Semantic Metric Store 中标准化的指标公式与维度定义，自动编译为标准 DuckDB 执行 SQL 并返回结果。注册了语义模型时，指标先在自己的表上聚合，再沿外键指向主键做最多两跳多对一连接；一对多扇出会被拒绝。`CUMULATIVE` 指标沿模型的时间脊做累计。`RATIO` 先聚合分子指标、再聚合分母指标，然后相除，不会先对行比率取平均。查询响应带 `metric_versions`（公式、表、聚合方式的短哈希）和编译后的 SQL。配套工具：`register_semantic_metric`、`list_semantic_metrics`、`register_semantic_model`、`list_session_datasets`。未登记维度白名单时，编译仍接受调用方传入的维度。
 
 ---
 
@@ -43,23 +43,23 @@
 * **作用**：对指定数据表执行自动去重、空值填充（均值/中位数/众数/常数）、极值缩尾截断（Winsorization）。
 
 ### 9. dbt 风格 SQL DAG 建模调度算子 (`run_dag_pipeline`)
-* **作用**：基于 Kahn 拓扑排序算法，按模型依赖顺序依次物化 DAG 管道中的所有模型，支持影子表原子替换与回滚。
+* **作用**：基于 Kahn 拓扑排序算法，按模型依赖顺序依次物化 DAG 管道中的所有模型，支持影子表原子替换与回滚。`view` 与 `ephemeral` 建成视图；`incremental` 在提供 `unique_key` 且目标表已存在时按键合并，否则整表刷新。同一条 DuckDB 连接上按阶段顺序执行。`depends_on` 留空时，用 SQL 血缘解析补上来源表；调用方显式传入的依赖不会被覆盖。
 
 ---
 
 ## 五、 核心数理统计、归因与自动洞察
 
 ### 10. EDA 探索性数据画像算子 (`eda_profile`)
-* **作用**：全表扫描并秒级输出字段业务语义类型推断、描述性统计、偏度峰度与数据质量综合得分。
+* **作用**：一次聚合扫描输出空值、均值、标准差、分位数、偏度和峰度。语义类型仍来自前 5000 行样本，结果里写着 `type_inference_sample_rows`。表不超过 10 万行时 distinct 是精确计数；超过之后用 `approx_count_distinct`，并在列上标明 `distinct_count_method`。
 
 ### 11. 多维异动下钻与归因算子 (`driver_attribution_analysis`)
-* **作用**：针对指标波动，沿维度层级路径逐层下钻，输出 Shapley 贡献度与层级瀑布树。
+* **作用**：针对指标波动，沿维度层级路径逐层下钻。`SUM` 使用加法贡献，每一层子项差值之和等于总差值，并在结果里记录 `closes`。`AVG`/`COUNT`/`MIN`/`MAX` 只做水平对比，不声称闭合。同时传入 `rate_col` 与 `volume_col` 时，按 Laspeyres 恒等式拆成量效应、率效应和交互项（`structure_effect` 与交互项是同一个交叉项）。结果里的 `orderings_used` 是 1：按调用方给出的维度顺序下钻，不计算 Sun-Shapley。方法名写在 `method` 字段里。这不是 Shapley 值。
 
 ### 12. SPSS 级数理假设检验算子 (`spss_hypothesis_test`)
-* **支持类型**：独立样本 t 检验（含 Levene 方差齐性与 Welch 校正）、单因素 ANOVA 方差分析（含事后 Tukey HSD 与 eta^2）、卡方独立性检验（含 Cramér's V）、Mann-Whitney U 检验。
+* **支持类型**：独立样本 t 检验（含 Levene 方差齐性与 Welch 校正）、配对样本 t 检验（`paired_t_test`，两个数值列）、单因素 ANOVA（含事后 Tukey HSD 与 eta^2）、双因素 ANOVA（`two_way_anova`，需要 `factor_b`，含交互项）、卡方独立性检验（含 Cramér's V）、Mann-Whitney U 检验。`significant` 同时要求 p 值过线，以及效应量过线：|Cohen's d| ≥ 0.2、η² ≥ 0.01、Cramér's V ≥ 0.1、|rank-biserial r| ≥ 0.1。
 
 ### 13. 多元回归与计量经济学诊断算子 (`spss_regression_analysis`)
-* **支持模型**：OLS 多元线性回归（$R^2$、F检验、系数表、VIF 多重共线性诊断、Durbin-Watson 残差自相关检验）、二元 Logistic 回归。
+* **支持模型**：OLS 多元线性回归（$R^2$、F检验、系数表、VIF 多重共线性诊断、Durbin-Watson 残差自相关检验）、二元 Logistic 回归。自变量超过 40 列，或扫描单元格超过 500 万时，返回「请先聚合再回归」，不把明细拉进进程。
 
 ### 14. 自动化洞察挖掘算子 (`detect_automated_insights`)
 * **异常点 (Outliers)**：3-Sigma、IQR、孤立森林。
@@ -68,6 +68,17 @@
 
 ### 15. 内存多维 OLAP 聚合算子 (`memory_olap_aggregation`)
 * **作用**：多维切片切块（Slice & Dice）、Rollup 与 Cube 聚合。
+
+### 实测：1000 万行上的 EDA 与相关
+
+2026-10-08，在 Darwin 24.6.0 arm64、Python 3.13.2、DuckDB 1.5.5 上测了一次。会话 `bench_slice` 用 `range(10000000)` 建表 `bench10m`，列是 `id`、`x = i % 1000`、`y = i % 50`、`z = sin(i)`。EDA 和相关各起一个新进程。macOS 的 `ru_maxrss` 单位是字节，峰值包含这张表。建表约 0.20 秒，不在下表的算子耗时里。这是这一次测量，不是性能承诺。
+
+| 算子 | 行数 | 耗时 | 进程峰值 RSS |
+| --- | ---: | ---: | ---: |
+| `DistributedEDA.profile_table` | 10,000,000 | 1.930 秒（evidence `duration_ms` 1930.06） | 3,229,220,864 字节（3079.6 MiB） |
+| `run_correlation_analysis`（`x`,`y`,`z`，Pearson） | 10,000,000 | 0.010 秒（evidence `duration_ms` 10.14） | 568,754,176 字节（542.4 MiB） |
+
+EDA 四列的 `distinct_count_method` 都是 `approx_count_distinct`，`rows_scanned` 为 10000000。相关的 `rows_scanned` 和 `sample_size` 也是 10000000，返回的 `high_correlation_pairs` 为 0。
 
 ---
 

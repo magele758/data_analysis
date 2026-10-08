@@ -1,3 +1,5 @@
+import shutil
+import tempfile
 import time
 import uuid
 import threading
@@ -5,6 +7,7 @@ from typing import Dict, Optional, Any, List
 import duckdb
 import pyarrow as pa
 from app.config import settings
+from app.engine.sql_guard import safe_ident
 
 class DatasetMeta:
     def __init__(self, name: str, arrow_table: pa.Table, source_info: Optional[Dict[str, Any]] = None):
@@ -28,11 +31,18 @@ class SessionContext:
         self.last_accessed_at = time.time()
         self.datasets: Dict[str, DatasetMeta] = {}
         self._con = duckdb.connect(":memory:")
-        
-        # Configure DuckDB performance settings
-        self._con.execute(f"SET memory_limit = '{settings.DUCKDB_MEMORY_LIMIT}'")
+        self._temp_dir = tempfile.mkdtemp(prefix=f"duckdb-{session_id[:12]}-")
+        # One session cannot claim the whole machine. Spill lands in temp_directory.
+        session_limit = f"{int(settings.MAX_MEMORY_PER_SESSION_MB)}MB"
+        self._con.execute(f"SET memory_limit = '{session_limit}'")
         self._con.execute(f"SET threads = {settings.DUCKDB_THREADS}")
+        try:
+            escaped = self._temp_dir.replace("'", "''")
+            self._con.execute(f"SET temp_directory = '{escaped}'")
+        except duckdb.Error:
+            pass
         self._lock = threading.Lock()
+        self.memory_limit = session_limit
 
     def touch(self):
         self.last_accessed_at = time.time()
@@ -45,9 +55,36 @@ class SessionContext:
             table = table.read_all()
         with self._lock:
             self.touch()
+            new_bytes = int(getattr(table, "nbytes", 0) or 0)
+            used = sum(
+                meta.memory_bytes for key, meta in self.datasets.items() if key != name
+            )
+            limit_bytes = int(settings.MAX_MEMORY_PER_SESSION_MB) * 1024 * 1024
+            if used + new_bytes > limit_bytes:
+                raise ValueError(
+                    f"Session '{self.session_id}' memory budget exceeded: "
+                    f"{used + new_bytes} bytes > {limit_bytes} bytes "
+                    f"({settings.MAX_MEMORY_PER_SESSION_MB} MB). "
+                    "Sessions are process-local; extra workers do not share this budget."
+                )
             # Register arrow table directly as zero-copy in-memory view
             self._con.register(name, table)
-            meta = DatasetMeta(name, table, source_info)
+            meta = DatasetMeta(name, table, _redact_source(source_info))
+            try:
+                summary = self._con.execute(f"SUMMARIZE {safe_ident(name)}").fetchall()
+                meta.summarize = [
+                    {"column": r[0], "type": r[1], "approx_unique": r[4], "null_percentage": r[10]}
+                    if len(r) > 10 else {"column": r[0]}
+                    for r in summary
+                ]
+            except Exception:
+                meta.summarize = None
+            try:
+                self._con.execute(f"ANALYZE {safe_ident(name)}")
+                meta.stats_collected = True
+            except Exception:
+                # Views over Arrow often have no persistent-table statistics.
+                meta.stats_collected = False
             self.datasets[name] = meta
             return meta
 
@@ -78,6 +115,15 @@ class SessionContext:
             except Exception:
                 pass
             self.datasets.clear()
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
+
+
+def _redact_source(source_info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    info = dict(source_info or {})
+    for key in ("conn_str", "connection_string", "password"):
+        if key in info and isinstance(info[key], str):
+            info[key] = "***"
+    return info
 
 class SessionManager:
     """Singleton manager for multi-tenant in-memory analytical sessions with auto TTL eviction."""

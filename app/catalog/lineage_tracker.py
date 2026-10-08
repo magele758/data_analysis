@@ -41,45 +41,14 @@ class LineageTracker:
         1. Identifies CTEs (Common Table Expressions) declared in `WITH cte AS (...)` to avoid treating CTE aliases as external physical tables.
         2. Extracts all physical source tables referenced in FROM and JOIN clauses.
         3. Records dependencies into the DAG lineage graph.
+
+        sqlglot is used when installed. Its tables are unioned with the regex
+        result, and regex CTE names are always excluded, so a parser miss cannot
+        drop a physical table or promote a CTE.
         """
         if not sql_query:
             return
-
-        # 1. Extract CTE names to exclude them from external dependencies
-        cte_names = set()
-        cte_pattern = re.compile(r'(?:WITH|,)\s*([a-zA-Z0-9_]+)\s+AS\s*\(', re.IGNORECASE)
-        for match in cte_pattern.finditer(sql_query):
-            cte_names.add(match.group(1).lower())
-
-        # 2. Extract FROM and JOIN target sources
-        source_pattern = re.compile(
-            r'(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?',
-            re.IGNORECASE
-        )
-        
-        # Reserved SQL keywords that cannot be table names
-        reserved = {
-            'select', 'where', 'group', 'order', 'having', 'limit', 'union', 
-            'left', 'right', 'inner', 'full', 'outer', 'cross', 'join', 'on', 
-            'as', 'case', 'when', 'then', 'else', 'end', 'values', 'table',
-            'unnest', 'generate_series', 'read_parquet', 'read_csv', 'read_csv_auto'
-        }
-
-        matches = source_pattern.findall(sql_query)
-        for table_ref, alias in matches:
-            clean_name = table_ref.strip('`"[]')
-            # Extract base table if schema-qualified
-            parts = clean_name.split('.')
-            base_table = parts[-1].strip('`"[]')
-
-            base_lower = base_table.lower()
-            if base_lower in reserved:
-                continue
-            if base_lower in cte_names:
-                continue
-            if not base_table.isidentifier():
-                continue
-
+        for base_table in _lineage_sources(sql_query):
             self.record_dependency(base_table, target_table)
 
     def get_lineage_graph(self) -> Dict[str, Any]:
@@ -108,6 +77,77 @@ class LineageTracker:
                 "affected_downstream_count": len(visited),
                 "affected_tables": list(visited)
             }
+
+_LINEAGE_RESERVED = {
+    'select', 'where', 'group', 'order', 'having', 'limit', 'union',
+    'left', 'right', 'inner', 'full', 'outer', 'cross', 'join', 'on',
+    'as', 'case', 'when', 'then', 'else', 'end', 'values', 'table',
+    'unnest', 'generate_series', 'read_parquet', 'read_csv', 'read_csv_auto'
+}
+_CTE_RE = re.compile(r'(?:WITH|,)\s*([a-zA-Z0-9_]+)\s+AS\s*\(', re.IGNORECASE)
+_SOURCE_RE = re.compile(
+    r'(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?',
+    re.IGNORECASE,
+)
+
+
+def _regex_ctes(sql_query: str) -> set:
+    return {match.group(1).lower() for match in _CTE_RE.finditer(sql_query)}
+
+
+def _regex_sources(sql_query: str, cte_names: set) -> List[str]:
+    names = []
+    for table_ref, _alias in _SOURCE_RE.findall(sql_query):
+        base_table = table_ref.strip('`"[]').split('.')[-1].strip('`"[]')
+        base_lower = base_table.lower()
+        if base_lower in _LINEAGE_RESERVED or base_lower in cte_names:
+            continue
+        if not base_table.isidentifier():
+            continue
+        names.append(base_table)
+    return names
+
+
+def _sqlglot_sources(sql_query: str) -> Optional[List[str]]:
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except ImportError:
+        return None
+    try:
+        try:
+            tree = sqlglot.parse_one(sql_query, read="duckdb")
+        except TypeError:
+            tree = sqlglot.parse_one(sql_query, dialect="duckdb")
+    except Exception:
+        return None
+    ctes = set()
+    for cte in tree.find_all(exp.CTE):
+        alias = getattr(cte, "alias_or_name", None) or getattr(cte, "alias", None)
+        if alias:
+            ctes.add(str(alias).split(".")[-1].strip('"').lower())
+    names = []
+    for table in tree.find_all(exp.Table):
+        name = table.name
+        if not name or name.lower() in ctes or name.lower() in _LINEAGE_RESERVED:
+            continue
+        names.append(name)
+    return names
+
+
+def _lineage_sources(sql_query: str) -> List[str]:
+    cte_names = _regex_ctes(sql_query)
+    regex_tables = _regex_sources(sql_query, cte_names)
+    glot_tables = _sqlglot_sources(sql_query) or []
+    merged = []
+    seen = set()
+    for name in list(glot_tables) + list(regex_tables):
+        if name.lower() in cte_names or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        merged.append(name)
+    return merged
+
 
 _lineage_session_instances: Dict[str, "LineageTracker"] = {}
 

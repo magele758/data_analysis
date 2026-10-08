@@ -18,12 +18,12 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 ### 2. Palantir Agentic Ontology Layer
 * **Inspect Schema**: Invoke `ontology_list_schema` to discover all business Object Types, Links, and available Actions.
 * **Query Entities**: Invoke `ontology_query_objects` to search entity instances and status.
-* **Multi-Hop Traversal**: Invoke `ontology_traverse_links` to traverse along relation links across entities (e.g. `Customer -> Orders -> Products`).
-* **Execute Actions**: Invoke `ontology_execute_action` to trigger atomic business operations (e.g. `ApplyDiscountAction`, `RerouteOrderAction`) with full audit trails.
+* **Multi-Hop Traversal**: Invoke `ontology_traverse_links` to traverse along relation links across entities (e.g. `Customer -> Orders -> Products`). The result includes `path` and `hop_counts`. MANY_TO_MANY uses the junction table.
+* **Execute Actions**: Invoke `ontology_execute_action` to trigger atomic business operations (e.g. `ApplyDiscountAction`, `RerouteOrderAction`). The audit stores before, after, and `statement_hash`. The MCP tool defaults `dry_run=true`. Pass `dry_run=false` to write. `link_path` walks more than one hop. A `writeback_table` on `SQL_MUTATION` stores the edit beside the source table. `REVERSE_ETL_SYNC` calls `DestinationSync` only when `dest_conn_str`, `dest_table_name`, and `source_table` are set.
 
 ### 3. Data Catalog & Semantic Layer
 * **Catalog Assets**: Auto-registers ingested files/tables into Data Catalog.
-* **Semantic Metrics**: Invoke `query_semantic_metric` to compute standardized metrics compiled to DuckDB SQL.
+* **Semantic Metrics**: Invoke `register_semantic_metric` / `register_semantic_model`, then `query_semantic_metric`. Governed compilation aggregates on the metric's home table and joins only many-to-one, at most two hops. A `RATIO` metric divides the numerator aggregate by the denominator aggregate. The response includes `metric_versions`. `list_semantic_metrics` and `list_session_datasets` read what the session already holds.
 
 ### 4. ETL / ELT Transformation & Data Cleansing
 * **Data Cleaning**: Invoke `execute_data_cleaning` to deduplicate, fill missing values (mean/median/mode), and clip outliers.
@@ -31,10 +31,10 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 
 ### 5. Analytics, Attribution, Mining & SPSS Testing
 * **EDA Profiling**: Invoke `eda_profile` for semantic types, distribution stats, and data quality scores.
-* **Driver Attribution**: Invoke `driver_attribution_analysis` to drill down root-cause drivers with Shapley contributions.
-* **SPSS Testing & Regression**: Use `spss_hypothesis_test` and `spss_regression_analysis` for formal inference.
-* **Correlation / OLAP Pivot**: `correlation_analysis` (Pearson/Spearman matrix + strong pairs), `pivot_table` (rows × columns aggregation).
-* **Data Mining**: `kmeans_clustering` (auto-k), `rfm_segmentation` (customer value), `timeseries_forecast` (ARIMA-family).
+* **Driver Attribution**: Invoke `driver_attribution_analysis` to drill a metric change. SUM closes as an additive contribution. Pass `rate_col` and `volume_col` for a Laspeyres rate/volume split. `orderings_used` is 1. The result is not a Shapley value.
+* **SPSS Testing & Regression**: Use `spss_hypothesis_test` (`independent_t_test`, `paired_t_test`, `one_way_anova`, `two_way_anova` with `factor_b`, `chi_square`, `mann_whitney`) and `spss_regression_analysis` for formal inference. `significant` also requires an effect-size floor. More than 40 regressors returns `请先聚合再回归`.
+* **Correlation / OLAP Pivot**: `correlation_analysis` (Pearson/Spearman matrix, BH q-values, |r| >= 0.1). Pass `group_col` to surface a Simpson caveat when a group flips the sign. `pivot_table` aggregates rows × columns.
+* **Data Mining**: `kmeans_clustering` (auto-k), `rfm_segmentation` (customer value), `timeseries_forecast` (ARIMA(1,1,1) plus a holdout against last-value and, on a calendar, seasonal naive).
 * **Trace & Web Analytics (on the imported trace table)**: Use `analyze_conversion_funnel`, `analyze_user_flow`, `analyze_cohort_retention`, `analyze_page_performance`, `inspect_trace_and_replay` — each takes `session_id` + `dataset_name` and runs on the session-resident trace/event table (not a separate store).
 
 ### 5b. Insight Copilot (Automated Insight Discovery)
@@ -51,9 +51,9 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 
 ## Notes
 
-- **Session isolation**: Data Catalog, semantic metrics, DAG models, and lineage are scoped per `session_id`. Distinct sessions never see each other's datasets/metrics/models; a DAG run only materializes its own session's models.
+- **Session isolation**: Data Catalog, semantic metrics, DAG models, and lineage are scoped per `session_id`. Distinct sessions never see each other's datasets/metrics/models; a DAG run only materializes its own session's models. The ontology catalog is process-global. A session lives in one process; extra workers do not see its tables. Empty `depends_on` is filled from SQL lineage. An explicit list is kept.
 
 ## Reference Documentation
 
 - [Operators Guide](references/operators.md) - Mathematical formulations and detailed parameter options.
-- [MCP Tools Reference](references/mcp_tools.md) - Exact schema and payload definitions for all 33 MCP tools.
+- [MCP Tools Reference](references/mcp_tools.md) - Exact schema and payload definitions for all 37 MCP tools.

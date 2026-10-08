@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional
 import numpy as np
 import scipy.stats as stats
 from app.cluster.session_manager import SessionManager
+from app.engine.evidence import Stopwatch, evidence
 from app.engine.sql_guard import safe_ident, safe_table_ref
 
 def detect_trends(
@@ -16,6 +17,7 @@ def detect_trends(
     if not sess:
         raise ValueError(f"Session '{session_id}' not found")
     con = sess.get_duckdb_conn()
+    clock = Stopwatch()
 
     group_clause = f", {safe_ident(group_col)}" if group_col else ""
     time_ref = safe_ident(time_col)
@@ -49,7 +51,9 @@ def detect_trends(
             })
 
     direction = "Upward (Increasing)" if slope > 0 else ("Downward (Decreasing)" if slope < 0 else "Flat")
-    significant = bool(p_value < 0.05)
+    # r² of 0.01 is the small-effect floor. A tiny slope with a tiny p-value stays non-significant.
+    effect_ok = bool(r_squared >= 0.01)
+    significant = bool(p_value < 0.05 and effect_ok)
 
     return {
         "time_col": time_col,
@@ -60,5 +64,13 @@ def detect_trends(
         "p_value": round(float(p_value), 6),
         "statistically_significant": significant,
         "change_points": change_points,
-        "series_preview": [{"time": str(r[time_col]), "val": round(float(r["val"]), 2)} for _, r in df.head(20).iterrows()]
+        "series_preview": [{"time": str(r[time_col]), "val": round(float(r["val"]), 2)} for _, r in df.head(20).iterrows()],
+        "evidence": evidence(
+            operator="trend_detection",
+            method="linregress",
+            sql=[sql],
+            rows_used=int(len(df)),
+            duration_ms=clock.ms(),
+            caveats=[] if effect_ok else ["r squared is under 0.01, so the trend is not called significant."],
+        ),
     }

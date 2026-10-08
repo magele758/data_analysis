@@ -18,8 +18,9 @@ class SchemaInferencer:
         type_str = str(pa_type).lower()
         name_lower = col_name.lower()
 
-        # 1. Check ID indicators
-        if name_lower.endswith("_id") or name_lower.endswith("id") or name_lower in ["uuid", "code", "guid", "pk"]:
+        # 1. Check ID indicators. Match a suffix or an exact name.
+        # "paid" and "valid" end with the letters id and are measures, not keys.
+        if name_lower.endswith("_id") or name_lower in {"id", "uuid", "code", "guid", "pk"}:
             return SemanticType.IDENTIFIER
 
         # 2. Check temporal types

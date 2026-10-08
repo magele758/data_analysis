@@ -1,6 +1,6 @@
-# 企业级现代数据栈 (MDS) 与 Palantir 风格 Agentic Ontology 智能分析引擎
+# 单机数据分析服务：现代数据栈 (MDS) 与 Palantir 风格 Ontology
 
-基于 **DuckDB 向量化计算引擎**、**Apache Arrow 零拷贝内存通信** 与 **Palantir 业务本体 (Ontology) 架构** 打造的企业级现代数据智能平台。
+基于 **DuckDB 向量化计算引擎**、**Apache Arrow 零拷贝内存通信** 与 **Palantir 业务本体 (Ontology) 架构** 打造的单机数据分析服务。分析会话钉在单个进程的内存 DuckDB 上，多 worker 或换进程后会话表不在。本体目录是进程级全局目录，没有行级权限。
 提供 **Palantir 风格业务实体 (Objects)、关系拓扑 (Links) 与闭环动作 (Actions)**、**Data Catalog 数据资产与血缘**、**dbt 风格 ELT 数据清洗与 DAG 建模**、**专业统计检验与多维归因**、**Reverse ETL 数据激活与告警** 以及 **全链路交互式治理大盘**。
 全套核心算法 **100% 本地自研实现，零外部重型 SaaS 依赖**。
 
@@ -30,8 +30,8 @@
 
 ### 1. Palantir 风格业务本体模型 (Agentic Ontology) (`app/ontology/`)
 * **业务对象模型 (Object Types)**：将物理表映射为真实实体（`Customer`, `Order`, `Product`, `Device`），包含属性、主键与状态。
-* **实体关系图谱 (Link Types)**：定义 $1:1$、$1:N$、$N:M$ 业务拓扑，支持 Agent 沿实体链执行**多跳图谱遍历与因果溯源**。
-* **业务闭环动作 (Action Types)**：定义可逆、带参数校验的业务动作（如 `ApplyDiscountAction`, `RerouteOrderAction`），打通 Reverse ETL / Webhook 写回并记录完整**审计流水 (Audit Trail)**。
+* **实体关系图谱 (Link Types)**：定义 $1:1$、$1:N$、$N:M$ 业务拓扑。$N:M$ 走关联表。多跳遍历返回路径和每一跳的行数，并检测环。
+* **业务闭环动作 (Action Types)**：定义带参数校验的业务动作（如 `ApplyDiscountAction`, `RerouteOrderAction`）。`SQL_MUTATION` 可以按模板更新，或把改动记到旁路表。审计记录执行前、执行后和语句哈希。`REVERSE_ETL_SYNC` 只有在动作配置里给出目标连接时才调用 `DestinationSync`。MCP 上 `dry_run` 默认为真。
 
 ### 2. Data Catalog 与统一指标语义层 (`app/catalog/`)
 * **资产目录与字典**：沉淀表/字段业务含义、语义类型与标签。
@@ -46,9 +46,9 @@
 * **`discover_insights`**：把 EDA/异常/相关/集中/趋势等确定性算子当作 **Analysis Actions** 编排，产出 ①排序后的结构化洞察 ②**洞察图谱 (Insight Graph)** ——洞察间关系网络 ③**数据叙事 (data story)**。可选 `intent` 轻量偏置要跑的动作。这是新一代自动洞察范式（InsightPilot / DataSage 风格）中**可本地确定性实现**的部分；语义意图理解与多智能体推理交给调用方 Agent（符合"算法本地自研、LLM 高层编排"的边界）。
 
 ### 4. 专业数理统计、异动归因与自动化洞察
-* **SPSS 级假设检验**：独立/配对 t 检验（Levene 方差齐性与 Welch 校正）、单/双因素 ANOVA + Tukey HSD、卡方独立性检验。
+* **SPSS 级假设检验**：独立/配对 t 检验（Levene 方差齐性与 Welch 校正）、单因素 ANOVA + Tukey HSD、双因素 ANOVA（含交互项）、卡方独立性检验。
 * **计量经济学回归**：OLS 多元回归全报告（$R^2$、F检验、VIF 多重共线性预警、Durbin-Watson 残差检验）。
-* **波动下钻归因**：差异分解树 + Shapley 贡献率算法，自动输出瀑布图。
+* **波动下钻归因**：差异分解树。SUM 指标用可闭合的加法贡献；比率×数量用 Laspeyres 分解（量、率、交互项）。这不是 Shapley 值。自动输出瀑布图。
 * **数据挖掘与洞察**：3-Sigma/孤立森林异常点检测、时序突变拐点、基尼/帕累托集中度、KMeans 聚类与 RFM 客户价值模型。
 
 ### 5. Reverse ETL 与业务数据激活 (`app/retl/`)

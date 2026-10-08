@@ -1,6 +1,12 @@
 import time
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
+
+
+def utc_stamp() -> str:
+    """UTC time with microseconds so two audits in the same second stay ordered."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 class ActionParameter(BaseModel):
     name: str
@@ -28,4 +34,4 @@ class ActionExecutionAudit(BaseModel):
     parameters: Dict[str, Any]
     status: str # SUCCESS, FAILED, SIMULATED
     execution_result: Dict[str, Any] = Field(default_factory=dict)
-    executed_at: str = Field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    executed_at: str = Field(default_factory=utc_stamp)

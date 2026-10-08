@@ -95,7 +95,11 @@ def discover_insights(
     actions = _intent_actions(intent)
 
     insights: List[Dict[str, Any]] = []
+    caveats: List[Dict[str, Any]] = []
     n = 0
+
+    def _fail(action: str, column: Optional[str], exc: Exception) -> None:
+        caveats.append({"action": action, "column": column, "error": str(exc)})
 
     # Action: anomalies (per measure)
     if "anomaly" in actions:
@@ -109,20 +113,26 @@ def discover_insights(
                         f"指标 {m} 存在 {cnt} 个异常点",
                         f"「{m}」检出 {cnt} 个离群点（均值 {r.get('baseline_mean')}, 标准差 {r.get('baseline_std')}），需关注数据质量或业务突发。",
                         cnt / total * 5, [m], r)); n += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                _fail("anomaly", m, exc)
 
     # Action: correlation (across measures)
     if "correlation" in actions and len(measures) >= 2:
         try:
-            r = run_correlation_analysis(session_id, dataset_name, columns=measures)
+            r = run_correlation_analysis(session_id, dataset_name, columns=measures, group_col=cat)
+            for note in r.get("evidence", {}).get("caveats", []):
+                if note.startswith("Simpson:"):
+                    caveats.append({"action": "correlation", "column": None, "note": note})
             for p in r.get("high_correlation_pairs", []):
+                if not p.get("fdr_significant"):
+                    continue
+                q = p.get("q_value")
                 insights.append(_mk(f"i{n}", "correlation",
-                    f"{p['col1']} 与 {p['col2']} {p['strength']} 相关 (r={p['r']})",
-                    f"「{p['col1']}」与「{p['col2']}」呈 {p['strength']} 相关（r={p['r']}, p={p['p_value']}）。",
+                    f"{p['col1']} 与 {p['col2']} {p['strength']} 线性相关 (r={p['r']})",
+                    f"「{p['col1']}」与「{p['col2']}」呈 {p['strength']} 线性相关（r={p['r']}, p={p['p_value']}, q={q}）。这是相关，不是因果效应。",
                     abs(p["r"]), [p["col1"], p["col2"]], p)); n += 1
-        except Exception:
-            pass
+        except Exception as exc:
+            _fail("correlation", None, exc)
 
     # Action: dominance (category x metric)
     if "dominance" in actions and cat:
@@ -141,8 +151,8 @@ def discover_insights(
                         f"{m} 在 {cat} 上高度集中 (Gini={gini})",
                         f"按「{cat}」看「{m}」头部集中：Gini={gini}，{r.get('pareto_80_rule_ratio')}。",
                         gini, [cat, m], r)); n += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                _fail("dominance", m, exc)
 
     # Action: trend (time x metric)
     if "trend" in actions and tcol:
@@ -154,8 +164,8 @@ def discover_insights(
                         f"{m} 随 {tcol} 呈{r.get('trend_direction')}趋势",
                         f"「{m}」随「{tcol}」呈显著{r.get('trend_direction')}趋势（斜率 {r.get('slope')}, R²={r.get('r_squared')}）。",
                         r.get("r_squared", 0), [tcol, m], r)); n += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                _fail("trend", m, exc)
 
     insights.sort(key=lambda x: x["severity"], reverse=True)
     insights = insights[:max_insights]
@@ -171,6 +181,7 @@ def discover_insights(
         "insights": insights,
         "insight_graph": graph,
         "narrative": narrative,
+        "caveats": caveats,
     }
 
 

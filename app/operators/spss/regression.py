@@ -4,7 +4,11 @@ import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 from statsmodels.stats.stattools import durbin_watson, jarque_bera
 from app.cluster.session_manager import SessionManager
+from app.engine.evidence import Stopwatch, evidence
 from app.engine.sql_guard import safe_columns, safe_table_ref
+
+_MAX_REGRESSORS = 40
+_MAX_CELLS = 5_000_000
 
 def run_spss_regression(
     session_id: str,
@@ -18,10 +22,19 @@ def run_spss_regression(
     if not sess:
         raise ValueError(f"Session '{session_id}' not found")
     con = sess.get_duckdb_conn()
+    clock = Stopwatch()
+    if len(independent_vars) > _MAX_REGRESSORS:
+        raise ValueError("请先聚合再回归：自变量超过 40 列。先按业务粒度聚合，再把汇总表送进回归。")
 
     all_vars = [dependent_var] + independent_vars
     cols_sql = safe_columns(all_vars)
-    df = con.execute(f"SELECT {cols_sql} FROM {safe_table_ref(dataset_name)}").df().dropna()
+    sql = f"SELECT {cols_sql} FROM {safe_table_ref(dataset_name)}"
+    raw = con.execute(sql).df()
+    rows_scanned = int(len(raw))
+    if rows_scanned * (len(independent_vars) + 1) > _MAX_CELLS:
+        raise ValueError("请先聚合再回归：扫描单元格超过 5,000,000。先聚合再回归。")
+    df = raw.dropna()
+    nulls_dropped = rows_scanned - int(len(df))
 
     Y = df[dependent_var]
     X_raw = df[independent_vars]
@@ -101,7 +114,19 @@ def run_spss_regression(
                 "jarque_bera_p": round(float(jb_p), 6),
                 "residual_normality": bool(jb_p > 0.05)
             },
-            "formal_conclusion": conclusion
+            "formal_conclusion": conclusion,
+            "rows_used": int(len(df)),
+            "nulls_dropped": int(nulls_dropped),
+            "evidence": evidence(
+                operator="regression",
+                method="ols",
+                sql=[sql],
+                rows_scanned=rows_scanned,
+                rows_used=int(len(df)),
+                nulls_dropped=int(nulls_dropped),
+                duration_ms=clock.ms(),
+                caveats=["Coefficients come from statsmodels on the rows that survived dropna."],
+            ),
         }
 
     elif model_type.lower() == "logistic":
@@ -124,7 +149,18 @@ def run_spss_regression(
             "pseudo_r_squared": round(float(logit_model.prsquared), 4),
             "llr_p_value": round(float(logit_model.llr_pvalue), 6),
             "coefficients": coef_list,
-            "formal_conclusion": f"Binary Logistic Regression: Pseudo R² = {logit_model.prsquared:.4f}, LLR p = {logit_model.llr_pvalue:.6f}."
+            "formal_conclusion": f"Binary Logistic Regression: Pseudo R² = {logit_model.prsquared:.4f}, LLR p = {logit_model.llr_pvalue:.6f}.",
+            "rows_used": int(len(df)),
+            "nulls_dropped": int(nulls_dropped),
+            "evidence": evidence(
+                operator="regression",
+                method="logistic",
+                sql=[sql],
+                rows_scanned=rows_scanned,
+                rows_used=int(len(df)),
+                nulls_dropped=int(nulls_dropped),
+                duration_ms=clock.ms(),
+            ),
         }
 
     raise ValueError(f"Unsupported model_type: '{model_type}'")

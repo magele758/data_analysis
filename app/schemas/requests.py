@@ -22,6 +22,7 @@ class CorrelationRequest(BaseModel):
     dataset_name: str
     columns: Optional[List[str]] = None
     method: str = Field("pearson", description="'pearson' or 'spearman'")
+    group_col: Optional[str] = Field(None, description="Optional group column. Opposite within-group correlation is reported as a Simpson caveat.")
 
 class OLAPRequest(BaseModel):
     session_id: str
@@ -54,13 +55,16 @@ class DriverAnalysisRequest(BaseModel):
     current_filter: str = Field(..., description="Current condition, e.g. 'month = 2'")
     agg_func: str = "SUM"
     top_k: int = 5
+    rate_col: Optional[str] = Field(None, description="Rate column for a Laspeyres rate x volume split")
+    volume_col: Optional[str] = Field(None, description="Volume column paired with rate_col")
 
 class HypothesisTestRequest(BaseModel):
     session_id: str
     dataset_name: str
-    test_type: str = Field(..., description="'independent_t_test', 'paired_t_test', 'one_way_anova', 'chi_square', 'mann_whitney'")
-    dependent_var: str = Field(..., description="Dependent continuous or categorical variable")
-    group_var: str = Field(..., description="Independent grouping variable")
+    test_type: str = Field(..., description="'independent_t_test', 'paired_t_test', 'one_way_anova', 'two_way_anova', 'chi_square', 'mann_whitney'")
+    dependent_var: str = Field(..., description="Dependent continuous or categorical variable. For paired_t_test, the first numeric column.")
+    group_var: str = Field(..., description="Grouping column. For paired_t_test, the second numeric column. For two_way_anova, the first factor.")
+    factor_b: Optional[str] = Field(None, description="Second factor column. Required for two_way_anova.")
     alpha: float = Field(0.05, description="Significance level")
 
 class RegressionRequest(BaseModel):

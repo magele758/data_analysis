@@ -36,7 +36,7 @@ from app.operators.web_analytics.trace_replay import get_trace_waterfall, get_se
 
 from app.catalog.meta_registry import get_meta_registry, TableAsset, ColumnMeta
 from app.catalog.lineage_tracker import get_lineage_tracker
-from app.catalog.semantic_store import get_semantic_store, MetricDefinition
+from app.catalog.semantic_store import get_semantic_store, MetricDefinition, SemanticModel, EntityRef
 from app.transform.data_cleaner import DataCleaner
 from app.transform.pipeline_dag import get_pipeline_engine, DAGModel
 from app.retl.destination_sync import DestinationSync
@@ -110,7 +110,7 @@ def eda_profile(session_id: str, dataset_name: str) -> str:
         "columns": res.get("columns")
     }, ensure_ascii=False)
 
-@mcp.tool(name="driver_attribution_analysis", description="Execute multi-dimensional drill-down & Shapley-style fluctuation attribution for an indicator.")
+@mcp.tool(name="driver_attribution_analysis", description="Drill a metric change by dimension. SUM uses an additive contribution that closes; rate_col + volume_col uses a Laspeyres rate/volume split. This is not a Shapley value.")
 def driver_attribution_analysis(
     session_id: str,
     dataset_name: str,
@@ -119,7 +119,9 @@ def driver_attribution_analysis(
     base_filter: str,
     current_filter: str,
     agg_func: str = "SUM",
-    top_k: int = 5
+    top_k: int = 5,
+    rate_col: Optional[str] = None,
+    volume_col: Optional[str] = None,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
@@ -134,7 +136,9 @@ def driver_attribution_analysis(
         base_filter=base_filter,
         current_filter=current_filter,
         agg_func=agg_func,
-        top_k=top_k
+        top_k=top_k,
+        rate_col=rate_col,
+        volume_col=volume_col,
     )
     summary = NarrativeBuilder.generate_driver_narrative(res)
     chart_data = []
@@ -149,16 +153,19 @@ def driver_attribution_analysis(
         "chart_spec": chart_spec
     }, ensure_ascii=False)
 
-@mcp.tool(name="spss_hypothesis_test", description="Execute SPSS-grade hypothesis tests (independent_t_test, paired_t_test, one_way_anova, chi_square, mann_whitney).")
+@mcp.tool(name="spss_hypothesis_test", description="Execute hypothesis tests: independent_t_test, paired_t_test, one_way_anova, two_way_anova (requires factor_b), chi_square, mann_whitney.")
 def spss_hypothesis_test(
     session_id: str,
     dataset_name: str,
     test_type: str,
     dependent_var: str,
     group_var: str,
-    alpha: float = 0.05
+    alpha: float = 0.05,
+    factor_b: Optional[str] = None,
 ) -> str:
-    res = run_spss_hypothesis_test(session_id, dataset_name, test_type, dependent_var, group_var, alpha)
+    res = run_spss_hypothesis_test(
+        session_id, dataset_name, test_type, dependent_var, group_var, alpha, factor_b=factor_b
+    )
     summary = NarrativeBuilder.generate_spss_narrative(res)
     return json.dumps({
         "status": "success",
@@ -223,8 +230,8 @@ def duckdb_sql_sandbox(session_id: str, sql_query: str, limit: int = 100) -> str
     return json.dumps({"status": "success", "result": res}, ensure_ascii=False)
 
 @mcp.tool(name="correlation_analysis", description="Compute a Pearson/Spearman correlation matrix and surface strongly-correlated column pairs.")
-def correlation_analysis(session_id: str, dataset_name: str, columns: Optional[List[str]] = None, method: str = "pearson") -> str:
-    res = run_correlation_analysis(session_id, dataset_name, columns, method)
+def correlation_analysis(session_id: str, dataset_name: str, columns: Optional[List[str]] = None, method: str = "pearson", group_col: Optional[str] = None) -> str:
+    res = run_correlation_analysis(session_id, dataset_name, columns, method, group_col=group_col)
     return json.dumps({"status": "success", "correlation": res}, ensure_ascii=False)
 
 @mcp.tool(name="pivot_table", description="Build a multi-dimensional pivot table (rows x columns aggregated by a measure).")
@@ -327,9 +334,81 @@ def query_semantic_metric(
     limit: int = 100
 ) -> str:
     store = get_semantic_store(session_id)
-    sql = store.compile_query(metric_names, dimensions, filters, order_by, limit)
-    res = run_duckdb_sql(session_id, sql, limit=limit)
-    return json.dumps({"status": "success", "compiled_sql": sql, "result": res}, ensure_ascii=False)
+    sql = store.compile_governed(metric_names, dimensions, filters, order_by=order_by, limit=limit)
+    res = run_duckdb_sql(session_id, sql, limit=limit, governed=True)
+    versions = {name: store.metric_version(name) for name in metric_names}
+    return json.dumps({"status": "success", "compiled_sql": sql, "result": res, "governed": True, "metric_versions": versions}, ensure_ascii=False)
+
+@mcp.tool(name="register_semantic_metric", description="Register a metric formula on a session table. Dimensions listed here are the only ones compile will accept for that metric.")
+def register_semantic_metric(
+    session_id: str,
+    name: str,
+    table_name: str,
+    formula: str,
+    aggregation_type: str = "SUM",
+    dimensions: Optional[List[str]] = None,
+    display_name: Optional[str] = None,
+    description: str = "",
+    numerator_metric: Optional[str] = None,
+    denominator_metric: Optional[str] = None,
+) -> str:
+    metric = MetricDefinition(
+        name=name,
+        display_name=display_name,
+        description=description,
+        table_name=table_name,
+        formula=formula,
+        aggregation_type=aggregation_type,
+        dimensions=dimensions or [],
+        numerator_metric=numerator_metric,
+        denominator_metric=denominator_metric,
+    )
+    get_semantic_store(session_id).register_metric(metric)
+    return json.dumps({"status": "success", "metric": metric.model_dump()}, ensure_ascii=False)
+
+@mcp.tool(name="list_semantic_metrics", description="List metric definitions registered in this session.")
+def list_semantic_metrics(session_id: str) -> str:
+    metrics = [m.model_dump() for m in get_semantic_store(session_id).list_metrics()]
+    return json.dumps({"status": "success", "metrics": metrics}, ensure_ascii=False)
+
+@mcp.tool(name="register_semantic_model", description="Register a semantic model: grain, columns, and many-to-one entities. Joins follow a foreign key toward a primary key, at most two hops.")
+def register_semantic_model(
+    session_id: str,
+    name: str,
+    table_name: str,
+    grain: List[str],
+    columns: Optional[List[str]] = None,
+    entities: Optional[List[Dict[str, str]]] = None,
+    agg_time_dimension: Optional[str] = None,
+) -> str:
+    model = SemanticModel(
+        name=name,
+        table_name=table_name,
+        grain=grain,
+        columns=columns or [],
+        entities=[EntityRef(**entity) for entity in (entities or [])],
+        agg_time_dimension=agg_time_dimension,
+    )
+    get_semantic_store(session_id).register_model(model)
+    return json.dumps({"status": "success", "model": model.model_dump()}, ensure_ascii=False)
+
+@mcp.tool(name="list_session_datasets", description="List datasets registered in the session, with row counts and redacted source info.")
+def list_session_datasets(session_id: str) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_session(session_id)
+    if not sess:
+        return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
+    rows = []
+    for name, meta in sess.datasets.items():
+        rows.append({
+            "name": name,
+            "row_count": meta.row_count,
+            "column_count": meta.column_count,
+            "columns": meta.column_names,
+            "memory_bytes": meta.memory_bytes,
+            "source": meta.source_info,
+        })
+    return json.dumps({"status": "success", "datasets": rows}, ensure_ascii=False)
 
 @mcp.tool(name="execute_data_cleaning", description="Clean dirty data: deduplicate, fill missing values (mean/median/mode/constant), and clip outliers.")
 def execute_data_cleaning(
@@ -455,7 +534,8 @@ def ontology_traverse_links(
     source_object_type: str,
     source_instance_id: str,
     link_name: str,
-    limit: int = 50
+    limit: int = 50,
+    link_path: Optional[List[str]] = None,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
@@ -463,16 +543,18 @@ def ontology_traverse_links(
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
     engine = get_ontology_engine()
-    res = engine.traverse_links(con, source_object_type, source_instance_id, link_name, limit)
+    res = engine.traverse_links(
+        con, source_object_type, source_instance_id, link_name, limit, link_path=link_path
+    )
     return json.dumps({"status": "success", "traversal": res}, ensure_ascii=False)
 
-@mcp.tool(name="ontology_execute_action", description="Execute an atomic business action on an entity instance (e.g. ApplyDiscount, RerouteOrder) with audit logging.")
+@mcp.tool(name="ontology_execute_action", description="Execute an atomic business action on an entity instance with audit logging. dry_run defaults to true so a tool call previews the action before it writes.")
 def ontology_execute_action(
     session_id: str,
     action_name: str,
     instance_id: str,
     parameters: Dict[str, Any],
-    dry_run: bool = False
+    dry_run: bool = True
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)

@@ -6,6 +6,8 @@ import time
 from typing import Dict, List, Any, Optional
 from contextlib import contextmanager
 
+from app.ontology.action_type import utc_stamp
+
 class MetadataDB:
     _instance = None
     _lock = threading.RLock()
@@ -63,6 +65,8 @@ class MetadataDB:
                 dimensions_json TEXT,
                 filter_expr TEXT,
                 format TEXT,
+                numerator_metric TEXT,
+                denominator_metric TEXT,
                 created_at TEXT
             );
 
@@ -87,6 +91,9 @@ class MetadataDB:
                 cardinality TEXT,
                 source_join_key TEXT,
                 target_join_key TEXT,
+                junction_table TEXT,
+                junction_source_key TEXT,
+                junction_target_key TEXT,
                 created_at TEXT
             );
 
@@ -120,6 +127,17 @@ class MetadataDB:
                 updated_at TEXT
             );
             """)
+            for stmt in (
+                "ALTER TABLE semantic_metrics ADD COLUMN numerator_metric TEXT",
+                "ALTER TABLE semantic_metrics ADD COLUMN denominator_metric TEXT",
+                "ALTER TABLE ontology_links ADD COLUMN junction_table TEXT",
+                "ALTER TABLE ontology_links ADD COLUMN junction_source_key TEXT",
+                "ALTER TABLE ontology_links ADD COLUMN junction_target_key TEXT",
+            ):
+                try:
+                    conn.execute(stmt)
+                except sqlite3.OperationalError:
+                    pass
 
     # --- Table Asset Methods ---
     def save_table_asset(self, asset_dict: Dict[str, Any]):
@@ -192,8 +210,9 @@ class MetadataDB:
                 conn.execute("""
                 INSERT INTO semantic_metrics (
                     name, display_name, description, table_name, formula,
-                    aggregation_type, dimensions_json, filter_expr, format, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    aggregation_type, dimensions_json, filter_expr, format,
+                    numerator_metric, denominator_metric, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(name) DO UPDATE SET
                     display_name=excluded.display_name,
                     description=excluded.description,
@@ -202,7 +221,9 @@ class MetadataDB:
                     aggregation_type=excluded.aggregation_type,
                     dimensions_json=excluded.dimensions_json,
                     filter_expr=excluded.filter_expr,
-                    format=excluded.format
+                    format=excluded.format,
+                    numerator_metric=excluded.numerator_metric,
+                    denominator_metric=excluded.denominator_metric
                 """, (
                     metric_dict["name"],
                     metric_dict.get("display_name"),
@@ -212,7 +233,9 @@ class MetadataDB:
                     metric_dict.get("aggregation_type", "SUM"),
                     json.dumps(metric_dict.get("dimensions", [])),
                     metric_dict.get("filter_expr"),
-                    metric_dict.get("format", "number")
+                    metric_dict.get("format", "number"),
+                    metric_dict.get("numerator_metric"),
+                    metric_dict.get("denominator_metric"),
                 ))
 
     def get_metric(self, name: str) -> Optional[Dict[str, Any]]:
@@ -239,7 +262,9 @@ class MetadataDB:
             "aggregation_type": r["aggregation_type"],
             "dimensions": json.loads(r["dimensions_json"] or "[]"),
             "filter_expr": r["filter_expr"],
-            "format": r["format"]
+            "format": r["format"],
+            "numerator_metric": r["numerator_metric"] if "numerator_metric" in r.keys() else None,
+            "denominator_metric": r["denominator_metric"] if "denominator_metric" in r.keys() else None,
         }
 
     # --- DAG Model Methods ---
@@ -326,8 +351,9 @@ class MetadataDB:
                 conn.execute("""
                 INSERT INTO ontology_links (
                     name, display_name, description, source_object_type,
-                    target_object_type, cardinality, source_join_key, target_join_key, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    target_object_type, cardinality, source_join_key, target_join_key,
+                    junction_table, junction_source_key, junction_target_key, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     display_name=excluded.display_name,
                     description=excluded.description,
@@ -335,7 +361,10 @@ class MetadataDB:
                     target_object_type=excluded.target_object_type,
                     cardinality=excluded.cardinality,
                     source_join_key=excluded.source_join_key,
-                    target_join_key=excluded.target_join_key
+                    target_join_key=excluded.target_join_key,
+                    junction_table=excluded.junction_table,
+                    junction_source_key=excluded.junction_source_key,
+                    junction_target_key=excluded.junction_target_key
                 """, (
                     link_dict["name"],
                     link_dict.get("display_name"),
@@ -345,6 +374,9 @@ class MetadataDB:
                     link_dict.get("cardinality", "ONE_TO_MANY"),
                     link_dict["source_join_key"],
                     link_dict["target_join_key"],
+                    link_dict.get("junction_table"),
+                    link_dict.get("junction_source_key"),
+                    link_dict.get("junction_target_key"),
                     link_dict.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 ))
 
@@ -361,6 +393,9 @@ class MetadataDB:
                     "cardinality": r["cardinality"],
                     "source_join_key": r["source_join_key"],
                     "target_join_key": r["target_join_key"],
+                    "junction_table": r["junction_table"] if "junction_table" in r.keys() else None,
+                    "junction_source_key": r["junction_source_key"] if "junction_source_key" in r.keys() else None,
+                    "junction_target_key": r["junction_target_key"] if "junction_target_key" in r.keys() else None,
                     "created_at": r["created_at"]
                 } for r in rows]
 
@@ -421,13 +456,16 @@ class MetadataDB:
                     json.dumps(audit_dict.get("parameters", {})),
                     audit_dict.get("status", "SUCCESS"),
                     json.dumps(audit_dict.get("execution_result", {})),
-                    audit_dict.get("executed_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    audit_dict.get("executed_at") or utc_stamp()
                 ))
 
     def list_action_audits(self, limit: int = 50) -> List[Dict[str, Any]]:
         with self._lock:
             with self._get_conn() as conn:
-                rows = conn.execute("SELECT * FROM ontology_action_audit ORDER BY executed_at DESC LIMIT ?", (limit,)).fetchall()
+                rows = conn.execute(
+                    "SELECT * FROM ontology_action_audit ORDER BY executed_at DESC, rowid DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
                 return [{
                     "audit_id": r["audit_id"],
                     "action_name": r["action_name"],

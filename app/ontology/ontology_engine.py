@@ -1,3 +1,5 @@
+import hashlib
+import json
 import threading
 import time
 import uuid
@@ -145,7 +147,9 @@ class OntologyEngine:
         source_object_type: str,
         source_instance_id: Any,
         link_name: str,
-        limit: int = 50
+        limit: int = 50,
+        link_path: Optional[List[str]] = None,
+        max_hops: int = 4,
     ) -> Dict[str, Any]:
         """
         Graph Multi-Hop Traversal:
@@ -165,28 +169,100 @@ class OntologyEngine:
                 raise ValueError("Source or Target ObjectType definition missing.")
 
             # Perform graph hop via DuckDB join
-            src_table = safe_table_ref(src_obj.backed_by_table)
-            tgt_table = safe_table_ref(tgt_obj.backed_by_table)
+            hops = link_path or [link_name]
+            if len(hops) > max_hops:
+                raise ValueError(f"Traversal length {len(hops)} exceeds max_hops={max_hops}")
+            if len(hops) == 1:
+                sql = f"""
+                SELECT tgt.*
+                FROM {self._from_clause(link, src_obj, tgt_obj)}
+                WHERE src.{safe_ident(src_obj.primary_key)} = ?
+                LIMIT ?
+                """
+                df = con.execute(sql, [source_instance_id, limit]).df()
+                linked_instances = df.to_dict(orient="records")
+                return {
+                    "source_object_type": source_object_type,
+                    "source_instance_id": source_instance_id,
+                    "link_name": link_name,
+                    "target_object_type": tgt_obj.name,
+                    "hops": 1,
+                    "path": [source_object_type, tgt_obj.name],
+                    "hop_counts": [len(linked_instances)],
+                    "linked_count": len(linked_instances),
+                    "linked_instances": linked_instances
+                }
 
-            sql = f"""
-            SELECT tgt.*
-            FROM {tgt_table} tgt
-            JOIN {src_table} src ON src.{safe_ident(link.source_join_key)} = tgt.{safe_ident(link.target_join_key)}
-            WHERE src.{safe_ident(src_obj.primary_key)} = ?
-            LIMIT ?
-            """
-
-            df = con.execute(sql, [source_instance_id, limit]).df()
-            linked_instances = df.to_dict(orient="records")
-
+            current_ids = [source_instance_id]
+            current_type = source_object_type
+            path = [source_object_type]
+            seen = {source_object_type}
+            hop_counts: List[int] = []
+            last = None
+            for hop_name in hops:
+                hop = self._link_types.get(hop_name)
+                if hop is None:
+                    raise ValueError(f"LinkType '{hop_name}' not found.")
+                if hop.source_object_type != current_type:
+                    raise ValueError(
+                        f"Link '{hop_name}' expects source '{hop.source_object_type}', got '{current_type}'"
+                    )
+                if hop.target_object_type in seen:
+                    raise ValueError(f"Cycle detected at '{hop.target_object_type}'")
+                src_obj = self._object_types[hop.source_object_type]
+                tgt_obj = self._object_types[hop.target_object_type]
+                placeholders = ", ".join(["?"] * len(current_ids))
+                sql = f"""
+                SELECT tgt.*
+                FROM {self._from_clause(hop, src_obj, tgt_obj)}
+                WHERE src.{safe_ident(src_obj.primary_key)} IN ({placeholders})
+                LIMIT ?
+                """
+                df = con.execute(sql, [*current_ids, limit]).df()
+                last = df.to_dict(orient="records")
+                hop_counts.append(len(last))
+                pk = tgt_obj.primary_key
+                current_ids = [row[pk] for row in last]
+                current_type = tgt_obj.name
+                path.append(current_type)
+                seen.add(current_type)
+                if not current_ids:
+                    break
             return {
                 "source_object_type": source_object_type,
                 "source_instance_id": source_instance_id,
-                "link_name": link_name,
-                "target_object_type": tgt_obj.name,
-                "linked_count": len(linked_instances),
-                "linked_instances": linked_instances
+                "link_name": hops[-1],
+                "target_object_type": current_type,
+                "hops": len(path) - 1,
+                "path": path,
+                "hop_counts": hop_counts,
+                "linked_count": len(last or []),
+                "linked_instances": last or [],
             }
+
+    def _from_clause(self, link: LinkType, src_obj, tgt_obj) -> str:
+        """FROM/JOIN fragment. MANY_TO_MANY goes through the junction table."""
+        src_table = safe_table_ref(src_obj.backed_by_table)
+        tgt_table = safe_table_ref(tgt_obj.backed_by_table)
+        if link.cardinality == "MANY_TO_MANY":
+            if not (link.junction_table and link.junction_source_key and link.junction_target_key):
+                raise ValueError(
+                    f"MANY_TO_MANY link '{link.name}' requires junction_table, "
+                    "junction_source_key, and junction_target_key"
+                )
+            junction = safe_table_ref(link.junction_table)
+            return (
+                f"{tgt_table} tgt "
+                f"JOIN {junction} j "
+                f"ON j.{safe_ident(link.junction_target_key)} = tgt.{safe_ident(link.target_join_key)} "
+                f"JOIN {src_table} src "
+                f"ON src.{safe_ident(link.source_join_key)} = j.{safe_ident(link.junction_source_key)}"
+            )
+        return (
+            f"{tgt_table} tgt "
+            f"JOIN {src_table} src "
+            f"ON src.{safe_ident(link.source_join_key)} = tgt.{safe_ident(link.target_join_key)}"
+        )
 
     # --- Action Execution & Audit Trail ---
     def execute_action(
@@ -230,8 +306,38 @@ class OntologyEngine:
                         status = "FAILED"
 
                 elif action.handler_type == "SQL_MUTATION":
-                    template = action.handler_config.get("sql_template")
-                    if template:
+                    cfg = action.handler_config
+                    before = self._snapshot_instance(con, action.target_object_type, instance_id)
+                    if cfg.get("writeback_table"):
+                        wb = safe_table_ref(cfg["writeback_table"])
+                        value_param = cfg.get("value_param", "value")
+                        column_name = cfg.get("set_column", value_param)
+                        statement = (
+                            f"INSERT INTO {wb} (instance_id, column_name, new_value, executed_at) "
+                            "VALUES (?, ?, ?, current_timestamp)"
+                        )
+                        con.execute(
+                            f"CREATE TABLE IF NOT EXISTS {wb} ("
+                            "instance_id VARCHAR, column_name VARCHAR, new_value VARCHAR, executed_at TIMESTAMP)"
+                        )
+                        bound = [str(instance_id), str(column_name), str(parameter_values.get(value_param))]
+                        con.execute(statement, bound)
+                        after = {
+                            "writeback_table": cfg["writeback_table"],
+                            "column_name": column_name,
+                            "new_value": bound[2],
+                            "note": "Edit stored beside the source table. The backing table was not updated.",
+                        }
+                        exec_result = {
+                            "status": "SUCCESS",
+                            "writeback_table": cfg["writeback_table"],
+                            "note": after["note"],
+                            "before": before,
+                            "after": after,
+                            "statement_hash": _statement_hash(statement, bound),
+                        }
+                    template = cfg.get("sql_template")
+                    if template and not cfg.get("writeback_table"):
                         # Simple parameter substitution
                         # sql_template is a .format() string, so values cannot be bound as real
                         # parameters without an API change: reject anything that could close a
@@ -244,11 +350,35 @@ class OntologyEngine:
                                 )
                         formatted_sql = template.format(**subs)
                         con.execute(formatted_sql)
-                        exec_result = {"status": "SUCCESS", "executed_sql": formatted_sql}
+                        after = self._snapshot_instance(con, action.target_object_type, instance_id)
+                        exec_result = {
+                            "status": "SUCCESS",
+                            "executed_sql": formatted_sql,
+                            "before": before,
+                            "after": after,
+                            "statement_hash": _statement_hash(formatted_sql),
+                        }
 
                 elif action.handler_type == "REVERSE_ETL_SYNC":
-                    # Sync instance update to sink DB
-                    exec_result = {"status": "SUCCESS", "message": "Synced to downstream destination"}
+                    cfg = action.handler_config
+                    dest = cfg.get("dest_conn_str")
+                    dest_table = cfg.get("dest_table_name")
+                    source = cfg.get("source_table")
+                    if not (dest and dest_table and source):
+                        status = "FAILED"
+                        exec_result = {
+                            "status": "FAILED",
+                            "message": "REVERSE_ETL_SYNC needs handler_config dest_conn_str, dest_table_name, and source_table. Nothing was synced.",
+                        }
+                    else:
+                        try:
+                            synced = DestinationSync.sync_table_to_destination(
+                                con, source, dest, dest_table, cfg.get("mode", "replace")
+                            )
+                            exec_result = {"status": "SUCCESS", "sync": synced}
+                        except Exception as exc:
+                            status = "FAILED"
+                            exec_result = {"status": "FAILED", "message": str(exc)}
             else:
                 status = "SIMULATED"
                 exec_result = {"status": "SIMULATED", "params": parameter_values}
@@ -267,9 +397,29 @@ class OntologyEngine:
 
             return audit_record.model_dump()
 
+    def _snapshot_instance(self, con: duckdb.DuckDBPyConnection, object_type_name: str, instance_id: Any):
+        obj = self._object_types.get(object_type_name)
+        if obj is None:
+            return None
+        try:
+            df = con.execute(
+                f"SELECT * FROM {safe_table_ref(obj.backed_by_table)} WHERE {safe_ident(obj.primary_key)} = ?",
+                [instance_id],
+            ).df()
+        except duckdb.Error:
+            return None
+        if df.empty:
+            return None
+        return json.loads(df.head(1).to_json(orient="records", date_format="iso"))[0]
+
     def list_action_audits(self, limit: int = 50) -> List[Dict[str, Any]]:
         with self._lock:
             return self.db.list_action_audits(limit=limit)
+
+def _statement_hash(statement: str, bound: Optional[List[Any]] = None) -> str:
+    payload = statement if not bound else statement + "|" + json.dumps(bound, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
 
 def get_ontology_engine() -> OntologyEngine:
     return OntologyEngine.get_instance()

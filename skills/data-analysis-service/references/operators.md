@@ -9,11 +9,11 @@
 
 ## 3. OLAP & Root-Cause Attribution
 * `memory_olap_aggregation`: Slice & Dice, Rollup, Cube multi-dimensional aggregations in memory.
-* `driver_attribution_analysis`: Hierarchical deviation tree with Shapley contribution decomposition and waterfall chart spec.
+* `driver_attribution_analysis`: Hierarchical deviation tree. SUM uses a closed additive contribution. `rate_col` + `volume_col` uses a Laspeyres rate/volume split (volume, rate, interaction). Not a Shapley value. Waterfall chart spec is built from the first level.
 * `duckdb_sql_sandbox`: Safe read-only DuckDB SQL query execution sandbox.
 
 ## 4. SPSS Statistical Inference & Econometrics
-* `spss_hypothesis_test`: Independent/paired t-test (with Levene equality & Welch correction, Cohen's d), One-Way ANOVA (with Tukey HSD post-hoc & eta-squared), Chi-Square (with Cramér's V), Mann-Whitney U.
+* `spss_hypothesis_test`: Independent t-test (Levene equality and Welch correction, Cohen's d), paired t-test on two numeric columns, one-way ANOVA (Tukey HSD and eta-squared), two-way ANOVA with `factor_b` (type II, including the interaction), chi-square (Cramér's V), Mann-Whitney U.
 * `spss_regression_analysis`: OLS multi-linear regression (R2, F-test, VIF multicollinearity, Durbin-Watson autocorrelation, Jarque-Bera normality) and Logistic regression.
 
 ## 5. Web Telemetry & User Analytics
@@ -24,7 +24,8 @@
 * `inspect_trace_and_replay`: OpenTelemetry span waterfall tree and interactive action breadcrumb timeline replay.
 
 ## 6. Modern Data Stack (Catalog, Transform, rETL, Quality)
-* `query_semantic_metric`: Compile standardized metric formulas from Semantic Store into executable SQL.
+* `query_semantic_metric`: Compile standardized metric formulas into executable SQL. With a semantic model, aggregate on the home table and join many-to-one only. `RATIO` divides two aggregates. The response includes `metric_versions`.
+* `register_semantic_metric` / `list_semantic_metrics` / `register_semantic_model` / `list_session_datasets`: Register and list metrics, grains, and session datasets. Source connection strings are redacted.
 * `execute_data_cleaning`: Automated deduplication, missing value imputation (mean/median/mode/constant), and outlier clipping.
 * `run_dag_pipeline`: Topological DAG model execution using Kahn's algorithm with dependency-ordered materialization.
 * `reverse_sync_destination`: Reverse ETL sync of analytical tables/RFM scores back to target databases or files.
