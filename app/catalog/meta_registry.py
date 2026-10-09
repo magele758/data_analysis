@@ -42,10 +42,7 @@ class MetaRegistry:
 
     @classmethod
     def get_instance(cls) -> "MetaRegistry":
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = cls(persistent=True)
-            return cls._instance
+        return get_meta_registry("_global")
 
     def register_table(self, asset: TableAsset) -> TableAsset:
         with self._lock:
@@ -73,14 +70,19 @@ class MetaRegistry:
                 assets = [a for a in assets if tag in a.tags]
             if keyword:
                 kw = keyword.lower()
-                assets = [a for a in assets if kw in a.dataset_name.lower() or kw in (a.description or "").lower()]
+                assets = [
+                    a for a in assets
+                    if kw in a.dataset_name.lower()
+                    or kw in (a.description or "").lower()
+                    or kw in (a.display_name or "").lower()
+                ]
             return assets
 
     def delete_table(self, dataset_name: str) -> bool:
         with self._lock:
             if not self.persistent:
-                self._assets.pop(dataset_name, None)
-            return True
+                return self._assets.pop(dataset_name, None) is not None
+            return bool(self.db and self.db.delete_table_asset(dataset_name))
 
 def get_meta_registry(session_id: str = "_global") -> MetaRegistry:
     with MetaRegistry._lock:
@@ -88,4 +90,6 @@ def get_meta_registry(session_id: str = "_global") -> MetaRegistry:
         if inst is None:
             inst = MetaRegistry(persistent=(session_id == "_global"))
             MetaRegistry._session_instances[session_id] = inst
+        if session_id == "_global":
+            MetaRegistry._instance = inst
         return inst
