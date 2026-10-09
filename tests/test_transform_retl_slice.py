@@ -5,6 +5,7 @@ Covers gaps that used to drop rows, ignore unknown columns, or send the wrong we
 import json
 import sqlite3
 from datetime import datetime
+from decimal import Decimal
 from unittest.mock import patch
 
 import duckdb
@@ -166,6 +167,24 @@ def test_file_export_is_bound_and_append_does_not_touch_the_file(tmp_path, con):
     DestinationSync.sync_table_to_destination(con, "src", str(evil), "ignored", mode="replace")
     assert con.execute("SELECT keep_me FROM victim").fetchone() == (1,)
     assert evil.is_file()
+
+
+def test_sqlite_decimal_binds_exact_digits(tmp_path, con):
+    exact = "12345678901234567890.123456789012345678"
+    con.execute(
+        "CREATE TABLE src AS SELECT ?::DECIMAL(38, 18) AS amount",
+        [exact],
+    )
+    db = tmp_path / "dec.db"
+    res = DestinationSync.sync_table_to_destination(
+        con, "src", "sqlite:///" + str(db), "landed", mode="replace", chunk_size=1,
+    )
+    assert res["synced_rows"] == 1
+    with sqlite3.connect(db) as sink:
+        stored_type, stored = sink.execute("SELECT typeof(amount), amount FROM landed").fetchone()
+    assert stored_type == "text"
+    assert Decimal(stored) == Decimal(exact)
+    assert Decimal(stored) != Decimal(float(exact))
 
 
 def test_sync_rejects_bad_chunk_size_and_unknown_mode(con):

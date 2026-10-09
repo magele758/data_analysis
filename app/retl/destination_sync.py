@@ -49,7 +49,11 @@ def _map_type(duck_type: str, type_map: Dict[str, str]) -> str:
 
 def _sqlite_type(duck_type: str) -> str:
     base = duck_type.split("(")[0].strip()
-    if base in ("FLOAT", "DOUBLE", "REAL", "DECIMAL"):
+    # REAL/NUMERIC affinity stores IEEE floats. DECIMAL stays TEXT so the
+    # exact digit string is what gets bound.
+    if base == "DECIMAL":
+        return "TEXT"
+    if base in ("FLOAT", "DOUBLE", "REAL"):
         return "REAL"
     if base == "BLOB":
         return "BLOB"
@@ -82,9 +86,15 @@ def _rows_from_batch(batch: pa.RecordBatch, columns: Sequence[str]) -> List[Tupl
 
 
 def _sqlite_param(value: Any) -> Any:
-    """Values sqlite3 will bind without the deprecated default adapters."""
+    """Values sqlite3 will bind without the deprecated default adapters.
+
+    Decimal is the exact digit string. sqlite3 cannot bind Decimal, and float()
+    rounds anything past about 15 significant digits.
+    """
     if isinstance(value, Decimal):
-        return float(value)
+        if not value.is_finite():
+            return str(value)
+        return format(value, "f")
     if isinstance(value, datetime):
         return value.isoformat(sep=" ")
     if isinstance(value, date):
