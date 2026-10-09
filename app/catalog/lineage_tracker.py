@@ -2,6 +2,8 @@ import threading
 import re
 from typing import Dict, List, Set, Any, Optional
 
+from app.catalog.metadata_db import MetadataDB
+
 class LineageNode:
     def __init__(self, name: str, node_type: str = "TABLE"):
         self.name = name
@@ -13,27 +15,32 @@ class LineageTracker:
     _instance = None
     _lock = threading.RLock()
 
-    def __init__(self):
+    def __init__(self, persistent: bool = False, db: Optional[MetadataDB] = None):
         self._nodes: Dict[str, LineageNode] = {}
+        self._db = db if db is not None else (MetadataDB.get_instance() if persistent else None)
+        if self._db is not None:
+            for edge in self._db.list_lineage_edges():
+                self._remember(edge["source_table"], edge["target_table"])
 
     @classmethod
     def get_instance(cls) -> "LineageTracker":
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = cls()
-            return cls._instance
+        return get_lineage_tracker("_global")
 
     def record_dependency(self, source_table: str, target_table: str):
         if not source_table or not target_table or source_table == target_table:
             return
         with self._lock:
-            if source_table not in self._nodes:
-                self._nodes[source_table] = LineageNode(source_table)
-            if target_table not in self._nodes:
-                self._nodes[target_table] = LineageNode(target_table)
+            self._remember(source_table, target_table)
+            if self._db is not None:
+                self._db.save_lineage_edge(source_table, target_table)
 
-            self._nodes[source_table].downstream.add(target_table)
-            self._nodes[target_table].upstream.add(source_table)
+    def _remember(self, source_table: str, target_table: str):
+        if source_table not in self._nodes:
+            self._nodes[source_table] = LineageNode(source_table)
+        if target_table not in self._nodes:
+            self._nodes[target_table] = LineageNode(target_table)
+        self._nodes[source_table].downstream.add(target_table)
+        self._nodes[target_table].upstream.add(source_table)
 
     def parse_and_record_sql_lineage(self, target_table: str, sql_query: str):
         """
@@ -86,7 +93,7 @@ _LINEAGE_RESERVED = {
 }
 _CTE_RE = re.compile(r'(?:WITH|,)\s*([a-zA-Z0-9_]+)\s+AS\s*\(', re.IGNORECASE)
 _SOURCE_RE = re.compile(
-    r'(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)(?:\s+(?:AS\s+)?([a-zA-Z0-9_]+))?',
+    r'(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)',
     re.IGNORECASE,
 )
 
@@ -97,7 +104,7 @@ def _regex_ctes(sql_query: str) -> set:
 
 def _regex_sources(sql_query: str, cte_names: set) -> List[str]:
     names = []
-    for table_ref, _alias in _SOURCE_RE.findall(sql_query):
+    for table_ref in _SOURCE_RE.findall(sql_query):
         base_table = table_ref.strip('`"[]').split('.')[-1].strip('`"[]')
         base_lower = base_table.lower()
         if base_lower in _LINEAGE_RESERVED or base_lower in cte_names:
@@ -156,6 +163,8 @@ def get_lineage_tracker(session_id: str = "_global") -> LineageTracker:
     with LineageTracker._lock:
         inst = _lineage_session_instances.get(session_id)
         if inst is None:
-            inst = LineageTracker()
+            inst = LineageTracker(persistent=(session_id == "_global"))
             _lineage_session_instances[session_id] = inst
+        if session_id == "_global":
+            LineageTracker._instance = inst
         return inst

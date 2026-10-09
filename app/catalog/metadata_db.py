@@ -125,6 +125,19 @@ class MetadataDB:
                 description TEXT,
                 updated_at TEXT
             );
+            CREATE TABLE IF NOT EXISTS semantic_models (
+                name TEXT PRIMARY KEY,
+                table_name TEXT NOT NULL,
+                grain_json TEXT,
+                columns_json TEXT,
+                entities_json TEXT,
+                agg_time_dimension TEXT
+            );
+            CREATE TABLE IF NOT EXISTS lineage_edges (
+                source_table TEXT NOT NULL,
+                target_table TEXT NOT NULL,
+                PRIMARY KEY (source_table, target_table)
+            );
             """)
             for stmt in (
                 "ALTER TABLE semantic_metrics ADD COLUMN numerator_metric TEXT",
@@ -171,6 +184,15 @@ class MetadataDB:
                     asset_dict.get("created_at") or now_str,
                     asset_dict.get("updated_at") or now_str
                 ))
+
+    def delete_table_asset(self, dataset_name: str) -> bool:
+        with self._lock:
+            with self._get_conn() as conn:
+                cur = conn.execute(
+                    "DELETE FROM catalog_tables WHERE dataset_name=?",
+                    (dataset_name,),
+                )
+                return cur.rowcount > 0
 
     def get_table_asset(self, dataset_name: str) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -475,3 +497,76 @@ class MetadataDB:
                     "execution_result": json.loads(r["execution_result_json"] or "{}"),
                     "executed_at": r["executed_at"]
                 } for r in rows]
+
+    def delete_ontology_object(self, name: str) -> bool:
+        return self._delete_by_name("ontology_objects", "name", name)
+
+    def delete_ontology_link(self, name: str) -> bool:
+        return self._delete_by_name("ontology_links", "name", name)
+
+    def delete_ontology_action(self, name: str) -> bool:
+        return self._delete_by_name("ontology_actions", "name", name)
+
+    def _delete_by_name(self, table: str, column: str, value: str) -> bool:
+        with self._lock:
+            with self._get_conn() as conn:
+                cur = conn.execute(
+                    f"DELETE FROM {table} WHERE {column}=?",
+                    (value,),
+                )
+                return cur.rowcount > 0
+
+    def save_semantic_model(self, model_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("""
+                INSERT INTO semantic_models (
+                    name, table_name, grain_json, columns_json, entities_json, agg_time_dimension
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    table_name=excluded.table_name,
+                    grain_json=excluded.grain_json,
+                    columns_json=excluded.columns_json,
+                    entities_json=excluded.entities_json,
+                    agg_time_dimension=excluded.agg_time_dimension
+                """, (
+                    model_dict["name"],
+                    model_dict["table_name"],
+                    json.dumps(model_dict.get("grain") or []),
+                    json.dumps(model_dict.get("columns") or []),
+                    json.dumps(model_dict.get("entities") or []),
+                    model_dict.get("agg_time_dimension"),
+                ))
+
+    def list_semantic_models(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT * FROM semantic_models").fetchall()
+                return [{
+                    "name": r["name"],
+                    "table_name": r["table_name"],
+                    "grain": json.loads(r["grain_json"] or "[]"),
+                    "columns": json.loads(r["columns_json"] or "[]"),
+                    "entities": json.loads(r["entities_json"] or "[]"),
+                    "agg_time_dimension": r["agg_time_dimension"],
+                } for r in rows]
+
+    def save_lineage_edge(self, source_table: str, target_table: str):
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("""
+                INSERT INTO lineage_edges (source_table, target_table)
+                VALUES (?, ?)
+                ON CONFLICT(source_table, target_table) DO NOTHING
+                """, (source_table, target_table))
+
+    def list_lineage_edges(self) -> List[Dict[str, str]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT source_table, target_table FROM lineage_edges"
+                ).fetchall()
+                return [
+                    {"source_table": r["source_table"], "target_table": r["target_table"]}
+                    for r in rows
+                ]
