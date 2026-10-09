@@ -67,25 +67,26 @@ def _import_ray():
     return ray
 
 
-def _ray_map(ray_mod, tasks: List[Dict[str, Any]]) -> List[Dict[str, float]]:
+def _ray_map(ray_mod, tasks: List[Dict[str, Any]], worker) -> List[Any]:
     if not ray_mod.is_initialized():
         kwargs = {"ignore_reinit_error": True, "include_dashboard": False}
         if settings.RAY_ADDRESS:
             ray_mod.init(address=settings.RAY_ADDRESS, **kwargs)
         else:
             ray_mod.init(num_cpus=min(4, os.cpu_count() or 2), **kwargs)
-    remote = ray_mod.remote(pearson_partition)
+    remote = ray_mod.remote(worker)
     return ray_mod.get([remote.remote(task) for task in tasks])
 
 
-def run_partition_tasks(tasks: List[Dict[str, Any]]) -> Tuple[List[Dict[str, float]], str]:
+def run_partition_tasks(tasks: List[Dict[str, Any]], worker=None) -> Tuple[List[Any], str]:
+    fn = worker or pearson_partition
     ray_mod = _import_ray()
     if ray_mod is not None:
         try:
-            return _ray_map(ray_mod, tasks), "ray"
+            return _ray_map(ray_mod, tasks, fn), "ray"
         except Exception:
             pass
-    return [pearson_partition(task) for task in tasks], "local"
+    return [fn(task) for task in tasks], "local"
 
 
 def partition_count() -> int:
@@ -138,5 +139,107 @@ def partitioned_pearson_sums(con, select_sql: str, columns: List[str], parts: in
             f"(backend={backend})."
         )
         return merge_sum_rows(pieces), note
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def merge_group_moments(pieces: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """Add per-group (n, sum, sum of squares) across partitions."""
+    merged: Dict[Tuple[str, ...], Dict[str, Any]] = {}
+    for piece in pieces:
+        for row in piece:
+            key = tuple(str(part) for part in row["key"])
+            current = merged.get(key)
+            if current is None:
+                merged[key] = {
+                    "key": key,
+                    "n": float(row["n"] or 0.0),
+                    "s": float(row["s"] or 0.0),
+                    "ss": float(row["ss"] or 0.0),
+                }
+                continue
+            current["n"] += float(row["n"] or 0.0)
+            current["s"] += float(row["s"] or 0.0)
+            current["ss"] += float(row["ss"] or 0.0)
+    return list(merged.values())
+
+
+def _moment_rows(rel, n_dims: int) -> List[Dict[str, Any]]:
+    cells = []
+    for row in rel.fetchall():
+        n_value = row[n_dims]
+        if n_value is None or float(n_value) == 0.0:
+            continue
+        cells.append({
+            "key": [str(row[i]) for i in range(n_dims)],
+            "n": float(n_value),
+            "s": float(row[n_dims + 1] or 0.0),
+            "ss": float(row[n_dims + 2] or 0.0),
+        })
+    return cells
+
+
+def _group_moment_sql(dimensions: List[str], source_sql: str, parts: int, part: int) -> str:
+    dim_sql = ", ".join(safe_ident(name) for name in dimensions)
+    hash_args = ", ".join(
+        f"CAST({safe_ident(name)} AS VARCHAR)" for name in list(dimensions) + ["__y"]
+    )
+    group_by = ", ".join(str(i + 1) for i in range(len(dimensions)))
+    return (
+        f"SELECT {dim_sql}, COUNT(__y), SUM(__y), SUM(__y * __y) "
+        f"FROM ({source_sql}) AS _slice "
+        f"WHERE (hash({hash_args}) % {int(parts)}) = {int(part)} "
+        f"GROUP BY {group_by}"
+    )
+
+
+def group_moment_partition(task: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Group moments for one hash slice of a parquet spill."""
+    dimensions = list(task["dimensions"])
+    parts = int(task["parts"])
+    part = int(task["part"])
+    path = str(task["parquet"]).replace("'", "''")
+    source = f"SELECT * FROM read_parquet('{path}')"
+    sql = _group_moment_sql(dimensions, source, parts, part)
+    con = duckdb.connect(database=":memory:")
+    try:
+        rel = con.execute(sql)
+        return _moment_rows(rel, len(dimensions))
+    finally:
+        con.close()
+
+
+def _session_group_merge(con, select_sql: str, dimensions: List[str], parts: int) -> Tuple[List[Dict[str, Any]], str]:
+    pieces = []
+    for part in range(parts):
+        sql = _group_moment_sql(dimensions, select_sql, parts, part)
+        pieces.append(_moment_rows(con.execute(sql), len(dimensions)))
+    note = (
+        f"Variance group moments were merged from {parts} partitions "
+        "(backend=session). External access is off on this connection, so the slices stayed here."
+    )
+    return merge_group_moments(pieces), note
+
+
+def partitioned_group_moments(con, select_sql: str, dimensions: List[str], parts: int) -> Tuple[List[Dict[str, Any]], str]:
+    """Spill the metric and dimensions, then merge group moments across hash slices."""
+    directory = tempfile.mkdtemp(prefix="ray-var-")
+    path = os.path.join(directory, "cols.parquet")
+    try:
+        escaped = path.replace("'", "''")
+        try:
+            con.execute(f"COPY ({select_sql}) TO '{escaped}' (FORMAT PARQUET)")
+        except duckdb.Error:
+            return _session_group_merge(con, select_sql, dimensions, parts)
+        tasks = [
+            {"parquet": path, "part": index, "parts": parts, "dimensions": list(dimensions)}
+            for index in range(parts)
+        ]
+        pieces, backend = run_partition_tasks(tasks, group_moment_partition)
+        note = (
+            f"Variance group moments were merged from {parts} partitions "
+            f"(backend={backend})."
+        )
+        return merge_group_moments(pieces), note
     finally:
         shutil.rmtree(directory, ignore_errors=True)
