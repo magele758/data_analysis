@@ -1,10 +1,10 @@
-# Operators Reference (21 Operators Across 6 MDS Layers)
+# Operators Reference (22 Operators Across 6 MDS Layers)
 
 ## 1. Ingestion & Pushdown Connectors
 * `connect_and_load_db`: Connects to PostgreSQL, MySQL, SQL Server, SQLite, Parquet/CSV via Rust ConnectorX with predicate & projection pushdown.
 
 ## 2. Profiling & Insights
-* `eda_profile`: Single-pass sufficient statistics (mean, std, P25, P50, P75, P95, P99, skewness, kurtosis, data quality score). Tables over 100,000 rows use `approx_count_distinct` and `approx_quantile`.
+* `eda_profile`: Single-pass sufficient statistics (mean, std, P25, P50, P75, P95, P99, skewness, kurtosis, data quality score). Tables over 100,000 rows use `approx_count_distinct` and `approx_quantile`. Undefined skewness, kurtosis, and std stay null. When `quantile_method` is `quantile_cont`, p50 is `quantile_cont`.
 * `detect_automated_insights`: 3-Sigma/Isolation Forest anomaly detection, temporal slope change points, Gini coefficient & Pareto 80/20. REST exposes the same three operators at `POST /api/v1/insights/outliers`, `/trends`, and `/dominance`.
 
 ## 3. OLAP & Root-Cause Attribution
@@ -13,7 +13,8 @@
 * `duckdb_sql_sandbox`: Safe read-only DuckDB SQL query execution sandbox.
 
 ## 4. SPSS Statistical Inference & Econometrics
-* `spss_hypothesis_test`: Independent t-test (Levene equality and Welch correction, Cohen's d), paired t-test on two numeric columns, one-way ANOVA (Tukey HSD and eta-squared), two-way ANOVA with `factor_b` (type II, including the interaction), chi-square (Cramér's V), Mann-Whitney U.
+* `variance_decomposition`: Law of total variance across categorical dimensions. Between and within sums of squares close. `sun_shapley` averages order-sensitive increments (at most 4 dimensions). Interaction is present only for a balanced two-dimension design.
+* `spss_hypothesis_test`: Independent t-test (Levene equality and Welch correction, Cohen's d), paired t-test on two numeric columns, one-way ANOVA (Tukey HSD, eta-squared, and `variance_decomposition`), two-way ANOVA with `factor_b` (type II, including the interaction, plus `variance_decomposition`), chi-square (Cramér's V), Mann-Whitney U (exactly 2 groups). More than 5,000,000 scanned cells returns 请先聚合再检验.
 * `spss_regression_analysis`: OLS multi-linear regression (R2, F-test, VIF multicollinearity, Durbin-Watson autocorrelation, Jarque-Bera normality) and Logistic regression.
 
 ## 5. Web Telemetry & User Analytics

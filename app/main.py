@@ -19,7 +19,7 @@ from app.security import require_api_key, validate_auth_config
 from app.schemas.requests import (
     ConnectDBRequest, EDARequest, CorrelationRequest, OLAPRequest, PivotRequest,
     DriverAnalysisRequest, HypothesisTestRequest, RegressionRequest,
-    OutliersRequest, TrendsRequest, DominanceRequest,
+    OutliersRequest, TrendsRequest, DominanceRequest, VarianceDecompositionRequest,
     ClusteringRequest, TimeSeriesRequest, SQLSandboxRequest, RFMRequest,
     InsightDiscoverRequest, RunExampleRequest, FunnelRequest, SemanticQueryRequest,
     CleanTableRequest, ReverseSyncRequest, AudienceExportRequest, WebhookAlertRequest,
@@ -31,6 +31,7 @@ from app.cluster.session_manager import SessionManager
 from app.connectors.factory import ConnectorFactory
 from app.connectors.trace_importer import TraceImporter
 from app.operators.eda import run_eda_profile
+from app.operators.variance import run_variance_decomposition
 from app.operators.correlation import run_correlation_analysis
 from app.operators.olap import run_olap_query, run_pivot_table
 from app.distributed_ops.dist_driver import DistributedDriverAnalysis
@@ -305,6 +306,18 @@ def api_spss_regression(req: RegressionRequest):
         session_id=req.session_id,
         summary_text=summary,
         statistics=res
+    )
+
+@app.post("/api/v1/tools/variance_decomposition", response_model=AnalysisResponse)
+def api_variance_decomposition(req: VarianceDecompositionRequest):
+    res = run_variance_decomposition(
+        req.session_id, req.dataset_name, req.metric, req.dimensions, req.filters,
+    )
+    return AnalysisResponse(
+        status="success",
+        session_id=req.session_id,
+        summary_text=f"{res['method']} of {req.metric}: n={res['n']}, ss_total={res['ss_total']}.",
+        statistics=res,
     )
 
 @app.post("/api/v1/tools/olap", response_model=AnalysisResponse)

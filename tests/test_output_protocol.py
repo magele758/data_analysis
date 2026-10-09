@@ -1,4 +1,5 @@
 import inspect
+import json
 
 import duckdb
 from fastapi.testclient import TestClient
@@ -10,7 +11,13 @@ settings.API_KEYS = "test-api-key"
 from app.cluster.session_manager import SessionManager
 from app.connectors.trace_importer import TraceImporter
 from app.main import app
-from app.mcp_server import detect_automated_insights, import_traces, memory_olap_aggregation
+from app.mcp_server import (
+    detect_automated_insights,
+    driver_attribution_analysis,
+    import_traces,
+    memory_olap_aggregation,
+    variance_decomposition,
+)
 from app.nlg.narrative_builder import NarrativeBuilder
 from app.observability.assertions import DataQualityAssertions
 from app.schemas.charts import ChartSpecBuilder
@@ -253,3 +260,34 @@ def test_insight_routes_use_analysis_response():
     dominance_body = dominance.json()
     assert "gini_coefficient" in dominance_body["statistics"]
     assert dominance_body["data_preview"][0]["category"] == "East"
+
+
+def test_variance_decomposition_and_driver_keep_evidence():
+    sess = SessionManager().get_or_create_session("proto_var_sess")
+    con = sess.get_duckdb_conn()
+    con.execute("CREATE TABLE proto_var (g VARCHAR, y DOUBLE)")
+    con.execute("INSERT INTO proto_var VALUES ('A',1),('A',2),('A',3),('B',5),('B',7)")
+
+    http = client.post("/api/v1/tools/variance_decomposition", json={
+        "session_id": "proto_var_sess",
+        "dataset_name": "proto_var",
+        "metric": "y",
+        "dimensions": ["g"],
+    })
+    assert http.status_code == 200
+    stats = http.json()["statistics"]
+    assert stats["method"] == "law_of_total_variance"
+    assert stats["factors"][0]["closes"] is True
+    assert stats["evidence"]["operator"]
+
+    mcp_body = json.loads(variance_decomposition("proto_var_sess", "proto_var", "y", ["g"]))
+    assert mcp_body["variance_decomposition"]["n"] == stats["n"]
+    assert mcp_body["variance_decomposition"]["evidence"]["operator"]
+
+    con.execute("CREATE TABLE proto_drv (month INT, region VARCHAR, profit DOUBLE)")
+    con.execute("INSERT INTO proto_drv VALUES (1, 'East', 10), (2, 'East', 4)")
+    driver = json.loads(driver_attribution_analysis(
+        "proto_var_sess", "proto_drv", "profit", ["region"], "month = 1", "month = 2",
+    ))
+    assert driver["evidence"]["operator"] == "driver_attribution_analysis"
+    assert driver["method"] == "additive_contribution"

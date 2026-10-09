@@ -61,7 +61,7 @@ class DriverAnalysisRequest(BaseModel):
 class HypothesisTestRequest(BaseModel):
     session_id: str
     dataset_name: str
-    test_type: str = Field(..., description="'independent_t_test', 'paired_t_test', 'one_way_anova', 'two_way_anova', 'chi_square', 'mann_whitney'")
+    test_type: str = Field(..., description="'independent_t_test', 'paired_t_test', 'one_way_anova', 'two_way_anova', 'chi_square', 'mann_whitney'. one_way_anova and two_way_anova include variance_decomposition. mann_whitney requires exactly 2 groups.")
     dependent_var: str = Field(..., description="Dependent continuous or categorical variable. For paired_t_test, the first numeric column.")
     group_var: str = Field(..., description="Grouping column. For paired_t_test, the second numeric column. For two_way_anova, the first factor.")
     factor_b: Optional[str] = Field(None, description="Second factor column. Required for two_way_anova.")
@@ -89,6 +89,13 @@ class TrendsRequest(BaseModel):
     time_col: str
     metric: str
     group_col: Optional[str] = None
+
+class VarianceDecompositionRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    metric: str = Field(..., description="Numeric column. Must not also appear in dimensions.")
+    dimensions: List[str] = Field(..., description="At least one categorical dimension. Names must be unique.")
+    filters: Optional[str] = Field(None, description="WHERE fragment passed through safe_predicate.")
 
 class DominanceRequest(BaseModel):
     session_id: str

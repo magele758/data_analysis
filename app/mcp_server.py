@@ -13,6 +13,7 @@ from app.logging_setup import configure_logging
 # configure_logging() 默认写 stdout 会污染协议流，这里先导入模块让后续代码能用 logger
 configure_logging()
 from app.operators.eda import run_eda_profile
+from app.operators.variance import run_variance_decomposition
 from app.operators.correlation import run_correlation_analysis
 from app.operators.olap import run_olap_query, run_pivot_table
 from app.distributed_ops.dist_driver import DistributedDriverAnalysis
@@ -98,7 +99,7 @@ def connect_and_load_db(
         "summary": f"Successfully loaded {meta.row_count:,} rows across {meta.column_count} columns into session '{sess.session_id}' (table '{dataset_name}')."
     }, ensure_ascii=False)
 
-@mcp.tool(name="eda_profile", description="Run comprehensive EDA data profiling, distribution statistics, and data quality scoring. Tables over 100,000 rows label distinct_count_method and quantile_method as approximate.")
+@mcp.tool(name="eda_profile", description="Run comprehensive EDA data profiling, distribution statistics, and data quality scoring. Tables over 100,000 rows label distinct_count_method and quantile_method as approximate. skewness, kurtosis, and std are null when the moment is undefined, not 0. When quantile_method is quantile_cont, p50 is also quantile_cont.")
 def eda_profile(session_id: str, dataset_name: str) -> str:
     res = run_eda_profile(session_id, dataset_name)
     summary = NarrativeBuilder.generate_eda_narrative(res)
@@ -153,10 +154,11 @@ def driver_attribution_analysis(
         "orderings_used": res.get("orderings_used"),
         "sun_shapley": res.get("sun_shapley"),
         "driver_hierarchy": res.get("hierarchy"),
-        "chart_spec": chart_spec
+        "chart_spec": chart_spec,
+        "evidence": res.get("evidence"),
     }, ensure_ascii=False)
 
-@mcp.tool(name="spss_hypothesis_test", description="Execute hypothesis tests: independent_t_test, paired_t_test, one_way_anova, two_way_anova (requires factor_b), chi_square, mann_whitney.")
+@mcp.tool(name="spss_hypothesis_test", description="Execute hypothesis tests: independent_t_test, paired_t_test, one_way_anova, two_way_anova (requires factor_b), chi_square, mann_whitney. one_way_anova and two_way_anova include statistics.variance_decomposition. mann_whitney errors unless there are exactly 2 groups. More than 5,000,000 scanned cells returns 请先聚合再检验.")
 def spss_hypothesis_test(
     session_id: str,
     dataset_name: str,
@@ -175,6 +177,17 @@ def spss_hypothesis_test(
         "summary": summary,
         "statistics": res
     }, ensure_ascii=False)
+
+@mcp.tool(name="variance_decomposition", description="Decompose a numeric metric across categorical dimensions. Between-group and within-group sums of squares close. sun_shapley averages sequential increments over dimension order (at most 4 dimensions, 24 orderings). An interaction term is returned only for exactly two dimensions when the design is balanced.")
+def variance_decomposition(
+    session_id: str,
+    dataset_name: str,
+    metric: str,
+    dimensions: List[str],
+    filters: Optional[str] = None,
+) -> str:
+    res = run_variance_decomposition(session_id, dataset_name, metric, dimensions, filters)
+    return json.dumps({"status": "success", "variance_decomposition": res}, ensure_ascii=False)
 
 @mcp.tool(name="spss_regression_analysis", description="Run OLS or Logistic regression with full diagnostic battery (R2, F-test, VIF, DW residual test).")
 def spss_regression_analysis(

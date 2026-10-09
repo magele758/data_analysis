@@ -1,4 +1,4 @@
-# MCP Tools Specification (37 Registered Tools)
+# MCP Tools Specification (38 Registered Tools)
 
 Two ingestion paths land data in one session; all analytics run on session tables.
 Catalog / metrics / DAG / lineage are scoped per `session_id` (isolated across sessions).
@@ -12,9 +12,10 @@ Catalog / metrics / DAG / lineage are scoped per `session_id` (isolated across s
 | `ontology_query_objects` | Ontology | `session_id`, `object_type`, `filters`, `properties`, `limit` | `status`, `data` (`object_type`, `primary_key`, `total_instances`, `instances`). REST returns that object directly, without the `data` wrapper |
 | `ontology_traverse_links` | Ontology | `session_id`, `source_object_type`, `source_instance_id`, `link_name`, `link_path` | `status`, `traversal` (linked instances, hops, path) |
 | `ontology_execute_action` | Ontology | `session_id`, `action_name`, `instance_id`, `parameters`, `dry_run` (default true) | `status`, `action_audit` |
-| `eda_profile` | Profiling | `session_id`, `dataset_name` | `summary`, `quality_score`, `total_rows`, `columns` |
-| `driver_attribution_analysis` | Attribution | `session_id`, `dataset_name`, `target_metric`, `dimension_path`, `base_filter`, `current_filter`, `rate_col`, `volume_col` | `summary`, `method`, `orderings_used`, `sun_shapley`, `driver_hierarchy`, `chart_spec` |
-| `spss_hypothesis_test` | Statistics | `session_id`, `dataset_name`, `test_type`, `dependent_var`, `group_var`, `factor_b`, `alpha` | `summary`, `statistics` |
+| `eda_profile` | Profiling | `session_id`, `dataset_name` | `summary`, `quality_score`, `total_rows`, `columns`. Measure `skewness` / `kurtosis` / `std` are null when undefined. `quantile_cont` p50 is `quantile_cont` |
+| `driver_attribution_analysis` | Attribution | `session_id`, `dataset_name`, `target_metric`, `dimension_path`, `base_filter`, `current_filter`, `rate_col`, `volume_col` | `summary`, `method`, `orderings_used`, `sun_shapley`, `driver_hierarchy`, `chart_spec`, `evidence`. Laspeyres still drills only the first dimension |
+| `variance_decomposition` | Statistics | `session_id`, `dataset_name`, `metric`, `dimensions`, `filters` | `variance_decomposition` is the operator dict unchanged, including `evidence`, `factors`, `sequential`, `interaction`, `sun_shapley`. REST `POST /api/v1/tools/variance_decomposition` puts that dict in `statistics` |
+| `spss_hypothesis_test` | Statistics | `session_id`, `dataset_name`, `test_type`, `dependent_var`, `group_var`, `factor_b`, `alpha` | `summary`, `statistics`. ANOVA includes `variance_decomposition`. `mann_whitney` requires exactly 2 groups. Over 5,000,000 cells returns 请先聚合再检验 |
 | `spss_regression_analysis` | Statistics | `session_id`, `dataset_name`, `dependent_var`, `independent_vars`, `model_type` | `summary`, `model_report` |
 | `detect_automated_insights` | Insights | `session_id`, `dataset_name`, `metric`, `category_col`, `time_col`, `outlier_method` (`z_score`/`iqr`/`isolation_forest`), `threshold`, `dimension_cols`, `top_k`, `group_col` | MCP: `status`, `insights` (`outliers`, `dominance`, `trends`). REST splits the same operators: `POST /api/v1/insights/outliers|trends|dominance` returns `AnalysisResponse` (`summary_text`, `statistics`, `data_preview`) |
 | `memory_olap_aggregation` | OLAP | `session_id`, `dataset_name`, `dimensions`, `metrics`, `agg_funcs`, `filters`, `rollup`, `cube`, `order_by`, `limit` | `status`, `result` |

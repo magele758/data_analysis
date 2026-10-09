@@ -56,6 +56,8 @@ HTTP 分析端点使用 `AnalysisResponse`：`summary_text`、`statistics`、`ch
 
 `POST /api/v1/insights/outliers`、`/trends`、`/dominance` 调用与 MCP `detect_automated_insights` 相同的算子，响应是 `AnalysisResponse`（`statistics` 为完整结果，`data_preview` 为异常点、序列预览或头部贡献者）。MCP 仍把三项包在 `insights` 里。
 
+`POST /api/v1/tools/variance_decomposition` 与 MCP `variance_decomposition` 调用 `run_variance_decomposition`。HTTP 把算子字典放在 `statistics`。MCP 把同一字典放在 `variance_decomposition`，含 `evidence`。归因 MCP 另外返回 `evidence`；Laspeyres 仍只拆第一个维度。
+
 质量规则只实现 `not_null`、`unique`、`between`、`row_count`。其余 type 记为失败的 `unsupported_rule`。
 
 本体查询：MCP 是 `{status, data}`，`instances` 在 `data` 里。REST 直接返回引擎对象。动作的 `dry_run`：MCP 默认 true，REST 默认 false。
