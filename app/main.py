@@ -22,7 +22,7 @@ from app.schemas.requests import (
     OutliersRequest, TrendsRequest, DominanceRequest, VarianceDecompositionRequest,
     ClusteringRequest, TimeSeriesRequest, SQLSandboxRequest, RFMRequest,
     InsightDiscoverRequest, RunExampleRequest, FunnelRequest, SemanticQueryRequest,
-    CleanTableRequest, ReverseSyncRequest, AudienceExportRequest, WebhookAlertRequest,
+    CleanTableRequest, ReverseSyncRequest, WideTableRequest, AudienceExportRequest, WebhookAlertRequest,
     QualitySuiteRequest, SchemaDriftRequest, OntologyQueryRequest, OntologyTraverseRequest,
     OntologyActionExecRequest, TraceImportRequest,
 )
@@ -58,6 +58,7 @@ from app.catalog.meta_registry import get_meta_registry, TableAsset, ColumnMeta
 from app.catalog.lineage_tracker import get_lineage_tracker
 from app.catalog.semantic_store import get_semantic_store, MetricDefinition
 from app.transform.data_cleaner import DataCleaner
+from app.transform.materializer import Materializer
 from app.transform.pipeline_dag import get_pipeline_engine, DAGModel
 from app.retl.destination_sync import DestinationSync
 from app.retl.audience_exporter import AudienceExporter
@@ -192,21 +193,40 @@ def get_dashboard():
 
 # ----------------- Core IQuery Analysis Endpoints -----------------
 
+def _client_error(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+def _upload_basename(filename: str) -> str:
+    if not filename or ".." in filename.replace("\\", "/"):
+        raise HTTPException(status_code=400, detail="Invalid upload filename")
+    normalized = filename.replace("\\", "/")
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        raise HTTPException(status_code=400, detail="Invalid upload filename")
+    name = os.path.basename(normalized)
+    if not name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid upload filename")
+    return name
+
+
 @app.post("/api/v1/connect", response_model=AnalysisResponse)
 def connect_db(req: ConnectDBRequest):
-    mgr = SessionManager()
-    sess = mgr.get_or_create_session(req.session_id)
-    connector = ConnectorFactory.get_connector(req.conn_str)
-    arrow_table = connector.fetch_to_arrow(
-        query_or_table=req.query_or_table,
-        filter_sql=req.filter_sql,
-        select_cols=req.select_cols,
-        partition_col=req.partition_col,
-        num_partitions=req.num_partitions,
-        limit=req.limit,
-        mode=req.mode
-    )
-    meta = sess.register_dataset(req.dataset_name, arrow_table, {"conn_str": req.conn_str, "source": req.query_or_table})
+    try:
+        mgr = SessionManager()
+        sess = mgr.get_or_create_session(req.session_id)
+        connector = ConnectorFactory.get_connector(req.conn_str)
+        arrow_table = connector.fetch_to_arrow(
+            query_or_table=req.query_or_table,
+            filter_sql=req.filter_sql,
+            select_cols=req.select_cols,
+            partition_col=req.partition_col,
+            num_partitions=req.num_partitions,
+            limit=req.limit,
+            mode=req.mode
+        )
+        meta = sess.register_dataset(req.dataset_name, arrow_table, {"conn_str": req.conn_str, "source": req.query_or_table})
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
     
     # Auto-register into Data Catalog
     cat = get_meta_registry(sess.session_id)
@@ -554,6 +574,19 @@ def api_query_semantic_metrics(req: SemanticQueryRequest):
 
 # ----------------- Modern Data Stack: Transform & ELT DAG -----------------
 
+@app.post("/api/v1/transform/wide")
+def api_create_wide_table(req: WideTableRequest):
+    mgr = SessionManager()
+    sess = mgr.get_session(req.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        return Materializer.create_wide_table(
+            sess.get_duckdb_conn(), req.target_name, req.fact_table, req.dimension_joins,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
+
 @app.post("/api/v1/transform/clean")
 def api_clean_table(req: CleanTableRequest):
     mgr = SessionManager()
@@ -593,7 +626,9 @@ def api_reverse_sync(req: ReverseSyncRequest):
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
-    return DestinationSync.sync_table_to_destination(con, req.source_table, req.dest_conn_str, req.dest_table_name, req.mode)
+    return DestinationSync.sync_table_to_destination(
+        con, req.source_table, req.dest_conn_str, req.dest_table_name, req.mode, chunk_size=req.chunk_size,
+    )
 
 @app.post("/api/v1/retl/audience")
 def api_export_audience(req: AudienceExportRequest):
@@ -629,6 +664,10 @@ def api_detect_schema_drift(req: SchemaDriftRequest):
     return SchemaDrifter.detect_drift(con, req.table, req.baseline_schema)
 
 # ----------------- Palantir-Style Agentic Ontology Endpoints -----------------
+
+@app.get("/api/v1/ontology/entity_graph")
+def api_entity_graph():
+    return get_ontology_engine().entity_graph()
 
 @app.get("/api/v1/ontology/schema")
 def api_get_ontology_schema():
@@ -683,9 +722,18 @@ def api_traverse_ontology_links(req: OntologyTraverseRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
     engine = get_ontology_engine()
-    return engine.traverse_links(
-        con, req.source_object_type, req.source_instance_id, req.link_name, req.limit, link_path=req.link_path
-    )
+    try:
+        return engine.traverse_links(
+            con,
+            req.source_object_type,
+            req.source_instance_id,
+            req.link_name,
+            req.limit,
+            link_path=req.link_path,
+            max_hops=req.max_hops,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
 
 @app.post("/api/v1/ontology/actions/execute")
 def api_execute_ontology_action(req: OntologyActionExecRequest):
@@ -695,7 +743,10 @@ def api_execute_ontology_action(req: OntologyActionExecRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
     engine = get_ontology_engine()
-    return engine.execute_action(con, req.action_name, req.instance_id, req.parameters, req.dry_run)
+    try:
+        return engine.execute_action(con, req.action_name, req.instance_id, req.parameters, req.dry_run)
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
 
 @app.get("/api/v1/ontology/audit")
 def api_list_ontology_audits(limit: int = 50):
@@ -714,27 +765,30 @@ async def api_import_file(
     limit: Optional[int] = Form(None)
 ):
     mgr = SessionManager()
-    sess = mgr.get_or_create_session(session_id)
-    
     target_path = file_path
-    if file:
-        os.makedirs("data/uploads", exist_ok=True)
-        target_path = f"data/uploads/{file.filename}"
-        with open(target_path, "wb") as f_out:
-            while chunk := await file.read(1024 * 1024 * 5): # 5MB stream chunks
-                f_out.write(chunk)
+    try:
+        sess = mgr.get_or_create_session(session_id)
+        if file:
+            os.makedirs("data/uploads", exist_ok=True)
+            target_path = f"data/uploads/{_upload_basename(file.filename or '')}"
+            with open(target_path, "wb") as f_out:
+                while chunk := await file.read(1024 * 1024 * 5): # 5MB stream chunks
+                    f_out.write(chunk)
 
-    if not target_path or not os.path.exists(target_path):
-        raise HTTPException(status_code=400, detail="Invalid file or file_path provided")
+        if not target_path or not os.path.exists(target_path):
+            raise HTTPException(status_code=400, detail="Invalid file or file_path provided")
 
-    conn_str = f"file://{target_path}"
-    connector = ConnectorFactory.get_connector(conn_str)
-    arrow_table = connector.fetch_to_arrow(
-        query_or_table=sheet_name or "Sheet1",
-        limit=limit
-    )
-
-    meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": target_path})
+        conn_str = f"file://{target_path}"
+        connector = ConnectorFactory.get_connector(conn_str)
+        arrow_table = connector.fetch_to_arrow(
+            query_or_table=sheet_name or "",
+            limit=limit
+        )
+        meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": target_path})
+    except HTTPException:
+        raise
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
 
     # Register into Catalog
     cat = get_meta_registry(sess.session_id)
@@ -771,8 +825,8 @@ def api_import_traces(req: TraceImportRequest):
     the same engine used by the DB-connector path.
     """
     mgr = SessionManager()
-    sess = mgr.get_or_create_session(req.session_id)
     try:
+        sess = mgr.get_or_create_session(req.session_id)
         arrow_table = TraceImporter.load_source(source=req.source, records=req.records, fmt=req.format)
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))

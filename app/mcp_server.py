@@ -39,6 +39,7 @@ from app.catalog.meta_registry import get_meta_registry, TableAsset, ColumnMeta
 from app.catalog.lineage_tracker import get_lineage_tracker
 from app.catalog.semantic_store import get_semantic_store, MetricDefinition, SemanticModel, EntityRef
 from app.transform.data_cleaner import DataCleaner
+from app.transform.materializer import Materializer
 from app.transform.pipeline_dag import get_pipeline_engine, DAGModel
 from app.retl.destination_sync import DestinationSync
 from app.retl.audience_exporter import AudienceExporter
@@ -61,19 +62,22 @@ def connect_and_load_db(
     limit: Optional[int] = None,
     mode: str = "materialize"
 ) -> str:
-    mgr = SessionManager()
-    sess = mgr.get_or_create_session(session_id)
-    connector = ConnectorFactory.get_connector(conn_str)
-    arrow_table = connector.fetch_to_arrow(
-        query_or_table=query_or_table,
-        filter_sql=filter_sql,
-        select_cols=select_cols,
-        partition_col=partition_col,
-        num_partitions=num_partitions,
-        limit=limit,
-        mode=mode
-    )
-    meta = sess.register_dataset(dataset_name, arrow_table, {"conn_str": conn_str, "source": query_or_table})
+    try:
+        mgr = SessionManager()
+        sess = mgr.get_or_create_session(session_id)
+        connector = ConnectorFactory.get_connector(conn_str)
+        arrow_table = connector.fetch_to_arrow(
+            query_or_table=query_or_table,
+            filter_sql=filter_sql,
+            select_cols=select_cols,
+            partition_col=partition_col,
+            num_partitions=num_partitions,
+            limit=limit,
+            mode=mode,
+        )
+        meta = sess.register_dataset(dataset_name, arrow_table, {"conn_str": conn_str, "source": query_or_table})
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     
     # Auto-register into Data Catalog
     cat = get_meta_registry(sess.session_id)
@@ -469,7 +473,24 @@ def execute_data_cleaning(
     res = DataCleaner.clean_table(con, source_table, target_table, dedup_keys, fillna_rules, outlier_clip_cols)
     return json.dumps({"status": "success", "cleaning_result": res}, ensure_ascii=False)
 
-@mcp.tool(name="run_dag_pipeline", description="Execute dbt-style topological DAG SQL transformation pipeline.")
+@mcp.tool(name="create_wide_table", description="Join a fact table to dimension tables into one wide table. Returns wide_table_name, row_count, and columns.")
+def create_wide_table(
+    session_id: str,
+    target_name: str,
+    fact_table: str,
+    dimension_joins: List[Dict[str, Any]],
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_session(session_id)
+    if not sess:
+        return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
+    try:
+        res = Materializer.create_wide_table(sess.get_duckdb_conn(), target_name, fact_table, dimension_joins)
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
+    return json.dumps({"status": "success", "wide_table": res}, ensure_ascii=False)
+
+@mcp.tool(name="run_dag_pipeline", description="Execute a dbt-style DAG. Models in the same stage run one after another on the session connection, not concurrently.")
 def run_dag_pipeline(session_id: str) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
@@ -486,17 +507,23 @@ def reverse_sync_destination(
     source_table: str,
     dest_conn_str: str,
     dest_table_name: str,
-    mode: str = "replace"
+    mode: str = "replace",
+    chunk_size: int = 50000,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
     if not sess:
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
-    res = DestinationSync.sync_table_to_destination(con, source_table, dest_conn_str, dest_table_name, mode)
+    try:
+        res = DestinationSync.sync_table_to_destination(
+            con, source_table, dest_conn_str, dest_table_name, mode, chunk_size=chunk_size,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "sync_result": res}, ensure_ascii=False)
 
-@mcp.tool(name="export_audience_cohort", description="Export specific audience segment or churn-risk users to JSON or CSV for CRM/marketing activation.")
+@mcp.tool(name="export_audience_cohort", description="Export an audience segment to JSON or CSV. total_audience_count is the filtered total. exported_count is the returned page. truncated is true when the page is shorter than the total.")
 def export_audience_cohort(
     session_id: str,
     source_table: str,
@@ -513,7 +540,7 @@ def export_audience_cohort(
     res = AudienceExporter.export_cohort(con, source_table, filter_sql, export_columns, format_type, limit)
     return json.dumps({"status": "success", "audience": res}, ensure_ascii=False)
 
-@mcp.tool(name="send_operational_webhook_alert", description="Send an alert. platform=feishu builds a post card and platform=dingtalk builds markdown. slack, generic, and any other value send the same JSON body {title, message, metrics}.")
+@mcp.tool(name="send_operational_webhook_alert", description="Send an alert. feishu is a post card, dingtalk and slack have their own bodies. wecom, wechat, weixin, qywx, wxwork, and wechat_work send WeCom markdown. Any other platform sends generic JSON. A failed send is status FAILED and still includes simulated_payload.")
 def send_operational_webhook_alert(
     webhook_url: str,
     title: str,
@@ -570,7 +597,7 @@ def ontology_query_objects(
     res = engine.query_object_instances(con, object_type, filters, properties, limit)
     return json.dumps({"status": "success", "data": res}, ensure_ascii=False)
 
-@mcp.tool(name="ontology_traverse_links", description="Graph-traverse from a source entity instance along relation links to discover connected business entities.")
+@mcp.tool(name="ontology_traverse_links", description="Graph-traverse from a source entity instance along relation links. link_path and max_hops are passed through. The traversal includes hop_details and truncated.")
 def ontology_traverse_links(
     session_id: str,
     source_object_type: str,
@@ -578,6 +605,7 @@ def ontology_traverse_links(
     link_name: str,
     limit: int = 50,
     link_path: Optional[List[str]] = None,
+    max_hops: int = 4,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
@@ -585,12 +613,21 @@ def ontology_traverse_links(
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
     engine = get_ontology_engine()
-    res = engine.traverse_links(
-        con, source_object_type, source_instance_id, link_name, limit, link_path=link_path
-    )
+    try:
+        res = engine.traverse_links(
+            con, source_object_type, source_instance_id, link_name, limit,
+            link_path=link_path, max_hops=max_hops,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "traversal": res}, ensure_ascii=False)
 
-@mcp.tool(name="ontology_execute_action", description="Execute an atomic business action on an entity instance with audit logging. dry_run defaults to true so a tool call previews the action before it writes.")
+@mcp.tool(name="ontology_entity_graph", description="Return the ontology entity graph: nodes, edges, and broken_edges whose endpoints are not registered.")
+def ontology_entity_graph() -> str:
+    graph = get_ontology_engine().entity_graph()
+    return json.dumps({"status": "success", "entity_graph": graph}, ensure_ascii=False)
+
+@mcp.tool(name="ontology_execute_action", description="Execute an atomic business action on an entity instance with audit logging. dry_run defaults to true so a tool call previews the action before it writes. A webhook push that returns FAILED is audited as FAILED even when the result still carries simulated_payload.")
 def ontology_execute_action(
     session_id: str,
     action_name: str,
@@ -604,11 +641,14 @@ def ontology_execute_action(
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
     engine = get_ontology_engine()
-    audit = engine.execute_action(con, action_name, instance_id, parameters, dry_run)
+    try:
+        audit = engine.execute_action(con, action_name, instance_id, parameters, dry_run)
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "action_audit": audit}, ensure_ascii=False)
 
 
-@mcp.tool(name="import_excel_or_csv", description="High-performance ingestion of large Excel (.xlsx, .xls) and CSV files into memory with zero copy.")
+@mcp.tool(name="import_excel_or_csv", description="Ingest .xlsx or CSV into a session. Omitting sheet_name reads the first worksheet. A sheet name that is not in the workbook is an error. Legacy .xls is rejected.")
 def import_excel_or_csv(
     file_path: str,
     dataset_name: str,
@@ -616,15 +656,18 @@ def import_excel_or_csv(
     sheet_name: Optional[str] = None,
     limit: Optional[int] = None
 ) -> str:
-    mgr = SessionManager()
-    sess = mgr.get_or_create_session(session_id)
-    conn_str = f"file://{file_path}"
-    connector = ConnectorFactory.get_connector(conn_str)
-    arrow_table = connector.fetch_to_arrow(
-        query_or_table=sheet_name or "Sheet1",
-        limit=limit
-    )
-    meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": file_path})
+    try:
+        mgr = SessionManager()
+        sess = mgr.get_or_create_session(session_id)
+        conn_str = f"file://{file_path}"
+        connector = ConnectorFactory.get_connector(conn_str)
+        arrow_table = connector.fetch_to_arrow(
+            query_or_table=sheet_name or "",
+            limit=limit
+        )
+        meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": file_path})
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
 
     # Register into Catalog
     cat = get_meta_registry(sess.session_id)

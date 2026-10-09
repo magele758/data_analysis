@@ -161,11 +161,11 @@ class FastExcelReader:
     ) -> str:
         sheets = cls._workbook_sheets(z)
         names = [name for name, _rid in sheets]
-        # import_excel_or_csv passes the literal "Sheet1" when the caller omits a
-        # sheet. Keep that alias as "first sheet" so existing imports still load.
+        # Omitted sheet_name means the first worksheet. A name that is not in the
+        # workbook is an error, including the literal "Sheet1".
         if sheet_name and sheet_name in names:
             idx = names.index(sheet_name)
-        elif sheet_name and sheet_name != "Sheet1":
+        elif sheet_name:
             raise ValueError(f"Sheet {sheet_name!r} not found. Available: {names}")
         else:
             idx = sheet_index if 0 <= sheet_index < len(sheets) else 0

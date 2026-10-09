@@ -13,10 +13,10 @@
 * **作用**：从底层 DuckDB 数据表中检索具体业务实体（如 `Customer`、`Order`），支持属性投影与动态过滤条件。
 
 ### 3. 实体关系多跳遍历算子 (`ontology_traverse_links`)
-* **作用**：沿着实体拓扑关系链执行图遍历（如从客户 `C01` 出发，通过 `customer_orders` 遍历出所有关联订单）。返回 `path`、`hops` 和每一跳的 `hop_counts`。$N:M$ 经关联表连接，关联表字段会写入目录库。
+* **作用**：沿着实体拓扑关系链执行图遍历（如从客户 `C01` 出发，通过 `customer_orders` 遍历出所有关联订单）。返回 `path`、`hops`、`hop_counts`、`hop_details`。某一跳碰到 `limit` 时 `truncated` 为真。对象查询的 `matched_count` 是过滤后的全量，`total_instances` 仍是本页行数。REST `POST /api/v1/ontology/instances/traverse` 把 `link_path` 和 `max_hops` 传给引擎。`GET /api/v1/ontology/entity_graph` 与 MCP `ontology_entity_graph` 返回 nodes、edges、broken_edges。$N:M$ 经关联表连接，关联表字段会写入目录库。
 
 ### 4. 业务动作闭环执行算子 (`ontology_execute_action`)
-* **作用**：执行业务实体上的原子动作。审计结果带执行前、执行后和 `statement_hash`。`REVERSE_ETL_SYNC` 在 `handler_config` 提供 `dest_conn_str`、`dest_table_name`、`source_table` 时调用 `DestinationSync`；缺配置时返回失败，不假装同步成功。MCP `ontology_execute_action` 默认 `dry_run=true`。REST `POST /api/v1/ontology/actions/execute` 默认 `dry_run=false`。REST 遍历请求体带 `link_path`，与 MCP 一样传给多跳遍历。
+* **作用**：执行业务实体上的原子动作。审计结果带执行前、执行后和 `statement_hash`。Webhook 推送返回 `FAILED` 时审计也是 `FAILED`，即使结果里仍有 `simulated_payload`。`REVERSE_ETL_SYNC` 在 `handler_config` 提供 `dest_conn_str`、`dest_table_name`、`source_table` 时调用 `DestinationSync`；缺配置时返回失败，不假装同步成功。MCP `ontology_execute_action` 默认 `dry_run=true`。REST `POST /api/v1/ontology/actions/execute` 默认 `dry_run=false`。REST 遍历请求体带 `link_path` 和 `max_hops`。
 
 ---
 
@@ -43,7 +43,7 @@
 * **作用**：对指定数据表执行自动去重、空值填充（均值/中位数/众数/常数）、极值缩尾截断（Winsorization）。
 
 ### 9. dbt 风格 SQL DAG 建模调度算子 (`run_dag_pipeline`)
-* **作用**：基于 Kahn 拓扑排序算法，按模型依赖顺序依次物化 DAG 管道中的所有模型，支持影子表原子替换与回滚。`view` 与 `ephemeral` 建成视图；`incremental` 在提供 `unique_key` 且目标表已存在时按键合并，否则整表刷新。同一条 DuckDB 连接上按阶段顺序执行。`depends_on` 留空时，用 SQL 血缘解析补上来源表；调用方显式传入的依赖不会被覆盖。
+* **作用**：基于 Kahn 拓扑排序算法，按模型依赖顺序依次物化 DAG 管道中的所有模型，支持影子表原子替换与回滚。`view` 与 `ephemeral` 建成视图；`incremental` 在提供 `unique_key` 且目标表已存在时按键合并，否则整表刷新。同一阶段的模型在同一条 DuckDB 连接上顺序执行，不是并发。`unique_key` 写入 `dag_models_meta`，重启后仍在。`depends_on` 留空时，用 SQL 血缘解析补上来源表；调用方显式传入的依赖不会被覆盖。宽表是 `POST /api/v1/transform/wide` 与 MCP `create_wide_table`，返回 `columns`。
 
 ---
 
@@ -119,13 +119,13 @@
 ## 七、 反向 ETL 与数据激活层
 
 ### 21. 目标库反向同步算子 (`reverse_sync_destination`)
-* **作用**：流式分块将分析结果或 RFM 分群标签反写回外部 PostgreSQL、MySQL、SQLite 或 Parquet/CSV。
+* **作用**：流式分块将分析结果或 RFM 分群标签反写回外部 PostgreSQL、MySQL、SQLite 或 Parquet/CSV。`chunk_size` 是数据库目的地的 Arrow 批大小，默认 50000。
 
 ### 22. 受众分群导出算子 (`export_audience_cohort`)
-* **作用**：提取特定受众分群导出为 CSV/JSON 对接业务 CRM。
+* **作用**：提取特定受众分群导出为 CSV/JSON 对接业务 CRM。`total_audience_count` 是过滤后的全量，`exported_count` 是本次返回的行数，`truncated` 表示被 `limit` 截断。
 
 ### 23. 智能告警推送算子 (`send_operational_webhook_alert`)
-* **作用**：`platform=feishu` 发飞书 post 卡片，`platform=dingtalk` 发钉钉 markdown。`slack`、`generic` 以及其他值共用同一份 JSON：`title`、`message`、`metrics`。没有单独的企业微信 payload。
+* **作用**：`platform=feishu` 发飞书 post 卡片，`dingtalk` 发钉钉 markdown，`slack` 发 `{"text": ...}`。`wecom`、`wechat`、`weixin`、`qywx`、`wxwork`、`wechat_work` 发企业微信 markdown。其他值发通用 JSON：`title`、`message`、`metrics`。推送失败时 `status` 为 `FAILED`，响应里仍会带 `simulated_payload`。
 
 ---
 

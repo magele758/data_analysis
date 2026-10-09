@@ -172,6 +172,13 @@ class ReverseSyncRequest(BaseModel):
     dest_conn_str: str
     dest_table_name: str
     mode: str = "replace"
+    chunk_size: int = Field(50000, description="Arrow batch size for database destinations. Must be >= 1.")
+
+class WideTableRequest(BaseModel):
+    session_id: str
+    target_name: str
+    fact_table: str
+    dimension_joins: List[Dict[str, Any]]
 
 class AudienceExportRequest(BaseModel):
     session_id: str
@@ -212,6 +219,7 @@ class OntologyTraverseRequest(BaseModel):
     link_name: str
     limit: int = 50
     link_path: Optional[List[str]] = None
+    max_hops: int = 4
 
 class OntologyActionExecRequest(BaseModel):
     session_id: str

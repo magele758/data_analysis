@@ -223,7 +223,11 @@ class PipelineDAG:
 
     def clear_models(self):
         with self._lock:
+            names = list(self._models)
             self._models.clear()
+            if self.persistent and self.db is not None:
+                for name in names:
+                    self.db.delete_dag_model(name)
 
     def run_pipeline(self, con: duckdb.DuckDBPyConnection, models: Optional[List[str]] = None) -> Dict[str, Any]:
         """

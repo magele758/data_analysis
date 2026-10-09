@@ -1,16 +1,17 @@
-# MCP Tools Specification (38 Registered Tools)
+# MCP Tools Specification (40 Registered Tools)
 
 Two ingestion paths land data in one session; all analytics run on session tables.
 Catalog / metrics / DAG / lineage are scoped per `session_id` (isolated across sessions).
 
 | Tool Name | Category | Key Parameters | Return Value |
 | :--- | :--- | :--- | :--- |
-| `import_excel_or_csv` | Ingestion (Path A) | `file_path`, `dataset_name`, `sheet_name`, `limit` | `session_id`, `row_count`, `column_count`, `summary` |
+| `import_excel_or_csv` | Ingestion (Path A) | `file_path`, `dataset_name`, `sheet_name` (omit = first worksheet; unknown name is an error), `limit` | `session_id`, `row_count`, `column_count`, `summary`. Legacy `.xls` is rejected |
 | `connect_and_load_db` | Ingestion (Path A) | `conn_str`, `query_or_table`, `dataset_name`, `select_cols`, `filter_sql` | `session_id`, `row_count`, `column_count`, `summary` |
 | `import_traces` | Ingestion (Path B) | `source` (OTLP/JSON/NDJSON/CSV/Parquet), `records` (inline spans; wins over `source`), `dataset_name`, `session_id`, `fmt` | `session_id`, `dataset_name`, `row_count`, `columns`, `summary`. REST uses the field name `format`, not `fmt` |
 | `ontology_list_schema` | Ontology | None | `status`, `ontology_schema` (objects, links, actions) |
 | `ontology_query_objects` | Ontology | `session_id`, `object_type`, `filters`, `properties`, `limit` | `status`, `data` (`object_type`, `primary_key`, `total_instances`, `instances`). REST returns that object directly, without the `data` wrapper |
-| `ontology_traverse_links` | Ontology | `session_id`, `source_object_type`, `source_instance_id`, `link_name`, `link_path` | `status`, `traversal` (linked instances, hops, path) |
+| `ontology_traverse_links` | Ontology | `session_id`, `source_object_type`, `source_instance_id`, `link_name`, `link_path`, `max_hops` | `status`, `traversal` (`hop_details`, `truncated`, path, hops). REST passes the same `link_path` and `max_hops` |
+| `ontology_entity_graph` | Ontology | None | `status`, `entity_graph` (`nodes`, `edges`, `broken_edges`). REST: `GET /api/v1/ontology/entity_graph` |
 | `ontology_execute_action` | Ontology | `session_id`, `action_name`, `instance_id`, `parameters`, `dry_run` (default true) | `status`, `action_audit` |
 | `eda_profile` | Profiling | `session_id`, `dataset_name` | `summary`, `quality_score`, `total_rows`, `columns`. Measure `skewness` / `kurtosis` / `std` are null when undefined. `quantile_cont` p50 is `quantile_cont` |
 | `driver_attribution_analysis` | Attribution | `session_id`, `dataset_name`, `target_metric`, `dimension_path`, `base_filter`, `current_filter`, `rate_col`, `volume_col` | `summary`, `method`, `orderings_used`, `sun_shapley`, `driver_hierarchy`, `chart_spec`, `evidence`. Laspeyres still drills only the first dimension |
@@ -37,9 +38,10 @@ Catalog / metrics / DAG / lineage are scoped per `session_id` (isolated across s
 | `register_semantic_model` | Catalog | `session_id`, `name`, `table_name`, `grain`, `columns`, `entities` | `model` |
 | `list_session_datasets` | Catalog | `session_id` | `datasets` (source credentials redacted) |
 | `execute_data_cleaning` | Transform | `session_id`, `source_table`, `target_table`, `dedup_keys`, `fillna_rules` | `cleaning_result` (rows, removed duplicates) |
-| `run_dag_pipeline` | Transform | `session_id` | `pipeline_execution` (order, results) |
-| `reverse_sync_destination` | Reverse ETL | `session_id`, `source_table`, `dest_conn_str`, `dest_table_name` | `sync_result` (synced rows, status) |
-| `export_audience_cohort` | Reverse ETL | `session_id`, `source_table`, `filter_sql`, `format_type` | `audience` (count, data) |
-| `send_operational_webhook_alert` | Reverse ETL | `webhook_url`, `title`, `message`, `platform` (`feishu` post card, `dingtalk` markdown; `slack` and anything else use one generic JSON body), `extra_metrics` | `alert_result` |
+| `create_wide_table` | Transform | `session_id`, `target_name`, `fact_table`, `dimension_joins` | `wide_table` (`wide_table_name`, `row_count`, `columns`). REST: `POST /api/v1/transform/wide` |
+| `run_dag_pipeline` | Transform | `session_id` | `pipeline_execution` (order, results). Same-stage models run sequentially |
+| `reverse_sync_destination` | Reverse ETL | `session_id`, `source_table`, `dest_conn_str`, `dest_table_name`, `chunk_size` | `sync_result` (synced rows, status) |
+| `export_audience_cohort` | Reverse ETL | `session_id`, `source_table`, `filter_sql`, `format_type` | `audience` (`total_audience_count`, `exported_count`, `truncated`, data) |
+| `send_operational_webhook_alert` | Reverse ETL | `webhook_url`, `title`, `message`, `platform` (`feishu`, `dingtalk`, `slack`, `wecom`/`wechat`/`weixin`/`qywx`/`wxwork`/`wechat_work`), `extra_metrics` | `alert_result`. `FAILED` still includes `simulated_payload` |
 | `assert_data_quality` | Observability | `session_id`, `table`, `rules` | `quality_report` (health score, rules) |
 | `detect_table_schema_drift` | Observability | `session_id`, `table`, `baseline_schema` | `drift_report` (add/remove/type changes) |

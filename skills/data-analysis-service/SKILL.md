@@ -11,15 +11,15 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 
 ### 1. Two Ingestion Paths → One Analytical Session
 * **Path A — Database Connectors**: Call `connect_and_load_db` to connect to PostgreSQL/MySQL/MSSQL/SQLite/File with projection & predicate pushdown. `mode="materialize"` (default, ConnectorX) or `mode="scanner"` (DuckDB ATTACH + pushdown for PG/MySQL).
-* **Path A — Big Excel / CSV**: Invoke `import_excel_or_csv` with `file_path`, `dataset_name`, optional `sheet_name` to stream-parse million-row files without OOM.
+* **Path A — Big Excel / CSV**: Invoke `import_excel_or_csv` with `file_path` and `dataset_name`. Omitting `sheet_name` reads the first worksheet. A sheet name that is not in the workbook is an error. Legacy `.xls` is rejected.
 * **Path B — Trace / Telemetry Import**: Invoke `import_traces` with `source` (OTLP JSON, span JSON/NDJSON array, or CSV/Parquet) and `dataset_name` to load trace spans/events as an ordinary session table. It is normalized to a canonical span/event schema so every downstream operator applies.
 * All paths land in the same in-memory DuckDB session (`session_id`), so DB data and trace data share one analysis engine.
 
 ### 2. Palantir Agentic Ontology Layer
 * **Inspect Schema**: Invoke `ontology_list_schema` to discover all business Object Types, Links, and available Actions.
 * **Query Entities**: Invoke `ontology_query_objects` to search entity instances and status.
-* **Multi-Hop Traversal**: Invoke `ontology_traverse_links` to traverse along relation links across entities (e.g. `Customer -> Orders -> Products`). The result includes `path` and `hop_counts`. MANY_TO_MANY uses the junction table.
-* **Execute Actions**: Invoke `ontology_execute_action` to trigger atomic business operations (e.g. `ApplyDiscountAction`, `RerouteOrderAction`). The audit stores before, after, and `statement_hash`. The MCP tool defaults `dry_run=true`. Pass `dry_run=false` to write. `link_path` walks more than one hop. A `writeback_table` on `SQL_MUTATION` stores the edit beside the source table. `REVERSE_ETL_SYNC` calls `DestinationSync` only when `dest_conn_str`, `dest_table_name`, and `source_table` are set.
+* **Multi-Hop Traversal**: Invoke `ontology_traverse_links` to traverse along relation links across entities (e.g. `Customer -> Orders -> Products`). Pass `link_path` and `max_hops`. The result includes `path`, `hop_counts`, `hop_details`, and `truncated`. Object queries include `matched_count` for the filtered total. MANY_TO_MANY uses the junction table. `ontology_entity_graph` returns nodes, edges, and broken_edges.
+* **Execute Actions**: Invoke `ontology_execute_action` to trigger atomic business operations (e.g. `ApplyDiscountAction`, `RerouteOrderAction`). The audit stores before, after, and `statement_hash`. A webhook result of `FAILED` stays `FAILED` even when `simulated_payload` is present. The MCP tool defaults `dry_run=true`. Pass `dry_run=false` to write. `link_path` walks more than one hop. A `writeback_table` on `SQL_MUTATION` stores the edit beside the source table. `REVERSE_ETL_SYNC` calls `DestinationSync` only when `dest_conn_str`, `dest_table_name`, and `source_table` are set.
 
 ### 3. Data Catalog & Semantic Layer
 * **Catalog Assets**: Auto-registers ingested files/tables into Data Catalog.
@@ -27,7 +27,7 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 
 ### 4. ETL / ELT Transformation & Data Cleansing
 * **Data Cleaning**: Invoke `execute_data_cleaning` to deduplicate, fill missing values (mean/median/mode), and clip outliers.
-* **DAG Pipeline**: Register SQL models and call `run_dag_pipeline` for transactional dbt-like topological modeling.
+* **DAG Pipeline**: Register SQL models and call `run_dag_pipeline` for transactional dbt-like topological modeling. Models in one stage run sequentially on the session connection. `create_wide_table` joins a fact table to dimensions and returns `columns`.
 
 ### 5. Analytics, Attribution, Mining & SPSS Testing
 * **EDA Profiling**: Invoke `eda_profile` for semantic types, distribution stats, and data quality scores.
@@ -44,9 +44,9 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 * **Single actions over HTTP**: `POST /api/v1/insights/outliers`, `/trends`, and `/dominance` call the same operators as `detect_automated_insights`. Each returns `AnalysisResponse` with the operator payload in `statistics` and the sample rows in `data_preview`.
 
 ### 6. Reverse ETL & Operational Activation
-* **Destination Sync**: Invoke `reverse_sync_destination` to stream sync analytical results back to PostgreSQL/MySQL/SQLite/Parquet.
-* **Audience Export**: Call `export_audience_cohort` to extract high-value or churn-risk users to JSON/CSV for CRM.
-* **Operational Webhooks**: Call `send_operational_webhook_alert`. `feishu` sends a post card and `dingtalk` sends markdown. `slack` and any other platform share one generic JSON body.
+* **Destination Sync**: Invoke `reverse_sync_destination` to stream sync analytical results back to PostgreSQL/MySQL/SQLite/Parquet. `chunk_size` sets the Arrow batch size.
+* **Audience Export**: Call `export_audience_cohort` to extract high-value or churn-risk users to JSON/CSV for CRM. `total_audience_count` is the filtered total, `exported_count` is the page, and `truncated` says whether `limit` cut the page short.
+* **Operational Webhooks**: Call `send_operational_webhook_alert`. `feishu` sends a post card, `dingtalk` sends markdown, and `slack` sends `{"text": ...}`. `wecom`, `wechat`, `weixin`, `qywx`, `wxwork`, and `wechat_work` send WeCom markdown. Other platforms send generic JSON. A failed send is `FAILED` and still includes `simulated_payload`.
 
 ### 7. Data Observability & Assertions
 * **Quality Assertions**: Invoke `assert_data_quality` for declarative single-pass validations (nulls, uniqueness, ranges, row counts).
@@ -59,4 +59,4 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 ## Reference Documentation
 
 - [Operators Guide](references/operators.md) - Mathematical formulations and detailed parameter options.
-- [MCP Tools Reference](references/mcp_tools.md) - Exact schema and payload definitions for all 38 MCP tools.
+- [MCP Tools Reference](references/mcp_tools.md) - Exact schema and payload definitions for all 40 MCP tools.

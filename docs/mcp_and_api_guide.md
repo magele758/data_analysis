@@ -58,6 +58,12 @@ HTTP 分析端点使用 `AnalysisResponse`：`summary_text`、`statistics`、`ch
 
 `POST /api/v1/tools/variance_decomposition` 与 MCP `variance_decomposition` 调用 `run_variance_decomposition`。HTTP 把算子字典放在 `statistics`。MCP 把同一字典放在 `variance_decomposition`，含 `evidence`。归因 MCP 另外返回 `evidence`；Laspeyres 仍只拆第一个维度。
 
+省略 Excel `sheet_name` 时读第一张工作表。工作表名不在文件里时，HTTP 返回 400。上传文件名只取 basename，路径里有 `..` 或绝对路径时拒绝。`connect`、文件导入、本体下钻和动作的 `ValueError` / `FileNotFoundError` 也是 400。
+
+`GET /api/v1/ontology/entity_graph` 与 MCP `ontology_entity_graph` 返回实体图。下钻请求带 `link_path` 和 `max_hops`。查询结果的 `matched_count` 是过滤后全量；下钻的 `truncated` 表示某一跳被 `limit` 截断。Webhook 失败即使带 `simulated_payload` 也是 `FAILED`。
+
+`POST /api/v1/transform/wide` 与 MCP `create_wide_table` 调用已有的 `Materializer.create_wide_table`。`reverse_sync` 接受 `chunk_size`。受众导出带 `exported_count` 和 `truncated`。DAG 同一阶段顺序执行，不是并发。
+
 质量规则只实现 `not_null`、`unique`、`between`、`row_count`。其余 type 记为失败的 `unsupported_rule`。
 
 本体查询：MCP 是 `{status, data}`，`instances` 在 `data` 里。REST 直接返回引擎对象。动作的 `dry_run`：MCP 默认 true，REST 默认 false。

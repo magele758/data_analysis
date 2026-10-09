@@ -30,7 +30,8 @@
 * `execute_data_cleaning`: Automated deduplication, missing value imputation (mean/median/mode/constant), and outlier clipping.
 * `run_dag_pipeline`: Topological DAG model execution using Kahn's algorithm with dependency-ordered materialization.
 * `reverse_sync_destination`: Reverse ETL sync of analytical tables/RFM scores back to target databases or files.
-* `export_audience_cohort`: Export specific audience segment to JSON/CSV for CRM activation.
-* `send_operational_webhook_alert`: Automated operational alert cards sent to Feishu, DingTalk, Slack, or Webhook.
+* `export_audience_cohort`: Export a segment to JSON/CSV. `total_audience_count` is the filtered total, `exported_count` is the page, and `truncated` records the limit.
+* `create_wide_table`: Join a fact table to dimension tables. The result includes `columns`.
+* `send_operational_webhook_alert`: Feishu post card, DingTalk markdown, Slack `text`, and WeCom markdown for `wecom`, `wechat`, `weixin`, `qywx`, `wxwork`, `wechat_work`. Failure is `FAILED` even when `simulated_payload` is present.
 * `assert_data_quality`: Great-Expectations style declarative assertions (nulls, uniqueness, ranges, row counts).
 * `detect_table_schema_drift`: Compare table schema against registered baseline to detect added, removed, or altered columns.
