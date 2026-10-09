@@ -27,18 +27,23 @@ class SemanticMetricStore:
     _lock = threading.RLock()
     _session_instances: Dict[str, "SemanticMetricStore"] = {}
 
-    def __init__(self, persistent: bool = True):
-        self.persistent = persistent
-        self.db = MetadataDB.get_instance() if persistent else None
+    def __init__(self, persistent: bool = True, db: Optional[MetadataDB] = None):
+        self.persistent = persistent or db is not None
+        self.db = db if db is not None else (MetadataDB.get_instance() if persistent else None)
         self._metrics: Dict[str, MetricDefinition] = {}
         self._models: Dict[str, "SemanticModel"] = {}
+        if self.persistent and self.db is not None:
+            self._restore_models()
 
     @classmethod
     def get_instance(cls) -> "SemanticMetricStore":
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = cls(persistent=True)
-            return cls._instance
+        return get_semantic_store("_global")
+
+    def _restore_models(self) -> None:
+        if self.db is None:
+            return
+        for row in self.db.list_semantic_models():
+            self._models[row["name"]] = SemanticModel(**row)
 
     def register_metric(self, metric: MetricDefinition) -> MetricDefinition:
         with self._lock:
@@ -102,14 +107,16 @@ class SemanticMetricStore:
 
             sql = f"SELECT {', '.join(select_parts)} FROM {safe_table_ref(table_name)}"
 
-            where_clauses = []
+            raw_wheres = []
             if filters:
-                where_clauses.append(safe_predicate(filters))
-            if first_m.filter_expr:
-                where_clauses.append(safe_predicate(first_m.filter_expr))
-
-            if where_clauses:
-                sql += f" WHERE {' AND '.join(where_clauses)}"
+                raw_wheres.append(filters)
+            for m_name in metric_names:
+                defined = self.get_metric(m_name)
+                if defined is not None and defined.filter_expr:
+                    raw_wheres.append(defined.filter_expr)
+            where_sql = _where_sql(raw_wheres)
+            if where_sql:
+                sql += where_sql
 
             if dimensions:
                 dim_indices = [str(i + 1) for i in range(len(dimensions))]
@@ -156,6 +163,8 @@ class SemanticMetricStore:
     def register_model(self, model: "SemanticModel") -> "SemanticModel":
         with self._lock:
             self._models[model.name] = model
+            if self.persistent and self.db is not None:
+                self.db.save_semantic_model(model.model_dump())
             return model
 
     def list_models(self) -> List["SemanticModel"]:
@@ -200,12 +209,12 @@ class SemanticMetricStore:
             model = self._model_for_table(metric.table_name)
             if model is None:
                 raise ValueError(f"Metric '{metric.name}' has no semantic model for table '{metric.table_name}'")
-            if metric.aggregation_type.upper() == "CUMULATIVE":
+            if (metric.aggregation_type or "").upper() == "CUMULATIVE":
                 if dimensions and dimensions != [model.agg_time_dimension]:
                     raise ValueError(
                         f"Cumulative metric '{metric.name}' compiles on the model time spine only"
                     )
-                ctes.append(self._cumulative_cte(metric, model))
+                ctes.append(self._cumulative_cte(metric, model, filters))
                 continue
             joins = []
             group_exprs = []
@@ -224,9 +233,12 @@ class SemanticMetricStore:
                     f" JOIN {safe_table_ref(dst.table_name)} {_alias(dst)}"
                     f" ON {_alias(src)}.{safe_ident(entity.expr)} = {_alias(dst)}.{safe_ident(_primary_expr(dst, entity.name))}"
                 )
-            where = ""
+            raw_wheres = []
             if filters:
-                where = f" WHERE {safe_predicate(filters)}"
+                raw_wheres.append(filters)
+            if metric.filter_expr:
+                raw_wheres.append(metric.filter_expr)
+            where = _where_sql(raw_wheres)
             dim_sql = (", ".join(select_dims) + ", ") if select_dims else ""
             group_sql = f" GROUP BY {', '.join(str(i + 1) for i in range(len(select_dims)))}" if select_dims else ""
             ctes.append(
@@ -236,7 +248,7 @@ class SemanticMetricStore:
             )
 
         order_sql = f" ORDER BY {safe_predicate(order_by)}" if order_by else ""
-        if len(ctes) == 1 and metrics[0].aggregation_type.upper() == "CUMULATIVE":
+        if len(ctes) == 1 and (metrics[0].aggregation_type or "").upper() == "CUMULATIVE":
             return (
                 f"WITH {ctes[0]} SELECT * FROM {safe_ident(metrics[0].name + '_agg')}"
                 f"{order_sql} LIMIT {int(limit)}"
@@ -255,16 +267,27 @@ class SemanticMetricStore:
         sql += f"{order_sql} LIMIT {int(limit)}"
         return sql
 
-    def _cumulative_cte(self, metric: "MetricDefinition", model: "SemanticModel") -> str:
+    def _cumulative_cte(
+        self,
+        metric: "MetricDefinition",
+        model: "SemanticModel",
+        filters: Optional[str] = None,
+    ) -> str:
         if not model.agg_time_dimension:
             raise ValueError(f"Cumulative metric '{metric.name}' requires agg_time_dimension on its model")
         time_col = safe_ident(model.agg_time_dimension)
+        raw_wheres = []
+        if filters:
+            raw_wheres.append(filters)
+        if metric.filter_expr:
+            raw_wheres.append(metric.filter_expr)
+        where = _where_sql(raw_wheres)
         return (
             f"{safe_ident(metric.name + '_agg')} AS ("
             f"WITH daily AS ("
             f"SELECT CAST({time_col} AS DATE) AS {safe_ident('metric_time')}, "
             f"({safe_predicate(self._formula_sql(metric))}) AS v "
-            f"FROM {safe_table_ref(model.table_name)} GROUP BY 1), "
+            f"FROM {safe_table_ref(model.table_name)}{where} GROUP BY 1), "
             f"spine AS ("
             f"SELECT CAST(d AS DATE) AS {safe_ident('metric_time')} FROM generate_series("
             f"(SELECT MIN({safe_ident('metric_time')}) FROM daily), "
@@ -290,6 +313,16 @@ class SemanticModel(BaseModel):
     columns: List[str] = Field(default_factory=list)
     entities: List[EntityRef] = Field(default_factory=list)
     agg_time_dimension: Optional[str] = None
+
+
+def _where_sql(parts: List[str]) -> str:
+    cleaned: List[str] = []
+    for part in parts:
+        if part and part not in cleaned:
+            cleaned.append(safe_predicate(part))
+    if not cleaned:
+        return ""
+    return " WHERE " + " AND ".join(cleaned)
 
 
 def _alias(model: SemanticModel) -> str:
@@ -347,4 +380,6 @@ def get_semantic_store(session_id: str = "_global") -> SemanticMetricStore:
         if inst is None:
             inst = SemanticMetricStore(persistent=(session_id == "_global"))
             SemanticMetricStore._session_instances[session_id] = inst
+        if session_id == "_global":
+            SemanticMetricStore._instance = inst
         return inst
