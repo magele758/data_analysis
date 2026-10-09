@@ -39,6 +39,7 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 
 ### 5b. Insight Copilot (Automated Insight Discovery)
 * **Discover Insights**: Invoke `discover_insights` to orchestrate the operators above as *Analysis Actions* (anomaly/correlation/dominance/trend), returning ranked structured insights, an **Insight Graph** (relationships between findings), and a **data-story narrative**. An optional `intent` string lightly biases which actions run. `ranking_method` is `severity` unless `DATA_AGENT_LLM_BASE_URL` is set, in which case the endpoint reorders ids from titles, severity, and evidence fields and falls back to severity on failure. Deeper NLU and multi-agent reasoning stay with the calling Agent.
+* **Single actions over HTTP**: `POST /api/v1/insights/outliers`, `/trends`, and `/dominance` call the same operators as `detect_automated_insights`. Each returns `AnalysisResponse` with the operator payload in `statistics` and the sample rows in `data_preview`.
 
 ### 6. Reverse ETL & Operational Activation
 * **Destination Sync**: Invoke `reverse_sync_destination` to stream sync analytical results back to PostgreSQL/MySQL/SQLite/Parquet.

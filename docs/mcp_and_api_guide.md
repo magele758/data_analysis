@@ -54,6 +54,8 @@ HTTP 分析端点使用 `AnalysisResponse`：`summary_text`、`statistics`、`ch
 
 叙述：EDA 会带上 `type_inference_sample_rows` 以及列上的 `distinct_count_method` / `quantile_method`。归因会带上 `method`，并在 `sun_shapley` 为空时直接说空。假设检验按返回的 `significant` 叙述，不把「不显著」写成 `p >= 0.05`。Logistic 用 Pseudo R² 与 LLR p，不用 OLS 的 R² / VIF 模板。
 
+`POST /api/v1/insights/outliers`、`/trends`、`/dominance` 调用与 MCP `detect_automated_insights` 相同的算子，响应是 `AnalysisResponse`（`statistics` 为完整结果，`data_preview` 为异常点、序列预览或头部贡献者）。MCP 仍把三项包在 `insights` 里。
+
 质量规则只实现 `not_null`、`unique`、`between`、`row_count`。其余 type 记为失败的 `unsupported_rule`。
 
 本体查询：MCP 是 `{status, data}`，`instances` 在 `data` 里。REST 直接返回引擎对象。动作的 `dry_run`：MCP 默认 true，REST 默认 false。

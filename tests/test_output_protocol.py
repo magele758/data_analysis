@@ -221,3 +221,35 @@ def test_rest_attaches_chart_specs_beside_existing_fields():
     forecast_body = forecast.json()
     assert forecast_body["chart_spec"]["layer"][0]["mark"]["type"] == "errorband"
     assert forecast_body["statistics"]["forecasts"]
+
+
+def test_insight_routes_use_analysis_response():
+    sess = SessionManager().get_or_create_session("proto_insight_sess")
+    con = sess.get_duckdb_conn()
+    con.execute("CREATE TABLE proto_insight (month INT, region VARCHAR, sales DOUBLE)")
+    con.execute("""
+        INSERT INTO proto_insight VALUES
+        (1, 'East', 10), (2, 'East', 12), (3, 'East', 11), (4, 'East', 13),
+        (5, 'East', 14), (6, 'East', 400),
+        (1, 'West', 1), (2, 'West', 1), (3, 'West', 1)
+    """)
+    base = {"session_id": "proto_insight_sess", "dataset_name": "proto_insight", "metric": "sales"}
+
+    outliers = client.post("/api/v1/insights/outliers", json={**base, "method": "z_score", "threshold": 2})
+    assert outliers.status_code == 200
+    outliers_body = outliers.json()
+    assert outliers_body["statistics"]["method"] == "z_score"
+    assert outliers_body["statistics"]["outlier_count"] >= 1
+    assert outliers_body["data_preview"]
+
+    trends = client.post("/api/v1/insights/trends", json={**base, "time_col": "month"})
+    assert trends.status_code == 200
+    trends_body = trends.json()
+    assert "slope" in trends_body["statistics"]
+    assert trends_body["data_preview"][0]["time"]
+
+    dominance = client.post("/api/v1/insights/dominance", json={**base, "category_col": "region", "top_k": 2})
+    assert dominance.status_code == 200
+    dominance_body = dominance.json()
+    assert "gini_coefficient" in dominance_body["statistics"]
+    assert dominance_body["data_preview"][0]["category"] == "East"

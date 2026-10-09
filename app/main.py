@@ -19,6 +19,7 @@ from app.security import require_api_key, validate_auth_config
 from app.schemas.requests import (
     ConnectDBRequest, EDARequest, CorrelationRequest, OLAPRequest, PivotRequest,
     DriverAnalysisRequest, HypothesisTestRequest, RegressionRequest,
+    OutliersRequest, TrendsRequest, DominanceRequest,
     ClusteringRequest, TimeSeriesRequest, SQLSandboxRequest, RFMRequest,
     InsightDiscoverRequest, RunExampleRequest, FunnelRequest, SemanticQueryRequest,
     CleanTableRequest, ReverseSyncRequest, AudienceExportRequest, WebhookAlertRequest,
@@ -35,6 +36,9 @@ from app.operators.olap import run_olap_query, run_pivot_table
 from app.distributed_ops.dist_driver import DistributedDriverAnalysis
 from app.operators.spss.hypothesis import run_spss_hypothesis_test
 from app.operators.spss.regression import run_spss_regression
+from app.operators.insights.outliers import detect_outliers
+from app.operators.insights.trends import detect_trends
+from app.operators.insights.dominance import detect_dominance
 from app.operators.mining.clustering import run_kmeans_clustering, run_rfm_segmentation
 from app.operators.mining.timeseries import run_timeseries_forecast
 from app.operators.sandbox import run_duckdb_sql
@@ -390,6 +394,44 @@ def api_timeseries(req: TimeSeriesRequest):
     )
 
 # ----------------- Insight Copilot: automated insight discovery -----------------
+
+@app.post("/api/v1/insights/outliers", response_model=AnalysisResponse)
+def api_outliers(req: OutliersRequest):
+    res = detect_outliers(
+        req.session_id, req.dataset_name, req.metric,
+        dimension_cols=req.dimension_cols, method=req.method,
+        threshold=req.threshold, top_k=req.top_k,
+    )
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"{req.method} found {res['outlier_count']} outliers on {req.metric}.",
+        statistics=res,
+        data_preview=res.get("outliers"),
+    )
+
+@app.post("/api/v1/insights/trends", response_model=AnalysisResponse)
+def api_trends(req: TrendsRequest):
+    res = detect_trends(
+        req.session_id, req.dataset_name, req.time_col, req.metric, group_col=req.group_col,
+    )
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"{res['trend_direction']} on {req.metric}.",
+        statistics=res,
+        data_preview=res.get("series_preview"),
+    )
+
+@app.post("/api/v1/insights/dominance", response_model=AnalysisResponse)
+def api_dominance(req: DominanceRequest):
+    res = detect_dominance(
+        req.session_id, req.dataset_name, req.category_col, req.metric, top_k=req.top_k,
+    )
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"Gini {res['gini_coefficient']} across {res['total_categories']} categories of {req.metric}.",
+        statistics=res,
+        data_preview=res.get("top_contributors"),
+    )
 
 @app.post("/api/v1/insights/discover")
 def api_discover_insights(req: InsightDiscoverRequest):

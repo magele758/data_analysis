@@ -5,7 +5,7 @@
 
 ## 2. Profiling & Insights
 * `eda_profile`: Single-pass sufficient statistics (mean, std, P25, P50, P75, P95, P99, skewness, kurtosis, data quality score). Tables over 100,000 rows use `approx_count_distinct` and `approx_quantile`.
-* `detect_automated_insights`: 3-Sigma/Isolation Forest anomaly detection, temporal slope change points, Gini coefficient & Pareto 80/20.
+* `detect_automated_insights`: 3-Sigma/Isolation Forest anomaly detection, temporal slope change points, Gini coefficient & Pareto 80/20. REST exposes the same three operators at `POST /api/v1/insights/outliers`, `/trends`, and `/dominance`.
 
 ## 3. OLAP & Root-Cause Attribution
 * `memory_olap_aggregation`: Slice & Dice, Rollup, Cube multi-dimensional aggregations in memory.

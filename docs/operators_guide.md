@@ -62,9 +62,10 @@
 * **支持模型**：OLS 多元线性回归（$R^2$、F检验、系数表、VIF 多重共线性诊断、Durbin-Watson 残差自相关检验）、二元 Logistic 回归。自变量超过 40 列，或扫描单元格超过 500 万时，返回「请先聚合再回归」，不把明细拉进进程。
 
 ### 14. 自动化洞察挖掘算子 (`detect_automated_insights`)
-* **异常点 (Outliers)**：3-Sigma、IQR、孤立森林。
-* **趋势与拐点 (Trends)**：线性回归斜率显著性检验 + 滑动窗口斜率突变拐点识别。
-* **支配度 (Dominance)**：基尼系数（Gini）与帕累托 80/20 集中度。
+* **异常点 (Outliers)**：3-Sigma、IQR、孤立森林。REST：`POST /api/v1/insights/outliers`。
+* **趋势与拐点 (Trends)**：线性回归斜率显著性检验 + 滑动窗口斜率突变拐点识别。REST：`POST /api/v1/insights/trends`。
+* **支配度 (Dominance)**：基尼系数（Gini）与帕累托 80/20 集中度。REST：`POST /api/v1/insights/dominance`。
+* MCP 仍是一个 `detect_automated_insights`。三条 REST 用 `AnalysisResponse`：完整结果在 `statistics`，样本行在 `data_preview`（异常点、序列预览、头部贡献者）。
 
 ### 15. 内存多维 OLAP 聚合算子 (`memory_olap_aggregation`)
 * **作用**：多维切片切块（Slice & Dice）、Rollup 与 Cube 聚合。
