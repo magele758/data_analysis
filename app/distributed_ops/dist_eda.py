@@ -1,4 +1,5 @@
-from typing import Any, Dict, List
+import math
+from typing import Any, Dict, List, Optional
 
 import duckdb
 
@@ -7,6 +8,18 @@ from app.engine.schema_infer import SchemaInferencer, SemanticType
 from app.engine.sql_guard import safe_ident, safe_table_ref
 
 _SAMPLE_ROWS = 5000
+
+
+def _finite(value: Any, digits: int = 4) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return round(number, digits)
 
 
 class DistributedEDA:
@@ -39,17 +52,12 @@ class DistributedEDA:
             select_parts.append(f'{dist_expr} AS "__dist_{i}"')
             if meta["semantic_type"] == SemanticType.MEASURE.value:
                 quantile_fn = "approx_quantile" if use_approx else "quantile_cont"
-                p50 = (
-                    f'approx_quantile({quoted}, 0.50) AS "__p50_{i}"'
-                    if use_approx
-                    else f'MEDIAN({quoted}) AS "__p50_{i}"'
-                )
                 select_parts.extend([
                     f'AVG({quoted}) AS "__mean_{i}"',
                     f'STDDEV_SAMP({quoted}) AS "__std_{i}"',
                     f'MIN({quoted}) AS "__min_{i}"',
                     f'MAX({quoted}) AS "__max_{i}"',
-                    p50,
+                    f'{quantile_fn}({quoted}, 0.50) AS "__p50_{i}"',
                     f'{quantile_fn}({quoted}, 0.25) AS "__p25_{i}"',
                     f'{quantile_fn}({quoted}, 0.75) AS "__p75_{i}"',
                     f'{quantile_fn}({quoted}, 0.95) AS "__p95_{i}"',
@@ -97,6 +105,7 @@ class DistributedEDA:
 
         column_reports: Dict[str, Any] = {}
         quality_penalties = 0
+        undefined_moments: List[str] = []
         for i, col_name, meta in indexed:
             null_cnt = int(stats.get(f"__null_{i}") or 0)
             dist_cnt = int(stats.get(f"__dist_{i}") or 0)
@@ -119,24 +128,25 @@ class DistributedEDA:
                 ) if meta["semantic_type"] == SemanticType.MEASURE.value else None,
             }
             if meta["semantic_type"] == SemanticType.MEASURE.value and stats.get(f"__mean_{i}") is not None:
-                def _num(key: str):
-                    value = stats.get(key)
-                    return round(float(value), 4) if value is not None else None
-
+                skewness = _finite(stats.get(f"__skew_{i}"))
+                kurtosis = _finite(stats.get(f"__kurt_{i}"))
+                std = _finite(stats.get(f"__std_{i}"))
+                if skewness is None or kurtosis is None or std is None:
+                    undefined_moments.append(col_name)
                 report.update({
-                    "mean": _num(f"__mean_{i}"),
-                    "std": _num(f"__std_{i}") or 0.0,
-                    "min": _num(f"__min_{i}"),
-                    "max": _num(f"__max_{i}"),
+                    "mean": _finite(stats.get(f"__mean_{i}")),
+                    "std": std,
+                    "min": _finite(stats.get(f"__min_{i}")),
+                    "max": _finite(stats.get(f"__max_{i}")),
                     "quantiles": {
-                        "p25": _num(f"__p25_{i}"),
-                        "p50": _num(f"__p50_{i}"),
-                        "p75": _num(f"__p75_{i}"),
-                        "p95": _num(f"__p95_{i}"),
-                        "p99": _num(f"__p99_{i}"),
+                        "p25": _finite(stats.get(f"__p25_{i}")),
+                        "p50": _finite(stats.get(f"__p50_{i}")),
+                        "p75": _finite(stats.get(f"__p75_{i}")),
+                        "p95": _finite(stats.get(f"__p95_{i}")),
+                        "p99": _finite(stats.get(f"__p99_{i}")),
                     },
-                    "skewness": _num(f"__skew_{i}") or 0.0,
-                    "kurtosis": _num(f"__kurt_{i}") or 0.0,
+                    "skewness": skewness,
+                    "kurtosis": kurtosis,
                 })
             elif meta["semantic_type"] == SemanticType.DIMENSION_CATEGORICAL.value:
                 report["top_categories"] = top_by_col.get(col_name, [])
@@ -162,6 +172,13 @@ class DistributedEDA:
                 method="single_pass_aggregates",
                 caveats=[
                     f"Semantic types were inferred from the first {min(_SAMPLE_ROWS, total_rows)} rows.",
+                    (
+                        "skewness, kurtosis, and sample std stay null when DuckDB leaves them undefined "
+                        "(too few rows, or zero variance). They are not filled in as 0. Undefined columns: "
+                        + ", ".join(undefined_moments)
+                        if undefined_moments
+                        else "skewness and kurtosis are null when undefined, and are not filled in as 0."
+                    ),
                     (
                         "distinct_count uses DuckDB approx_count_distinct because the table has more than 100,000 rows."
                         if use_approx
