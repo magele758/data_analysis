@@ -30,6 +30,22 @@ def safe_query_or_table(query_or_table: str) -> str:
         return f"({safe_select(query_or_table)}) AS _q"
     return safe_table_ref(query_or_table)
 
+
+def sql_string_literal(value: str, *, escape_backslash: bool = False) -> str:
+    """Quote a value as a SQL string literal.
+
+    MySQL (with backslash escapes enabled) must also escape ``\\``. PostgreSQL
+    standard_conforming_strings does not treat backslash as an escape.
+    """
+    if not isinstance(value, str):
+        raise ValueError(f"SQL string literal expected a string, got {type(value).__name__}")
+    if "\x00" in value:
+        raise ValueError("SQL string literal cannot contain a NUL byte")
+    text = value
+    if escape_backslash:
+        text = text.replace("\\", "\\\\")
+    return "'" + text.replace("'", "''") + "'"
+
 class ColumnInfo(BaseModel):
     name: str
     physical_type: str

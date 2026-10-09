@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
 
+from app.connectors.local import LocalFileConnector
+
 # Canonical trace/telemetry schema: one row per span (or event). This superset is
 # what every web/trace analytics operator expects, so any imported source is
 # reshaped to it and missing fields are filled with NULL rather than omitted.
@@ -32,6 +34,15 @@ TRACE_COLUMNS: List[str] = [
     "created_at", "timestamp_ms",
     "properties",
 ]
+
+
+def _millis_from_unix_nano(unix_nano: Any) -> Optional[int]:
+    if unix_nano in (None, "", 0, "0"):
+        return None
+    try:
+        return int(int(unix_nano) / 1_000_000)
+    except (ValueError, TypeError, OverflowError):
+        return None
 
 
 def _iso_from_unix_nano(unix_nano: Any) -> Optional[str]:
@@ -84,7 +95,9 @@ class TraceImporter:
                     if start and end:
                         try:
                             duration_ms = (int(end) - int(start)) / 1_000_000
-                        except (ValueError, TypeError):
+                            if duration_ms < 0:
+                                duration_ms = None
+                        except (ValueError, TypeError, OverflowError):
                             duration_ms = None
                     status = span.get("status", {}) or {}
                     row = TraceImporter._blank_row()
@@ -98,12 +111,13 @@ class TraceImporter:
                         "event_type": "error" if str(status.get("code", "")).upper().endswith("ERROR") else "span",
                         "event_name": span.get("name"),
                         "service_name": service_name,
-                        "page_path": attrs.get("page.path") or attrs.get("http.route") or attrs.get("http.target"),
-                        "page_url": attrs.get("page.url") or attrs.get("http.url"),
-                        "status_code": str(status.get("code")) if status.get("code") is not None else "OK",
-                        "duration_ms": duration_ms,
-                        "created_at": _iso_from_unix_nano(start),
-                        "timestamp_ms": int(int(start) / 1_000_000) if start else None,
+                    "page_path": attrs.get("page.path") or attrs.get("http.route") or attrs.get("http.target"),
+                    "page_url": attrs.get("page.url") or attrs.get("http.url"),
+                    "page_title": attrs.get("page.title") or attrs.get("page_title"),
+                    "status_code": str(status.get("code")) if status.get("code") is not None else "OK",
+                    "duration_ms": duration_ms,
+                    "created_at": _iso_from_unix_nano(start),
+                    "timestamp_ms": _millis_from_unix_nano(start),
                         "properties": attrs,
                     })
                     rows.append(row)
@@ -148,7 +162,10 @@ class TraceImporter:
             # regardless of source, matching how tabular columns are queried.
             props = row.get("properties")
             if isinstance(props, (dict, list)):
-                row["properties"] = json.dumps(props, ensure_ascii=False)
+                try:
+                    row["properties"] = json.dumps(props, ensure_ascii=False, default=str)
+                except (TypeError, ValueError):
+                    row["properties"] = "{}"
             elif props is None:
                 row["properties"] = "{}"
         return rows
@@ -199,7 +216,6 @@ class TraceImporter:
 
         if detected in ("csv", "parquet"):
             # Reuse the file connector, then normalize columns onto the schema.
-            from app.connectors.local import LocalFileConnector
             conn_str = source if "://" in source else f"file://{source}"
             arrow_tbl = LocalFileConnector(conn_str).fetch_to_arrow(query_or_table=os.path.basename(source))
             recs = arrow_tbl.to_pylist()
@@ -209,10 +225,16 @@ class TraceImporter:
             text = f.read()
 
         if detected == "ndjson" or (detected not in ("json", "otlp") and "\n" in text.strip() and not text.strip().startswith("[")):
-            recs = [json.loads(line) for line in text.splitlines() if line.strip()]
+            try:
+                recs = [json.loads(line) for line in text.splitlines() if line.strip()]
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Invalid NDJSON in {source}: {exc}") from exc
             return TraceImporter.to_arrow(TraceImporter.from_records(recs))
 
-        obj = json.loads(text)
+        try:
+            obj = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in {source}: {exc}") from exc
         if isinstance(obj, dict) and "resourceSpans" in obj:
             return TraceImporter.to_arrow(TraceImporter.from_otlp(obj))
         if isinstance(obj, dict) and "events" in obj and isinstance(obj["events"], list):

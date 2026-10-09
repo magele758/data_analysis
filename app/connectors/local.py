@@ -1,58 +1,184 @@
 import os
-from typing import List, Optional
+from typing import Any, List, Optional
+from urllib.parse import unquote, urlparse
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.csv as pcsv
 import duckdb
-from app.connectors.base import BaseConnector, TableSchema, ColumnInfo
+from app.connectors.base import BaseConnector, TableSchema, ColumnInfo, is_select, safe_select
 from app.connectors.excel_reader import FastExcelReader
 from app.engine.sql_guard import safe_columns, safe_ident, safe_predicate, safe_table_ref
 
+_SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+def resolve_local_path(conn_str: str) -> str:
+    """Resolve a file path, ``file://`` URI, or ``sqlite://`` URI to a filesystem path."""
+    if not isinstance(conn_str, str) or not conn_str.strip():
+        raise ValueError("Local connection string is empty")
+    text = conn_str.strip()
+    if "://" not in text:
+        return text
+    scheme, rest = text.split("://", 1)
+    scheme = scheme.lower()
+    if scheme not in ("file", "sqlite"):
+        raise ValueError(f"LocalFileConnector cannot open scheme {scheme!r}")
+    # file:///abs and sqlite:///abs are real URIs. file://relative/path is the
+    # prefix this service concatenates onto a filesystem path (often relative).
+    if rest.startswith("/"):
+        path = unquote(urlparse(text).path or "")
+    else:
+        path = unquote(rest)
+    if not path:
+        raise ValueError(f"Local connection string {conn_str!r} has no path")
+    return path
+
+
+def _sql_path_literal(path: str) -> str:
+    if "\x00" in path:
+        raise ValueError("Local path cannot contain a NUL byte")
+    return "'" + path.replace("'", "''") + "'"
+
+
+def _require_file(path: str) -> str:
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"Local data file not found: {path}")
+    return path
+
+
+def _extension(path: str) -> str:
+    return os.path.splitext(path)[1].lower()
+
+
+def _is_sqlite_file(path: str) -> bool:
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(16) == _SQLITE_MAGIC
+    except OSError:
+        return False
+
+
+def _csv_reject_error(con: duckdb.DuckDBPyConnection, path: str) -> None:
+    """Fail the import when DuckDB had to skip malformed CSV rows."""
+    try:
+        present = con.execute(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'reject_errors'"
+        ).fetchone()[0]
+    except duckdb.Error:
+        return
+    if not present:
+        return
+    count = con.execute("SELECT count(DISTINCT line) FROM reject_errors").fetchone()[0]
+    if not count:
+        return
+    sample_rows = con.execute(
+        "SELECT line, error_type, error_message, csv_line FROM reject_errors LIMIT 3"
+    ).fetchall()
+    sample = []
+    for line, err_type, message, csv_line in sample_rows:
+        snippet = (csv_line or "").replace("\n", " ")[:120]
+        sample.append(f"line {line}: {err_type}: {message}: {snippet}")
+    detail = " | ".join(sample)
+    raise ValueError(
+        f"CSV file {path} has {count} unreadable row(s); import aborted instead of dropping them. {detail}"
+    )
+
+
 class LocalFileConnector(BaseConnector):
-    """Local Parquet / CSV / Excel (.xlsx, .xls) / SQLite / Arrow file connector."""
+    """Local Parquet / CSV / Excel (.xlsx) / SQLite / Arrow file connector.
+
+    Legacy ``.xls`` is rejected with a clear error. ``.db`` files are treated as
+    SQLite only when the file header says so; otherwise they are opened as DuckDB.
+    """
+
+    def _path(self) -> str:
+        return resolve_local_path(self.conn_str)
 
     def test_connection(self) -> bool:
-        path = self.conn_str.replace("file://", "").replace("sqlite://", "")
-        return os.path.exists(path)
+        try:
+            path = self._path()
+        except ValueError:
+            return False
+        return os.path.isfile(path)
 
     def list_tables(self) -> List[str]:
-        path = self.conn_str.replace("file://", "").replace("sqlite://", "")
-        if path.endswith((".xlsx", ".xls")):
-            try:
-                import zipfile
-                with zipfile.ZipFile(path) as z:
-                    return FastExcelReader.list_sheet_names(z)
-            except Exception:
-                return ["Sheet1"]
-        elif path.endswith(".sqlite") or path.endswith(".db"):
-            con = duckdb.connect(path, read_only=True)
-            res = con.execute("SHOW TABLES").fetchall()
-            con.close()
-            return [r[0] for r in res]
+        path = _require_file(self._path())
+        ext = _extension(path)
+        if ext in (".xlsx", ".xls"):
+            return FastExcelReader.list_sheets(path)
+        if ext in (".sqlite", ".db"):
+            return self._list_db_tables(path)
         return [os.path.basename(path)]
 
+    def _list_db_tables(self, path: str) -> List[str]:
+        if _is_sqlite_file(path):
+            con = duckdb.connect(":memory:")
+            try:
+                con.execute(f"ATTACH {_sql_path_literal(path)} AS src (TYPE SQLITE)")
+                rows = con.execute("SHOW TABLES FROM src").fetchall()
+                return [r[0] for r in rows]
+            finally:
+                con.close()
+        con = duckdb.connect(path, read_only=True)
+        try:
+            rows = con.execute("SHOW TABLES").fetchall()
+            return [r[0] for r in rows]
+        finally:
+            con.close()
+
     def introspect_schema(self, table_name: str) -> TableSchema:
-        path = self.conn_str.replace("file://", "").replace("sqlite://", "")
-        cols = []
-        if path.endswith((".xlsx", ".xls")):
+        path = _require_file(self._path())
+        ext = _extension(path)
+        cols: List[ColumnInfo] = []
+        if ext in (".xlsx", ".xls"):
             arrow_tbl = FastExcelReader.read_xlsx_to_arrow(path, sheet_name=table_name, limit_rows=10)
             for field in arrow_tbl.schema:
                 cols.append(ColumnInfo(name=field.name, physical_type=str(field.type), is_nullable=field.nullable))
-        elif path.endswith(".parquet"):
+        elif ext == ".parquet":
             schema = pq.read_schema(path)
             for field in schema:
                 cols.append(ColumnInfo(name=field.name, physical_type=str(field.type), is_nullable=field.nullable))
-        elif path.endswith(".csv"):
-            table = pcsv.read_csv(path)
-            for field in table.schema:
-                cols.append(ColumnInfo(name=field.name, physical_type=str(field.type), is_nullable=field.nullable))
-        elif path.endswith(".sqlite") or path.endswith(".db"):
-            con = duckdb.connect(path, read_only=True)
-            desc = con.execute(f"DESCRIBE {safe_table_ref(table_name)}").fetchall()
-            con.close()
-            for r in desc:
-                cols.append(ColumnInfo(name=r[0], physical_type=str(r[1]).lower(), is_nullable=(r[2] == 'YES')))
+        elif ext == ".csv":
+            reader = pcsv.open_csv(path)
+            try:
+                for field in reader.schema:
+                    cols.append(ColumnInfo(name=field.name, physical_type=str(field.type), is_nullable=field.nullable))
+            finally:
+                close = getattr(reader, "close", None)
+                if close:
+                    close()
+        elif ext in (".sqlite", ".db"):
+            cols = self._describe_db_table(path, table_name)
+        else:
+            con = duckdb.connect(":memory:")
+            try:
+                desc = con.execute(f"DESCRIBE SELECT * FROM {_sql_path_literal(path)}").fetchall()
+            finally:
+                con.close()
+            cols = [
+                ColumnInfo(name=r[0], physical_type=str(r[1]).lower(), is_nullable=(r[2] == "YES"))
+                for r in desc
+            ]
         return TableSchema(table_name=table_name, columns=cols)
+
+    def _describe_db_table(self, path: str, table_name: str) -> List[ColumnInfo]:
+        if _is_sqlite_file(path):
+            con = duckdb.connect(":memory:")
+            try:
+                con.execute(f"ATTACH {_sql_path_literal(path)} AS src (TYPE SQLITE)")
+                desc = con.execute(f"DESCRIBE src.{safe_ident(table_name)}").fetchall()
+            finally:
+                con.close()
+        else:
+            con = duckdb.connect(path, read_only=True)
+            try:
+                desc = con.execute(f"DESCRIBE {safe_table_ref(table_name)}").fetchall()
+            finally:
+                con.close()
+        return [
+            ColumnInfo(name=r[0], physical_type=str(r[1]).lower(), is_nullable=(r[2] == "YES"))
+            for r in desc
+        ]
 
     def fetch_to_arrow(
         self,
@@ -64,56 +190,98 @@ class LocalFileConnector(BaseConnector):
         limit: Optional[int] = None,
         mode: str = "materialize"  # local files are read via DuckDB already; mode is a no-op
     ) -> pa.Table:
-        path = self.conn_str.replace("file://", "").replace("sqlite://", "")
-        
-        # 1. Excel direct high-performance ingestion
-        if path.endswith((".xlsx", ".xls")):
-            sheet = query_or_table if query_or_table and not query_or_table.lower().startswith("select") else None
-            arrow_table = FastExcelReader.read_xlsx_to_arrow(
-                path,
-                sheet_name=sheet,
-                limit_rows=limit
-            )
-            if select_cols or filter_sql:
-                con = duckdb.connect(":memory:")
-                con.register("excel_tmp", arrow_table)
-                cols_clause = safe_columns(select_cols) if select_cols else "*"
-                sql = f"SELECT {cols_clause} FROM excel_tmp"
-                if filter_sql:
-                    sql += f" WHERE {safe_predicate(filter_sql)}"
-                params = []
-                if limit:
-                    sql += " LIMIT ?"
-                    params.append(int(limit))
-                arrow_table = con.execute(sql, params).arrow()
-                if isinstance(arrow_table, pa.RecordBatchReader):
-                    arrow_table = arrow_table.read_all()
-                con.close()
-            return arrow_table
+        del partition_col, num_partitions, mode  # partitioning is applied by PartitionedLoader
+        path = _require_file(self._path())
+        ext = _extension(path)
+        if limit is not None and int(limit) < 0:
+            raise ValueError("limit must be >= 0")
 
-        # 2. CSV / Parquet / SQLite via DuckDB
+        if ext in (".xlsx", ".xls"):
+            return self._fetch_excel(path, query_or_table, filter_sql, select_cols, limit)
+
         con = duckdb.connect(":memory:")
-        if path.endswith(".parquet"):
-            con.execute(f"CREATE VIEW tbl AS SELECT * FROM read_parquet('{path}')")
-        elif path.endswith(".csv"):
-            con.execute(f"CREATE VIEW tbl AS SELECT * FROM read_csv_auto('{path}', sample_size=100000, ignore_errors=true)")
-        elif path.endswith(".sqlite") or path.endswith(".db"):
-            con.execute(f"ATTACH '{path}' AS sqlite_db (TYPE SQLITE)")
-            con.execute(f"CREATE VIEW tbl AS SELECT * FROM sqlite_db.{safe_ident(query_or_table)}")
-        else:
-            con.execute(f"CREATE VIEW tbl AS SELECT * FROM '{path}'")
+        try:
+            from_clause, params = self._from_clause(con, path, ext, query_or_table)
+            cols_clause = safe_columns(select_cols) if select_cols else "*"
+            sql = f"SELECT {cols_clause} FROM {from_clause}"
+            if filter_sql:
+                sql += f" WHERE {safe_predicate(filter_sql)}"
+            if limit is not None:
+                sql += " LIMIT ?"
+                params.append(int(limit))
+            try:
+                arrow_table = con.execute(sql, params).arrow()
+            except duckdb.Error as exc:
+                raise ValueError(f"Failed to read local file {path}: {exc}") from exc
+            if isinstance(arrow_table, pa.RecordBatchReader):
+                arrow_table = arrow_table.read_all()
+            if ext == ".csv":
+                _csv_reject_error(con, path)
+            return arrow_table
+        finally:
+            con.close()
 
-        cols_clause = safe_columns(select_cols) if select_cols else "*"
-        sql = f"SELECT {cols_clause} FROM tbl"
-        if filter_sql:
-            sql += f" WHERE {safe_predicate(filter_sql)}"
-        params = []
-        if limit:
-            sql += " LIMIT ?"
-            params.append(int(limit))
+    def _fetch_excel(
+        self,
+        path: str,
+        query_or_table: str,
+        filter_sql: Optional[str],
+        select_cols: Optional[List[str]],
+        limit: Optional[int],
+    ) -> pa.Table:
+        sheet = None
+        if query_or_table and not str(query_or_table).strip().lower().startswith("select"):
+            sheet = query_or_table
+        # A filter has to see the whole sheet; limiting first would drop matching rows.
+        arrow_table = FastExcelReader.read_xlsx_to_arrow(
+            path,
+            sheet_name=sheet,
+            limit_rows=None if filter_sql else limit,
+        )
+        if not select_cols and not filter_sql:
+            return arrow_table
+        con = duckdb.connect(":memory:")
+        try:
+            con.register("excel_tmp", arrow_table)
+            cols_clause = safe_columns(select_cols) if select_cols else "*"
+            sql = f"SELECT {cols_clause} FROM excel_tmp"
+            params: List[Any] = []
+            if filter_sql:
+                sql += f" WHERE {safe_predicate(filter_sql)}"
+            if limit is not None:
+                sql += " LIMIT ?"
+                params.append(int(limit))
+            try:
+                filtered = con.execute(sql, params).arrow()
+            except duckdb.Error as exc:
+                raise ValueError(f"Failed to filter Excel sheet {sheet or path}: {exc}") from exc
+            if isinstance(filtered, pa.RecordBatchReader):
+                filtered = filtered.read_all()
+            return filtered
+        finally:
+            con.close()
 
-        arrow_table = con.execute(sql, params).arrow()
-        if isinstance(arrow_table, pa.RecordBatchReader):
-            arrow_table = arrow_table.read_all()
-        con.close()
-        return arrow_table
+    def _from_clause(
+        self,
+        con: duckdb.DuckDBPyConnection,
+        path: str,
+        ext: str,
+        query_or_table: str,
+    ) -> tuple:
+        if ext == ".parquet":
+            return "read_parquet(?)", [path]
+        if ext == ".csv":
+            return "read_csv_auto(?, sample_size=100000, ignore_errors=true, store_rejects=true)", [path]
+        if ext in (".sqlite", ".db") and _is_sqlite_file(path):
+            con.execute(f"ATTACH {_sql_path_literal(path)} AS sqlite_db (TYPE SQLITE)")
+            if is_select(query_or_table):
+                con.execute("USE sqlite_db")
+                return f"({safe_select(query_or_table)}) AS _q", []
+            return f"sqlite_db.{safe_ident(query_or_table)}", []
+        if ext in (".sqlite", ".db"):
+            con.execute(f"ATTACH {_sql_path_literal(path)} AS local_db (READ_ONLY)")
+            if is_select(query_or_table):
+                con.execute("USE local_db")
+                return f"({safe_select(query_or_table)}) AS _q", []
+            return f"local_db.{safe_table_ref(query_or_table)}", []
+        return _sql_path_literal(path), []

@@ -2,7 +2,9 @@ from typing import List, Optional
 import pyarrow as pa
 import connectorx as cx
 import duckdb
-from app.connectors.base import BaseConnector, TableSchema, ColumnInfo, is_select, safe_select
+from app.connectors.base import (
+    BaseConnector, TableSchema, ColumnInfo, is_select, safe_select, sql_string_literal,
+)
 from app.connectors.duckdb_scanner import fetch_via_scanner
 from app.engine.sql_guard import safe_columns, safe_ident, safe_predicate, safe_table_ref
 
@@ -28,18 +30,21 @@ class PostgresConnector(BaseConnector):
         return [str(val) for val in table["full_name"].to_pylist()]
 
     def introspect_schema(self, table_name: str) -> TableSchema:
-        schema_part = "public"
-        table_part = table_name
-        if "." in table_name:
-            schema_part, table_part = table_name.split(".", 1)
-
-        # connectorx has no bind-parameter API, so validate as identifiers before inlining as literals
-        safe_ident(schema_part)
-        safe_ident(table_part)
+        if not isinstance(table_name, str) or not table_name.strip():
+            raise ValueError("table_name is required")
+        parts = table_name.split(".")
+        if len(parts) == 1:
+            schema_part, table_part = "public", parts[0]
+        elif len(parts) == 2:
+            schema_part, table_part = parts
+        else:
+            raise ValueError(f"Expected schema.table, got {table_name!r}")
+        # connectorx has no bind-parameter API; quote as string literals instead.
         query = f"""
         SELECT column_name, data_type, is_nullable
         FROM information_schema.columns
-        WHERE table_schema = '{schema_part}' AND table_name = '{table_part}'
+        WHERE table_schema = {sql_string_literal(schema_part)}
+          AND table_name = {sql_string_literal(table_part)}
         ORDER BY ordinal_position;
         """
         arrow_res = cx.read_sql(self.conn_str, query, return_type="arrow")

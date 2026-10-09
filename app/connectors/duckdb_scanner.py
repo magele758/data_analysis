@@ -10,11 +10,15 @@ dialect, fewer moving parts, and no dependency on ConnectorX for this path.
 ConnectorX materialization stays the default; this is opt-in via mode="scanner".
 """
 
+import re
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import duckdb
 import pyarrow as pa
+
+_ALIAS_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_DSN_PLAIN = re.compile(r"[A-Za-z0-9_.~/-]+")
 
 # DuckDB scanner extension name per source type.
 _EXTENSION = {
@@ -29,21 +33,29 @@ _ATTACH_TYPE = {
 }
 
 
+def _dsn_pair(key: str, value: object) -> str:
+    text = str(value)
+    if _DSN_PLAIN.fullmatch(text):
+        return f"{key}={text}"
+    escaped = text.replace("\\", "\\\\").replace("'", "''")
+    return f"{key}='{escaped}'"
+
+
 def _mysql_dsn(conn_str: str) -> str:
     """DuckDB's MySQL scanner wants a key=value DSN, not a mysql:// URI."""
     p = urlparse(conn_str)
     parts = []
     if p.hostname:
-        parts.append(f"host={p.hostname}")
+        parts.append(_dsn_pair("host", unquote(p.hostname)))
     if p.port:
-        parts.append(f"port={p.port}")
+        parts.append(_dsn_pair("port", p.port))
     if p.username:
-        parts.append(f"user={p.username}")
+        parts.append(_dsn_pair("user", unquote(p.username)))
     if p.password:
-        parts.append(f"password={p.password}")
-    db = (p.path or "").lstrip("/")
+        parts.append(_dsn_pair("password", unquote(p.password)))
+    db = unquote((p.path or "").lstrip("/"))
     if db:
-        parts.append(f"database={db}")
+        parts.append(_dsn_pair("database", db))
     return " ".join(parts)
 
 
@@ -73,6 +85,8 @@ def attach_clause(db_type: str, conn_str: str, alias: str = "src", read_only: bo
     t = db_type.lower()
     if t not in _ATTACH_TYPE:
         raise ValueError(f"Unsupported scanner source type: {db_type}")
+    if not _ALIAS_RE.fullmatch(alias):
+        raise ValueError(f"Invalid ATTACH alias {alias!r}")
     target = attach_target(t, conn_str).replace("'", "''")
     opts = [f"TYPE {_ATTACH_TYPE[t]}"]
     # SQLite ATTACH does not accept READ_ONLY as an option here; keep it for RDBMS.
