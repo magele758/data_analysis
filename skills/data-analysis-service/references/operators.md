@@ -20,7 +20,7 @@
 * `analyze_conversion_funnel`: Multi-step sequential windowed conversion rates and drop-off analysis.
 * `analyze_user_flow`: N-Gram page transition matrix with Sankey diagram topology.
 * `analyze_cohort_retention`: Cohort user retention heatmap matrix.
-* `analyze_page_performance`: PV, UV, average stay dwell seconds, and bounce rate.
+* `analyze_page_performance`: PV, UV, sessions, and average dwell seconds. There is no bounce-rate field.
 * `inspect_trace_and_replay`: OpenTelemetry span waterfall tree and interactive action breadcrumb timeline replay.
 
 ## 6. Modern Data Stack (Catalog, Transform, rETL, Quality)

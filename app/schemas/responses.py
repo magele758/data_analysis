@@ -18,9 +18,9 @@ class StatSummary(BaseModel):
 class AnalysisResponse(BaseModel):
     status: str = "success"
     session_id: Optional[str] = None
-    summary_text: str = Field(..., description="High-density deterministic natural language summary for LLM context")
+    summary_text: str = Field(..., description="HTTP narrative from NarrativeBuilder. MCP tools expose the same text as summary.")
     insights: List[InsightItem] = Field(default_factory=list)
     statistics: Optional[Dict[str, Any]] = None
     data_preview: Optional[List[Dict[str, Any]]] = None
-    chart_spec: Optional[Dict[str, Any]] = Field(None, description="Vega-Lite / ECharts declarative visual spec")
+    chart_spec: Optional[Dict[str, Any]] = Field(None, description="Vega-Lite v5 ($schema) or ECharts option. Driver waterfall, forecast, funnel, retention heatmap, and user-flow sankey attach one.")
     metadata: Dict[str, Any] = Field(default_factory=dict)

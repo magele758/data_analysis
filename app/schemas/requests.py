@@ -116,3 +116,106 @@ class SQLSandboxRequest(BaseModel):
     session_id: str
     sql_query: str
     limit: int = 100
+
+class RFMRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    user_col: str
+    date_col: str
+    amount_col: str
+
+class InsightDiscoverRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    intent: Optional[str] = None
+    target_metric: Optional[str] = None
+    category_col: Optional[str] = None
+    time_col: Optional[str] = None
+    max_insights: int = 8
+
+class RunExampleRequest(BaseModel):
+    session_id: Optional[str] = None
+
+class FunnelRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    steps: List[str]
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+class SemanticQueryRequest(BaseModel):
+    session_id: str
+    metric_names: List[str]
+    dimensions: Optional[List[str]] = None
+    filters: Optional[str] = None
+    order_by: Optional[str] = None
+    limit: int = 100
+
+class CleanTableRequest(BaseModel):
+    session_id: str
+    source_table: str
+    target_table: str
+    dedup_keys: Optional[List[str]] = None
+    fillna_rules: Optional[Dict[str, Any]] = None
+    outlier_clip_cols: Optional[Dict[str, Dict[str, float]]] = None
+
+class ReverseSyncRequest(BaseModel):
+    session_id: str
+    source_table: str
+    dest_conn_str: str
+    dest_table_name: str
+    mode: str = "replace"
+
+class AudienceExportRequest(BaseModel):
+    session_id: str
+    source_table: str
+    filter_sql: Optional[str] = None
+    export_columns: Optional[List[str]] = None
+    format_type: str = "json"
+    limit: int = 1000
+
+class WebhookAlertRequest(BaseModel):
+    webhook_url: str
+    title: str
+    message: str
+    platform: str = "generic"
+    extra_metrics: Optional[Dict[str, Any]] = None
+
+class QualitySuiteRequest(BaseModel):
+    session_id: str
+    table: str
+    rules: List[Dict[str, Any]]
+
+class SchemaDriftRequest(BaseModel):
+    session_id: str
+    table: str
+    baseline_schema: Dict[str, str]
+
+class OntologyQueryRequest(BaseModel):
+    session_id: str
+    object_type: str
+    filters: Optional[str] = None
+    properties: Optional[List[str]] = None
+    limit: int = 50
+
+class OntologyTraverseRequest(BaseModel):
+    session_id: str
+    source_object_type: str
+    source_instance_id: Any
+    link_name: str
+    limit: int = 50
+    link_path: Optional[List[str]] = None
+
+class OntologyActionExecRequest(BaseModel):
+    session_id: str
+    action_name: str
+    instance_id: Any
+    parameters: Dict[str, Any]
+    dry_run: bool = False
+
+class TraceImportRequest(BaseModel):
+    source: Optional[str] = None
+    records: Optional[List[Dict[str, Any]]] = None
+    dataset_name: str = "traces"
+    session_id: Optional[str] = None
+    format: Optional[str] = None

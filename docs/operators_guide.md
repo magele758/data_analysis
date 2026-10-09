@@ -16,7 +16,7 @@
 * **作用**：沿着实体拓扑关系链执行图遍历（如从客户 `C01` 出发，通过 `customer_orders` 遍历出所有关联订单）。返回 `path`、`hops` 和每一跳的 `hop_counts`。$N:M$ 经关联表连接，关联表字段会写入目录库。
 
 ### 4. 业务动作闭环执行算子 (`ontology_execute_action`)
-* **作用**：执行业务实体上的原子动作。审计结果带执行前、执行后和 `statement_hash`。`REVERSE_ETL_SYNC` 在 `handler_config` 提供 `dest_conn_str`、`dest_table_name`、`source_table` 时调用 `DestinationSync`；缺配置时返回失败，不假装同步成功。MCP 默认 `dry_run=true`。
+* **作用**：执行业务实体上的原子动作。审计结果带执行前、执行后和 `statement_hash`。`REVERSE_ETL_SYNC` 在 `handler_config` 提供 `dest_conn_str`、`dest_table_name`、`source_table` 时调用 `DestinationSync`；缺配置时返回失败，不假装同步成功。MCP `ontology_execute_action` 默认 `dry_run=true`。REST `POST /api/v1/ontology/actions/execute` 默认 `dry_run=false`。REST 遍历请求体带 `link_path`，与 MCP 一样传给多跳遍历。
 
 ---
 
@@ -53,7 +53,7 @@
 * **作用**：一次聚合扫描输出空值、均值、标准差、分位数、偏度和峰度。语义类型仍来自前 5000 行样本，结果里写着 `type_inference_sample_rows`。表不超过 10 万行时 distinct 是精确计数，分位数是 `quantile_cont`；超过之后 distinct 用 `approx_count_distinct`，分位数用 `approx_quantile`，列上分别标明 `distinct_count_method` 和 `quantile_method`。
 
 ### 11. 多维异动下钻与归因算子 (`driver_attribution_analysis`)
-* **作用**：针对指标波动，沿维度层级路径逐层下钻。`SUM` 使用加法贡献，每一层子项差值之和等于总差值，并在结果里记录 `closes`。`AVG`/`COUNT`/`MIN`/`MAX` 只做水平对比，不声称闭合，`sun_shapley` 为 null。同时传入 `rate_col` 与 `volume_col` 时，只按路径里的第一个维度做 Laspeyres 恒等式，拆成量效应、率效应和交互项（`structure_effect` 与交互项是同一个交叉项）；后面的维度不进入这一拆分。加法层级的 `orderings_used` 是 1，按调用方给出的维度顺序。`sun_shapley` 另外给出两种因子顺序的平均：量效应 `((p0+p1)/2)·Δq`，率效应 `((q0+q1)/2)·Δp`，两者相加等于差值，那里的 `orderings_used` 是 2。`SUM` 的 `sun_shapley` 对维度排列取平均；加法成员的差值不随顺序变化，所以平均值等于单独聚合，`order_invariant` 为真。最多枚举 4 个维度、24 种顺序。
+* **作用**：针对指标波动，沿维度层级路径逐层下钻。第一层分支会生成 Vega-Lite v5 瀑布（`$schema`，`y`/`y2` 为累计起止）。`SUM` 使用加法贡献，每一层子项差值之和等于总差值，并在结果里记录 `closes`。`AVG`/`COUNT`/`MIN`/`MAX` 只做水平对比，不声称闭合，`sun_shapley` 为 null。同时传入 `rate_col` 与 `volume_col` 时，只按路径里的第一个维度做 Laspeyres 恒等式，拆成量效应、率效应和交互项（`structure_effect` 与交互项是同一个交叉项）；后面的维度不进入这一拆分。加法层级的 `orderings_used` 是 1，按调用方给出的维度顺序。`sun_shapley` 另外给出两种因子顺序的平均：量效应 `((p0+p1)/2)·Δq`，率效应 `((q0+q1)/2)·Δp`，两者相加等于差值，那里的 `orderings_used` 是 2。`SUM` 的 `sun_shapley` 对维度排列取平均；加法成员的差值不随顺序变化，所以平均值等于单独聚合，`order_invariant` 为真。最多枚举 4 个维度、24 种顺序。
 
 ### 12. SPSS 级数理假设检验算子 (`spss_hypothesis_test`)
 * **支持类型**：独立样本 t 检验（含 Levene 方差齐性与 Welch 校正）、配对样本 t 检验（`paired_t_test`，两个数值列）、单因素 ANOVA（含事后 Tukey HSD 与 eta^2）、双因素 ANOVA（`two_way_anova`，需要 `factor_b`，含交互项）、卡方独立性检验（含 Cramér's V）、Mann-Whitney U 检验。`significant` 同时要求 p 值过线，以及效应量过线：|Cohen's d| ≥ 0.2、η² ≥ 0.01、Cramér's V ≥ 0.1、|rank-biserial r| ≥ 0.1。
@@ -94,16 +94,16 @@
 
 ### 16. 转化漏斗算子 (`analyze_conversion_funnel`)
 * **入参**：`session_id`, `dataset_name`, `steps`, `date_from?`, `date_to?`
-* **作用**：计算多步骤有序转化漏斗、各步骤留存人数、步进流失率与总转化率。
+* **作用**：计算多步骤有序转化漏斗、各步骤留存人数、步进流失率与总转化率。`chart_spec` 是 Vega-Lite 柱状图，x 为步骤名，y 为 `user_count`。MCP 把它放在 `funnel` 旁边；REST 与漏斗字段同层。
 
 ### 17. 用户流动与桑基图算子 (`analyze_user_flow`)
-* **作用**：基于会话内页面访问时序生成 N-Gram 转移矩阵，输出 ECharts 桑基图 (Sankey) 拓扑。
+* **作用**：基于会话内页面访问时序生成转移矩阵。`nodes` / `links` 是桑基拓扑。MCP 在 `user_flow` 旁附 `chart_spec`（ECharts `series.type=sankey`）。REST 把 `nodes`、`links` 与 `chart_spec` 放在同一层。
 
 ### 18. 留存队列分析算子 (`analyze_cohort_retention`)
-* **作用**：按首次活跃日期划分群组，计算 N 天活跃用户数与留存百分比热力图。
+* **作用**：按首次活跃日期划分群组，计算 N 天活跃用户数与留存率。`retention_matrix` 里 `day_N` 是 `{count, rate}`。`chart_spec` 把 rate 展成 Vega-Lite 热力矩形。MCP 放在 `retention` 旁边；REST 与矩阵同层。
 
 ### 19. 页面深度分析算子 (`analyze_page_performance`)
-* **作用**：计算页面 PV、UV、平均停留时长与跳出分析。
+* **作用**：计算页面 PV、UV、会话数与平均停留时长，以及全表事件、UV、会话、错误数。结果里没有跳出率字段，也没有图表 spec。
 
 ### 20. 链路追踪与操作路径复现 (`inspect_trace_and_replay`)
 * **入参**：`session_id`, `dataset_name`, `trace_id?`, `telemetry_session_id?`
@@ -120,14 +120,14 @@
 * **作用**：提取特定受众分群导出为 CSV/JSON 对接业务 CRM。
 
 ### 23. 智能告警推送算子 (`send_operational_webhook_alert`)
-* **作用**：向飞书机器人（富文本卡片）、企业微信、钉钉或 Webhook 推送归因告警。
+* **作用**：`platform=feishu` 发飞书 post 卡片，`platform=dingtalk` 发钉钉 markdown。`slack`、`generic` 以及其他值共用同一份 JSON：`title`、`message`、`metrics`。没有单独的企业微信 payload。
 
 ---
 
 ## 八、 数据可观测性与质量断言层
 
 ### 24. 声明式数据质量断言算子 (`assert_data_quality`)
-* **作用**：单遍扫描运行 Great-Expectations 风格的数据质量断言（非空、唯一、数值区间、行数范围），输出健康总评分。
+* **作用**：单遍扫描运行声明式断言，输出健康分。`rules[].type` 只实现四种：`not_null`（`column`）、`unique`（`column`）、`between`（`column`、`min_val`、`max_val`）、`row_count`（`min_rows`、`max_rows`）。其他 type 记为 `unsupported_rule` 且该条失败，会计入健康分分母。
 
 ### 25. Schema 漂移检测算子 (`detect_table_schema_drift`)
 * **作用**：自动比对字段增减与类型漂移，提供下游熔断保护。

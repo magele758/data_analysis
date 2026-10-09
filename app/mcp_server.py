@@ -192,24 +192,36 @@ def spss_regression_analysis(
         "model_report": res
     }, ensure_ascii=False)
 
-@mcp.tool(name="detect_automated_insights", description="Detect anomaly outliers, temporal change points, and Gini dominance patterns.")
+@mcp.tool(name="detect_automated_insights", description="Detect anomaly outliers, temporal change points, and Gini dominance patterns. outlier_method is z_score, iqr, or isolation_forest. group_col is passed only to the trend action. top_k limits outliers and dominance.")
 def detect_automated_insights(
     session_id: str,
     dataset_name: str,
     metric: str,
     category_col: Optional[str] = None,
-    time_col: Optional[str] = None
+    time_col: Optional[str] = None,
+    outlier_method: str = "z_score",
+    threshold: float = 3.0,
+    dimension_cols: Optional[List[str]] = None,
+    top_k: int = 10,
+    group_col: Optional[str] = None,
 ) -> str:
     insights = {}
     if metric:
-        outliers = detect_outliers(session_id, dataset_name, metric)
-        insights["outliers"] = outliers
+        insights["outliers"] = detect_outliers(
+            session_id, dataset_name, metric,
+            dimension_cols=dimension_cols,
+            method=outlier_method,
+            threshold=threshold,
+            top_k=top_k,
+        )
     if category_col and metric:
-        dominance = detect_dominance(session_id, dataset_name, category_col, metric)
-        insights["dominance"] = dominance
+        insights["dominance"] = detect_dominance(
+            session_id, dataset_name, category_col, metric, top_k=top_k
+        )
     if time_col and metric:
-        trends = detect_trends(session_id, dataset_name, time_col, metric)
-        insights["trends"] = trends
+        insights["trends"] = detect_trends(
+            session_id, dataset_name, time_col, metric, group_col=group_col
+        )
 
     return json.dumps({"status": "success", "insights": insights}, ensure_ascii=False)
 
@@ -222,9 +234,14 @@ def memory_olap_aggregation(
     agg_funcs: Optional[List[str]] = None,
     filters: Optional[str] = None,
     rollup: bool = False,
+    cube: bool = False,
+    order_by: Optional[str] = None,
     limit: int = 100
 ) -> str:
-    res = run_olap_query(session_id, dataset_name, dimensions, metrics, agg_funcs, filters, rollup=rollup, limit=limit)
+    res = run_olap_query(
+        session_id, dataset_name, dimensions, metrics, agg_funcs, filters,
+        rollup=rollup, cube=cube, order_by=order_by, limit=limit,
+    )
     return json.dumps({"status": "success", "result": res}, ensure_ascii=False)
 
 @mcp.tool(name="duckdb_sql_sandbox", description="Execute read-only SQL directly against DuckDB in-memory session.")
@@ -252,10 +269,16 @@ def rfm_segmentation(session_id: str, dataset_name: str, user_col: str, date_col
     res = run_rfm_segmentation(session_id, dataset_name, user_col, date_col, amount_col)
     return json.dumps({"status": "success", "rfm": res}, ensure_ascii=False)
 
-@mcp.tool(name="timeseries_forecast", description="Time-series forecast (ARIMA-family) for a value column over a horizon.")
+@mcp.tool(name="timeseries_forecast", description="Time-series forecast (ARIMA-family) for a value column over a horizon. chart_spec is a Vega-Lite line with a 95% interval band built from historical_preview and forecasts.")
 def timeseries_forecast(session_id: str, dataset_name: str, time_col: str, value_col: str, horizon: int = 12, model_type: str = "arima") -> str:
     res = run_timeseries_forecast(session_id, dataset_name, time_col, value_col, horizon, model_type)
-    return json.dumps({"status": "success", "forecast": res}, ensure_ascii=False)
+    chart_spec = ChartSpecBuilder.build_time_series_forecast_chart(
+        res.get("historical_preview") or [],
+        res.get("forecasts") or [],
+        time_col,
+        value_col,
+    )
+    return json.dumps({"status": "success", "forecast": res, "chart_spec": chart_spec}, ensure_ascii=False)
 
 @mcp.tool(name="discover_insights", description="Automated insight discovery: orchestrates Analysis Actions (anomaly/correlation/dominance/trend) into ranked insights, an Insight Graph, and a data-story narrative. Rank is severity unless DATA_AGENT_LLM_BASE_URL is set, in which case the endpoint reorders ids from evidence fields and falls back to severity. Optional intent biases which actions run.")
 def discover_insights(session_id: str, dataset_name: str, intent: Optional[str] = None, target_metric: Optional[str] = None, category_col: Optional[str] = None, time_col: Optional[str] = None, max_insights: int = 8) -> str:
@@ -269,14 +292,14 @@ def import_traces(
     source: Optional[str] = None,
     dataset_name: str = "traces",
     session_id: Optional[str] = None,
-    fmt: Optional[str] = None
+    fmt: Optional[str] = None,
+    records: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_or_create_session(session_id)
-    arrow_table = TraceImporter.load_source(source=source, fmt=fmt)
+    arrow_table = TraceImporter.load_source(source=source, records=records, fmt=fmt)
     meta = sess.register_dataset(dataset_name, arrow_table, {"source": source, "kind": "trace"})
 
-    from app.catalog.meta_registry import get_meta_registry
     cat = get_meta_registry(sess.session_id)
     cols = [_CM(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(_TA(
@@ -296,20 +319,23 @@ def import_traces(
 
 # ---------------- Trace / Web Analytics (on a session-resident table) ----------------
 
-@mcp.tool(name="analyze_conversion_funnel", description="Calculate sequential conversion funnel, drop-off and step conversion over a session-resident trace/event table.")
+@mcp.tool(name="analyze_conversion_funnel", description="Calculate sequential conversion funnel, drop-off and step conversion over a session-resident trace/event table. chart_spec is a Vega-Lite bar of step user counts.")
 def analyze_conversion_funnel(session_id: str, dataset_name: str, steps: List[str], date_from: Optional[str] = None, date_to: Optional[str] = None) -> str:
     res = calculate_funnel(session_id, dataset_name, steps, date_from, date_to)
-    return json.dumps({"status": "success", "funnel": res}, ensure_ascii=False)
+    chart_spec = ChartSpecBuilder.build_funnel_chart(res.get("steps") or [])
+    return json.dumps({"status": "success", "funnel": res, "chart_spec": chart_spec}, ensure_ascii=False)
 
-@mcp.tool(name="analyze_user_flow", description="Calculate page navigation transition matrix and Sankey nodes/links over a session-resident trace/event table.")
+@mcp.tool(name="analyze_user_flow", description="Calculate page navigation transition matrix and an ECharts Sankey option over a session-resident trace/event table.")
 def analyze_user_flow(session_id: str, dataset_name: str, limit_paths: int = 15) -> str:
     res = calculate_user_flow(session_id, dataset_name, limit_paths=limit_paths)
-    return json.dumps({"status": "success", "user_flow": res}, ensure_ascii=False)
+    chart_spec = ChartSpecBuilder.build_sankey_chart(res.get("nodes") or [], res.get("links") or [])
+    return json.dumps({"status": "success", "user_flow": res, "chart_spec": chart_spec}, ensure_ascii=False)
 
-@mcp.tool(name="analyze_cohort_retention", description="Calculate N-day cohort retention grid over a session-resident trace/event table.")
+@mcp.tool(name="analyze_cohort_retention", description="Calculate N-day cohort retention grid over a session-resident trace/event table. chart_spec is a Vega-Lite heatmap of day rates.")
 def analyze_cohort_retention(session_id: str, dataset_name: str, days: int = 7) -> str:
     res = calculate_retention(session_id, dataset_name, days=days)
-    return json.dumps({"status": "success", "retention": res}, ensure_ascii=False)
+    chart_spec = ChartSpecBuilder.build_retention_heatmap(res.get("retention_matrix") or [])
+    return json.dumps({"status": "success", "retention": res, "chart_spec": chart_spec}, ensure_ascii=False)
 
 @mcp.tool(name="analyze_page_performance", description="Calculate PV/UV and average dwell by page path over a session-resident trace/event table.")
 def analyze_page_performance(session_id: str, dataset_name: str, limit: int = 20) -> str:
@@ -342,7 +368,7 @@ def query_semantic_metric(
     versions = {name: store.metric_version(name) for name in metric_names}
     return json.dumps({"status": "success", "compiled_sql": sql, "result": res, "governed": True, "metric_versions": versions}, ensure_ascii=False)
 
-@mcp.tool(name="register_semantic_metric", description="Register a metric formula on a session table. Dimensions listed here are the only ones compile will accept for that metric.")
+@mcp.tool(name="register_semantic_metric", description="Register a metric formula on a session table. On the single-table compile path, a non-empty dimension list is a whitelist; an empty list does not restrict the caller. A registered semantic model uses the governed join path.")
 def register_semantic_metric(
     session_id: str,
     name: str,
@@ -474,7 +500,7 @@ def export_audience_cohort(
     res = AudienceExporter.export_cohort(con, source_table, filter_sql, export_columns, format_type, limit)
     return json.dumps({"status": "success", "audience": res}, ensure_ascii=False)
 
-@mcp.tool(name="send_operational_webhook_alert", description="Send automated operational alerts or attribution findings to Feishu, DingTalk, Slack, or Webhook.")
+@mcp.tool(name="send_operational_webhook_alert", description="Send an alert. platform=feishu builds a post card and platform=dingtalk builds markdown. slack, generic, and any other value send the same JSON body {title, message, metrics}.")
 def send_operational_webhook_alert(
     webhook_url: str,
     title: str,
