@@ -20,8 +20,17 @@ class ConnectorFactory:
 
     @classmethod
     def get_connector(cls, conn_str: str) -> BaseConnector:
-        prefix = conn_str.split("://")[0].lower() if "://" in conn_str else "file"
-        if prefix not in cls._registry:
-            # Fallback check file existence
-            return LocalFileConnector(conn_str)
-        return cls._registry[prefix](conn_str)
+        if not isinstance(conn_str, str) or not conn_str.strip():
+            raise ValueError("Connection string must be a non-empty string")
+        text = conn_str.strip()
+        if "://" not in text:
+            return LocalFileConnector(text)
+        prefix = text.split("://", 1)[0].lower()
+        connector_cls = cls._registry.get(prefix)
+        if connector_cls is None:
+            known = ", ".join(sorted(cls._registry))
+            raise ValueError(
+                f"Unsupported connection scheme {prefix!r}. Supported schemes: {known}. "
+                "Pass a local filesystem path without a scheme to read a file."
+            )
+        return connector_cls(text)

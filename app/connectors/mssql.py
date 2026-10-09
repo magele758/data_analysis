@@ -1,8 +1,34 @@
 from typing import List, Optional
 import pyarrow as pa
 import connectorx as cx
-from app.connectors.base import BaseConnector, TableSchema, ColumnInfo, is_select, safe_select
+from app.connectors.base import (
+    BaseConnector, TableSchema, ColumnInfo, is_select, safe_select, sql_string_literal,
+)
 from app.engine.sql_guard import safe_columns, safe_ident, safe_predicate, safe_table_ref
+
+
+def build_fetch_sql(
+    query_or_table: str,
+    filter_sql: Optional[str] = None,
+    select_cols: Optional[List[str]] = None,
+    limit: Optional[int] = None,
+) -> str:
+    """Build a SQL Server SELECT. TOP is applied after filters, including for caller-supplied SELECTs."""
+    cols_clause = safe_columns(select_cols) if select_cols else "*"
+    if is_select(query_or_table):
+        base_sql = safe_select(query_or_table)
+    else:
+        base_sql = f"SELECT {cols_clause} FROM {safe_table_ref(query_or_table)}"
+    if filter_sql:
+        base_sql = f"SELECT * FROM ({base_sql}) AS _sub WHERE {safe_predicate(filter_sql)}"
+    if limit is not None:
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise ValueError(f"limit must be a non-negative integer, got {limit!r}")
+        if limit < 0:
+            raise ValueError("limit must be >= 0")
+        base_sql = f"SELECT TOP {limit} * FROM ({base_sql}) AS _lim"
+    return base_sql
+
 
 class MSSQLConnector(BaseConnector):
     """SQL Server (MSSQL) high-performance connector via ConnectorX."""
@@ -25,15 +51,20 @@ class MSSQLConnector(BaseConnector):
         return [str(val) for val in table["full_name"].to_pylist()]
 
     def introspect_schema(self, table_name: str) -> TableSchema:
-        schema_part = "dbo"
-        table_part = table_name
-        if "." in table_name:
-            schema_part, table_part = table_name.split(".", 1)
-
+        if not isinstance(table_name, str) or not table_name.strip():
+            raise ValueError("table_name is required")
+        parts = table_name.split(".")
+        if len(parts) == 1:
+            schema_part, table_part = "dbo", parts[0]
+        elif len(parts) == 2:
+            schema_part, table_part = parts
+        else:
+            raise ValueError(f"Expected schema.table, got {table_name!r}")
         query = f"""
         SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
         FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = '{schema_part}' AND TABLE_NAME = '{table_part}'
+        WHERE TABLE_SCHEMA = {sql_string_literal(schema_part)}
+          AND TABLE_NAME = {sql_string_literal(table_part)}
         ORDER BY ORDINAL_POSITION;
         """
         arrow_res = cx.read_sql(self.conn_str, query, return_type="arrow")
@@ -56,15 +87,12 @@ class MSSQLConnector(BaseConnector):
         limit: Optional[int] = None,
         mode: str = "materialize"  # no DuckDB mssql scanner; always ConnectorX
     ) -> pa.Table:
-        cols_clause = safe_columns(select_cols) if select_cols else "*"
-        if is_select(query_or_table):
-            base_sql = safe_select(query_or_table)
-        else:
-            top_clause = f"TOP {int(limit)} " if limit else ""
-            base_sql = f"SELECT {top_clause}{cols_clause} FROM {safe_table_ref(query_or_table)}"
-
-        if filter_sql:
-            base_sql = f"SELECT * FROM ({base_sql}) AS _sub WHERE {safe_predicate(filter_sql)}"
+        base_sql = build_fetch_sql(
+            query_or_table,
+            filter_sql=filter_sql,
+            select_cols=select_cols,
+            limit=limit,
+        )
 
         if partition_col and num_partitions > 1:
             return cx.read_sql(
