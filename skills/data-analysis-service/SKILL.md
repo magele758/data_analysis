@@ -11,15 +11,15 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 
 ### 1. Two Ingestion Paths → One Analytical Session
 * **Path A — Database Connectors**: Call `connect_and_load_db` to connect to PostgreSQL/MySQL/MSSQL/SQLite/File with projection & predicate pushdown. `mode="materialize"` (default, ConnectorX) or `mode="scanner"` (DuckDB ATTACH + pushdown for PG/MySQL).
-* **Path A — Big Excel / CSV**: Invoke `import_excel_or_csv` with `file_path`, `dataset_name`, optional `sheet_name` to stream-parse million-row files without OOM.
+* **Path A — Big Excel / CSV**: Invoke `import_excel_or_csv` with `file_path` and `dataset_name`. Omitting `sheet_name` reads the first worksheet. A sheet name that is not in the workbook is an error. Legacy `.xls` is rejected.
 * **Path B — Trace / Telemetry Import**: Invoke `import_traces` with `source` (OTLP JSON, span JSON/NDJSON array, or CSV/Parquet) and `dataset_name` to load trace spans/events as an ordinary session table. It is normalized to a canonical span/event schema so every downstream operator applies.
 * All paths land in the same in-memory DuckDB session (`session_id`), so DB data and trace data share one analysis engine.
 
 ### 2. Palantir Agentic Ontology Layer
 * **Inspect Schema**: Invoke `ontology_list_schema` to discover all business Object Types, Links, and available Actions.
 * **Query Entities**: Invoke `ontology_query_objects` to search entity instances and status.
-* **Multi-Hop Traversal**: Invoke `ontology_traverse_links` to traverse along relation links across entities (e.g. `Customer -> Orders -> Products`). The result includes `path` and `hop_counts`. MANY_TO_MANY uses the junction table.
-* **Execute Actions**: Invoke `ontology_execute_action` to trigger atomic business operations (e.g. `ApplyDiscountAction`, `RerouteOrderAction`). The audit stores before, after, and `statement_hash`. The MCP tool defaults `dry_run=true`. Pass `dry_run=false` to write. `link_path` walks more than one hop. A `writeback_table` on `SQL_MUTATION` stores the edit beside the source table. `REVERSE_ETL_SYNC` calls `DestinationSync` only when `dest_conn_str`, `dest_table_name`, and `source_table` are set.
+* **Multi-Hop Traversal**: Invoke `ontology_traverse_links` to traverse along relation links across entities (e.g. `Customer -> Orders -> Products`). Pass `link_path` and `max_hops`. The result includes `path`, `hop_counts`, `hop_details`, and `truncated`. Object queries include `matched_count` for the filtered total. MANY_TO_MANY uses the junction table. `ontology_entity_graph` returns nodes, edges, and broken_edges.
+* **Execute Actions**: Invoke `ontology_execute_action` to trigger atomic business operations (e.g. `ApplyDiscountAction`, `RerouteOrderAction`). The audit stores before, after, and `statement_hash`. A webhook result of `FAILED` stays `FAILED` even when `simulated_payload` is present. The MCP tool defaults `dry_run=true`. Pass `dry_run=false` to write. `link_path` walks more than one hop. A `writeback_table` on `SQL_MUTATION` stores the edit beside the source table. `REVERSE_ETL_SYNC` calls `DestinationSync` only when `dest_conn_str`, `dest_table_name`, and `source_table` are set.
 
 ### 3. Data Catalog & Semantic Layer
 * **Catalog Assets**: Auto-registers ingested files/tables into Data Catalog.
@@ -27,23 +27,26 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 
 ### 4. ETL / ELT Transformation & Data Cleansing
 * **Data Cleaning**: Invoke `execute_data_cleaning` to deduplicate, fill missing values (mean/median/mode), and clip outliers.
-* **DAG Pipeline**: Register SQL models and call `run_dag_pipeline` for transactional dbt-like topological modeling.
+* **DAG Pipeline**: Register SQL models and call `run_dag_pipeline` for transactional dbt-like topological modeling. Models in one stage run sequentially on the session connection. `create_wide_table` joins a fact table to dimensions and returns `columns`.
 
 ### 5. Analytics, Attribution, Mining & SPSS Testing
 * **EDA Profiling**: Invoke `eda_profile` for semantic types, distribution stats, and data quality scores.
 * **Driver Attribution**: Invoke `driver_attribution_analysis` to drill a metric change. SUM closes as an additive contribution. Pass `rate_col` and `volume_col` for a Laspeyres rate/volume split on the first dimension only (`orderings_used` 1) plus `sun_shapley`, which averages the two factor orders (`orderings_used` 2). Later dimensions are not drilled on that path. SUM also returns `sun_shapley` over dimension permutations; a pure SUM member diff is order-invariant. Other aggregations leave `sun_shapley` null.
-* **SPSS Testing & Regression**: Use `spss_hypothesis_test` (`independent_t_test`, `paired_t_test`, `one_way_anova`, `two_way_anova` with `factor_b`, `chi_square`, `mann_whitney`) and `spss_regression_analysis` for formal inference. `significant` also requires an effect-size floor. More than 40 regressors returns `请先聚合再回归`.
+* **Variance decomposition**: Invoke `variance_decomposition` with `metric` and `dimensions`. The operator dict, including `evidence`, is returned as-is. REST `POST /api/v1/tools/variance_decomposition` puts it in `statistics`.
+* **SPSS Testing & Regression**: Use `spss_hypothesis_test` (`independent_t_test`, `paired_t_test`, `one_way_anova`, `two_way_anova` with `factor_b`, `chi_square`, `mann_whitney`) and `spss_regression_analysis` for formal inference. `one_way_anova` and `two_way_anova` include `variance_decomposition`. `mann_whitney` requires exactly 2 groups. `significant` also requires an effect-size floor. More than 40 regressors returns `请先聚合再回归`. More than 5,000,000 scanned cells returns `请先聚合再检验`.
+* **EDA moments**: `eda_profile` leaves `skewness`, `kurtosis`, and `std` null when the moment is undefined. A `quantile_cont` profile uses `quantile_cont` for p50.
 * **Correlation / OLAP Pivot**: `correlation_analysis` (Pearson/Spearman matrix, BH q-values, |r| >= 0.1). Pass `group_col` to surface a Simpson caveat when a group flips the sign. With `DATA_AGENT_RAY_ENABLED=true`, a large Pearson scan merges hash partitions of the first numeric column. Ray is used when the package is installed and the connection can still spill a parquet file. If spill is blocked, the same slices stay on the session connection and the caveat says `backend=session`. `pivot_table` aggregates rows × columns.
-* **Data Mining**: `kmeans_clustering` (auto-k), `rfm_segmentation` (customer value), `timeseries_forecast` (ARIMA(1,1,1) plus a holdout against last-value and, on a calendar, seasonal naive).
-* **Trace & Web Analytics (on the imported trace table)**: Use `analyze_conversion_funnel`, `analyze_user_flow`, `analyze_cohort_retention`, `analyze_page_performance`, `inspect_trace_and_replay` — each takes `session_id` + `dataset_name` and runs on the session-resident trace/event table (not a separate store).
+* **Data Mining**: `kmeans_clustering` (auto-k), `rfm_segmentation` (customer value), `timeseries_forecast` (ARIMA(1,1,1) plus a holdout against last-value and, on a calendar, seasonal naive). The forecast payload includes a Vega-Lite `chart_spec`.
+* **Trace & Web Analytics (on the imported trace table)**: Use `analyze_conversion_funnel`, `analyze_user_flow`, `analyze_cohort_retention`, `analyze_page_performance`, `inspect_trace_and_replay` — each takes `session_id` + `dataset_name` and runs on the session-resident trace/event table (not a separate store). Funnel, retention, and user flow also return `chart_spec` (Vega-Lite bar, Vega-Lite heatmap, ECharts sankey). Page metrics do not include a bounce rate or a chart.
 
 ### 5b. Insight Copilot (Automated Insight Discovery)
 * **Discover Insights**: Invoke `discover_insights` to orchestrate the operators above as *Analysis Actions* (anomaly/correlation/dominance/trend), returning ranked structured insights, an **Insight Graph** (relationships between findings), and a **data-story narrative**. An optional `intent` string lightly biases which actions run. `ranking_method` is `severity` unless `DATA_AGENT_LLM_BASE_URL` is set, in which case the endpoint reorders ids from titles, severity, and evidence fields and falls back to severity on failure. Deeper NLU and multi-agent reasoning stay with the calling Agent.
+* **Single actions over HTTP**: `POST /api/v1/insights/outliers`, `/trends`, and `/dominance` call the same operators as `detect_automated_insights`. Each returns `AnalysisResponse` with the operator payload in `statistics` and the sample rows in `data_preview`.
 
 ### 6. Reverse ETL & Operational Activation
-* **Destination Sync**: Invoke `reverse_sync_destination` to stream sync analytical results back to PostgreSQL/MySQL/SQLite/Parquet.
-* **Audience Export**: Call `export_audience_cohort` to extract high-value or churn-risk users to JSON/CSV for CRM.
-* **Operational Webhooks**: Call `send_operational_webhook_alert` to push rich cards to Feishu/DingTalk/Slack.
+* **Destination Sync**: Invoke `reverse_sync_destination` to stream sync analytical results back to PostgreSQL/MySQL/SQLite/Parquet. `chunk_size` sets the Arrow batch size.
+* **Audience Export**: Call `export_audience_cohort` to extract high-value or churn-risk users to JSON/CSV for CRM. `total_audience_count` is the filtered total, `exported_count` is the page, and `truncated` says whether `limit` cut the page short.
+* **Operational Webhooks**: Call `send_operational_webhook_alert`. `feishu` sends a post card, `dingtalk` sends markdown, and `slack` sends `{"text": ...}`. `wecom`, `wechat`, `weixin`, `qywx`, `wxwork`, and `wechat_work` send WeCom markdown. Other platforms send generic JSON. A failed send is `FAILED` and still includes `simulated_payload`.
 
 ### 7. Data Observability & Assertions
 * **Quality Assertions**: Invoke `assert_data_quality` for declarative single-pass validations (nulls, uniqueness, ranges, row counts).
@@ -56,4 +59,4 @@ Provides high-performance, stateless in-memory analytics, large Excel/CSV stream
 ## Reference Documentation
 
 - [Operators Guide](references/operators.md) - Mathematical formulations and detailed parameter options.
-- [MCP Tools Reference](references/mcp_tools.md) - Exact schema and payload definitions for all 37 MCP tools.
+- [MCP Tools Reference](references/mcp_tools.md) - Exact schema and payload definitions for all 40 MCP tools.

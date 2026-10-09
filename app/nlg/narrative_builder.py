@@ -28,6 +28,27 @@ class NarrativeBuilder:
             parts.append(f"⚠️ 质量警示：发现明显数据缺失列 {', '.join(null_issues)}。")
         else:
             parts.append("✅ 数据完整性良好，未发现异常缺失字段。")
+        sample_rows = eda_data.get("type_inference_sample_rows")
+        if sample_rows is not None:
+            parts.append(f"语义类型由前 {sample_rows} 行样本推断。")
+        distinct_methods = sorted({
+            str(v.get("distinct_count_method"))
+            for v in cols.values()
+            if v.get("distinct_count_method")
+        })
+        quantile_methods = sorted({
+            str(v.get("quantile_method"))
+            for v in cols.values()
+            if v.get("quantile_method")
+        })
+        if distinct_methods or quantile_methods:
+            parts.append(
+                "计数方法："
+                + (", ".join(distinct_methods) if distinct_methods else "未标注")
+                + "；分位数方法："
+                + (", ".join(quantile_methods) if quantile_methods else "未标注")
+                + "。"
+            )
         return " ".join(parts)
 
     @classmethod
@@ -41,6 +62,21 @@ class NarrativeBuilder:
         parts = [
             f"【异动归因分析】目标指标 '{metric}' 整体发生波动：{direction_word} {abs(diff):,.2f} ({rate:+.2f}%)。"
         ]
+        method = driver_data.get("method")
+        if method:
+            parts.append(f"分解方法为 {method}。")
+        sun = driver_data.get("sun_shapley")
+        if sun is None:
+            parts.append("结果中的 sun_shapley 为空。")
+        elif isinstance(sun, dict):
+            parts.append(f"Sun-Shapley 记录了 {sun.get('orderings_used')} 种顺序。")
+        unclosed = [
+            str(layer.get("dimension_level"))
+            for layer in hierarchy
+            if layer.get("closes") is False
+        ]
+        if unclosed:
+            parts.append(f"维度 {', '.join(unclosed)} 的子项差值未闭合到总差值。")
 
         for layer in hierarchy:
             dim = layer.get("dimension_level")
@@ -68,20 +104,37 @@ class NarrativeBuilder:
         conclusion = spss_data.get("formal_conclusion", "")
         
         if sig:
-            verdict = f"【SPSS 统计推断 - 拒绝原假设】{test_name} 结果具有极显著统计学差异 (p={p_val:.4e} < 0.05)。"
+            verdict = f"【SPSS 统计推断 - 拒绝原假设】{test_name} 判定显著 (p={p_val:.4e})。"
         else:
-            verdict = f"【SPSS 统计推断 - 接受原假设】{test_name} 结果未达到统计学显著性差异 (p={p_val:.4f} >= 0.05)。"
+            verdict = (
+                f"【SPSS 统计推断 - 未拒绝原假设】{test_name} 未判定显著 (p={p_val:.4e})。"
+                "显著标志同时要求 p 值过线与效应量门槛。"
+            )
 
         return f"{verdict} {conclusion}"
 
     @classmethod
     def generate_regression_narrative(cls, reg_data: Dict[str, Any]) -> str:
+        coefs = reg_data.get("coefficients", [])
+        sig_vars = [c["variable"] for c in coefs if c.get("significant") and c["variable"] != "const"]
+        model_type = str(reg_data.get("model_type") or "")
+        is_logistic = "logistic" in model_type.lower() or (
+            "pseudo_r_squared" in reg_data and "r_squared" not in reg_data
+        )
+        if is_logistic:
+            pseudo = reg_data.get("pseudo_r_squared", 0.0)
+            llr_p = reg_data.get("llr_p_value", 1.0)
+            parts = [
+                f"【二元 Logistic 回归】Pseudo R²={pseudo:.4f}，似然比检验 p={llr_p:.4e} "
+                f"(模型{'显著有效' if llr_p < 0.05 else '不显著'})。"
+            ]
+            if sig_vars:
+                parts.append(f"其中显著自变量包含：{', '.join(sig_vars)}。")
+            return " ".join(parts)
+
         r2 = reg_data.get("r_squared", 0.0)
         f_p = reg_data.get("f_p_value", 1.0)
-        coefs = reg_data.get("coefficients", [])
         vifs = reg_data.get("multicollinearity_vif", [])
-
-        sig_vars = [c["variable"] for c in coefs if c.get("significant") and c["variable"] != "const"]
         vif_warns = [v["variable"] for v in vifs if v.get("multicollinearity_warning")]
 
         parts = [

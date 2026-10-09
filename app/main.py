@@ -11,22 +11,27 @@ from fastapi import FastAPI, HTTPException, Depends, Request, Query, UploadFile,
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from typing import Optional
 
 from app.config import settings
 from app.logging_setup import configure_logging, set_request_id, get_request_id
 from app.security import require_api_key, validate_auth_config
 from app.schemas.requests import (
     ConnectDBRequest, EDARequest, CorrelationRequest, OLAPRequest, PivotRequest,
-    DriverAnalysisRequest, HypothesisTestRequest, RegressionRequest, OutliersRequest,
-    TrendsRequest, DominanceRequest, ClusteringRequest, TimeSeriesRequest, SQLSandboxRequest
+    DriverAnalysisRequest, HypothesisTestRequest, RegressionRequest,
+    OutliersRequest, TrendsRequest, DominanceRequest, VarianceDecompositionRequest,
+    ClusteringRequest, TimeSeriesRequest, SQLSandboxRequest, RFMRequest,
+    InsightDiscoverRequest, RunExampleRequest, FunnelRequest, SemanticQueryRequest,
+    CleanTableRequest, ReverseSyncRequest, WideTableRequest, AudienceExportRequest, WebhookAlertRequest,
+    QualitySuiteRequest, SchemaDriftRequest, OntologyQueryRequest, OntologyTraverseRequest,
+    OntologyActionExecRequest, TraceImportRequest,
 )
 from app.schemas.responses import AnalysisResponse
 from app.cluster.session_manager import SessionManager
 from app.connectors.factory import ConnectorFactory
 from app.connectors.trace_importer import TraceImporter
 from app.operators.eda import run_eda_profile
+from app.operators.variance import run_variance_decomposition
 from app.operators.correlation import run_correlation_analysis
 from app.operators.olap import run_olap_query, run_pivot_table
 from app.distributed_ops.dist_driver import DistributedDriverAnalysis
@@ -53,6 +58,7 @@ from app.catalog.meta_registry import get_meta_registry, TableAsset, ColumnMeta
 from app.catalog.lineage_tracker import get_lineage_tracker
 from app.catalog.semantic_store import get_semantic_store, MetricDefinition
 from app.transform.data_cleaner import DataCleaner
+from app.transform.materializer import Materializer
 from app.transform.pipeline_dag import get_pipeline_engine, DAGModel
 from app.retl.destination_sync import DestinationSync
 from app.retl.audience_exporter import AudienceExporter
@@ -187,21 +193,40 @@ def get_dashboard():
 
 # ----------------- Core IQuery Analysis Endpoints -----------------
 
+def _client_error(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
+
+
+def _upload_basename(filename: str) -> str:
+    if not filename or ".." in filename.replace("\\", "/"):
+        raise HTTPException(status_code=400, detail="Invalid upload filename")
+    normalized = filename.replace("\\", "/")
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
+        raise HTTPException(status_code=400, detail="Invalid upload filename")
+    name = os.path.basename(normalized)
+    if not name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid upload filename")
+    return name
+
+
 @app.post("/api/v1/connect", response_model=AnalysisResponse)
 def connect_db(req: ConnectDBRequest):
-    mgr = SessionManager()
-    sess = mgr.get_or_create_session(req.session_id)
-    connector = ConnectorFactory.get_connector(req.conn_str)
-    arrow_table = connector.fetch_to_arrow(
-        query_or_table=req.query_or_table,
-        filter_sql=req.filter_sql,
-        select_cols=req.select_cols,
-        partition_col=req.partition_col,
-        num_partitions=req.num_partitions,
-        limit=req.limit,
-        mode=req.mode
-    )
-    meta = sess.register_dataset(req.dataset_name, arrow_table, {"conn_str": req.conn_str, "source": req.query_or_table})
+    try:
+        mgr = SessionManager()
+        sess = mgr.get_or_create_session(req.session_id)
+        connector = ConnectorFactory.get_connector(req.conn_str)
+        arrow_table = connector.fetch_to_arrow(
+            query_or_table=req.query_or_table,
+            filter_sql=req.filter_sql,
+            select_cols=req.select_cols,
+            partition_col=req.partition_col,
+            num_partitions=req.num_partitions,
+            limit=req.limit,
+            mode=req.mode
+        )
+        meta = sess.register_dataset(req.dataset_name, arrow_table, {"conn_str": req.conn_str, "source": req.query_or_table})
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
     
     # Auto-register into Data Catalog
     cat = get_meta_registry(sess.session_id)
@@ -303,6 +328,18 @@ def api_spss_regression(req: RegressionRequest):
         statistics=res
     )
 
+@app.post("/api/v1/tools/variance_decomposition", response_model=AnalysisResponse)
+def api_variance_decomposition(req: VarianceDecompositionRequest):
+    res = run_variance_decomposition(
+        req.session_id, req.dataset_name, req.metric, req.dimensions, req.filters,
+    )
+    return AnalysisResponse(
+        status="success",
+        session_id=req.session_id,
+        summary_text=f"{res['method']} of {req.metric}: n={res['n']}, ss_total={res['ss_total']}.",
+        statistics=res,
+    )
+
 @app.post("/api/v1/tools/olap", response_model=AnalysisResponse)
 def api_olap(req: OLAPRequest):
     res = run_olap_query(
@@ -365,13 +402,6 @@ def api_clustering(req: ClusteringRequest):
         statistics=res,
     )
 
-class RFMRequest(BaseModel):
-    session_id: str
-    dataset_name: str
-    user_col: str
-    date_col: str
-    amount_col: str
-
 @app.post("/api/v1/tools/rfm", response_model=AnalysisResponse)
 def api_rfm(req: RFMRequest):
     res = run_rfm_segmentation(req.session_id, req.dataset_name, req.user_col, req.date_col, req.amount_col)
@@ -383,21 +413,58 @@ def api_rfm(req: RFMRequest):
 @app.post("/api/v1/tools/timeseries", response_model=AnalysisResponse)
 def api_timeseries(req: TimeSeriesRequest):
     res = run_timeseries_forecast(req.session_id, req.dataset_name, req.time_col, req.value_col, req.horizon, req.model_type)
+    chart_spec = ChartSpecBuilder.build_time_series_forecast_chart(
+        res.get("historical_preview") or [],
+        res.get("forecasts") or [],
+        req.time_col,
+        req.value_col,
+    )
     return AnalysisResponse(
         status="success", session_id=req.session_id,
-        summary_text=f"{req.model_type} forecast for {req.horizon} periods.", statistics=res,
+        summary_text=f"{req.model_type} forecast for {req.horizon} periods.",
+        statistics=res,
+        chart_spec=chart_spec,
     )
 
 # ----------------- Insight Copilot: automated insight discovery -----------------
 
-class InsightDiscoverRequest(BaseModel):
-    session_id: str
-    dataset_name: str
-    intent: Optional[str] = None
-    target_metric: Optional[str] = None
-    category_col: Optional[str] = None
-    time_col: Optional[str] = None
-    max_insights: int = 8
+@app.post("/api/v1/insights/outliers", response_model=AnalysisResponse)
+def api_outliers(req: OutliersRequest):
+    res = detect_outliers(
+        req.session_id, req.dataset_name, req.metric,
+        dimension_cols=req.dimension_cols, method=req.method,
+        threshold=req.threshold, top_k=req.top_k,
+    )
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"{req.method} found {res['outlier_count']} outliers on {req.metric}.",
+        statistics=res,
+        data_preview=res.get("outliers"),
+    )
+
+@app.post("/api/v1/insights/trends", response_model=AnalysisResponse)
+def api_trends(req: TrendsRequest):
+    res = detect_trends(
+        req.session_id, req.dataset_name, req.time_col, req.metric, group_col=req.group_col,
+    )
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"{res['trend_direction']} on {req.metric}.",
+        statistics=res,
+        data_preview=res.get("series_preview"),
+    )
+
+@app.post("/api/v1/insights/dominance", response_model=AnalysisResponse)
+def api_dominance(req: DominanceRequest):
+    res = detect_dominance(
+        req.session_id, req.dataset_name, req.category_col, req.metric, top_k=req.top_k,
+    )
+    return AnalysisResponse(
+        status="success", session_id=req.session_id,
+        summary_text=f"Gini {res['gini_coefficient']} across {res['total_categories']} categories of {req.metric}.",
+        statistics=res,
+        data_preview=res.get("top_contributors"),
+    )
 
 @app.post("/api/v1/insights/discover")
 def api_discover_insights(req: InsightDiscoverRequest):
@@ -415,9 +482,6 @@ def api_list_examples():
     """List built-in end-to-end analysis examples runnable from the dashboard."""
     return {"examples": builtin_examples.list_examples()}
 
-class RunExampleRequest(BaseModel):
-    session_id: Optional[str] = None
-
 @app.post("/api/v1/examples/{example_id}/run")
 def api_run_example(example_id: str, req: RunExampleRequest = RunExampleRequest()):
     """Generate the example dataset into a session, run the full pipeline, and
@@ -433,24 +497,23 @@ def api_run_example(example_id: str, req: RunExampleRequest = RunExampleRequest(
 # engine the DB-connector path uses. The DB path and the trace path thus share
 # one analysis core rather than each maintaining a separate silo.
 
-class FunnelRequest(BaseModel):
-    session_id: str
-    dataset_name: str
-    steps: List[str]
-    date_from: Optional[str] = None
-    date_to: Optional[str] = None
-
 @app.post("/api/v1/analytics/funnel")
 def api_funnel(req: FunnelRequest):
-    return calculate_funnel(req.session_id, req.dataset_name, req.steps, req.date_from, req.date_to)
+    res = dict(calculate_funnel(req.session_id, req.dataset_name, req.steps, req.date_from, req.date_to))
+    res["chart_spec"] = ChartSpecBuilder.build_funnel_chart(res.get("steps") or [])
+    return res
 
 @app.get("/api/v1/analytics/flow")
 def api_flow(session_id: str, dataset_name: str, limit: int = 15):
-    return calculate_user_flow(session_id, dataset_name, limit_paths=limit)
+    res = dict(calculate_user_flow(session_id, dataset_name, limit_paths=limit))
+    res["chart_spec"] = ChartSpecBuilder.build_sankey_chart(res.get("nodes") or [], res.get("links") or [])
+    return res
 
 @app.get("/api/v1/analytics/retention")
 def api_retention(session_id: str, dataset_name: str, days: int = 7):
-    return calculate_retention(session_id, dataset_name, days=days)
+    res = dict(calculate_retention(session_id, dataset_name, days=days))
+    res["chart_spec"] = ChartSpecBuilder.build_retention_heatmap(res.get("retention_matrix") or [])
+    return res
 
 @app.get("/api/v1/analytics/pages")
 def api_pages(session_id: str, dataset_name: str, limit: int = 20):
@@ -495,14 +558,6 @@ def api_register_semantic_metric(metric: MetricDefinition, session_id: str = "_g
     store = get_semantic_store(session_id)
     return store.register_metric(metric)
 
-class SemanticQueryRequest(BaseModel):
-    session_id: str
-    metric_names: List[str]
-    dimensions: Optional[List[str]] = None
-    filters: Optional[str] = None
-    order_by: Optional[str] = None
-    limit: int = 100
-
 @app.post("/api/v1/catalog/metrics/query")
 def api_query_semantic_metrics(req: SemanticQueryRequest):
     store = get_semantic_store(req.session_id)
@@ -519,13 +574,18 @@ def api_query_semantic_metrics(req: SemanticQueryRequest):
 
 # ----------------- Modern Data Stack: Transform & ELT DAG -----------------
 
-class CleanTableRequest(BaseModel):
-    session_id: str
-    source_table: str
-    target_table: str
-    dedup_keys: Optional[List[str]] = None
-    fillna_rules: Optional[Dict[str, Any]] = None
-    outlier_clip_cols: Optional[Dict[str, Dict[str, float]]] = None
+@app.post("/api/v1/transform/wide")
+def api_create_wide_table(req: WideTableRequest):
+    mgr = SessionManager()
+    sess = mgr.get_session(req.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        return Materializer.create_wide_table(
+            sess.get_duckdb_conn(), req.target_name, req.fact_table, req.dimension_joins,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
 
 @app.post("/api/v1/transform/clean")
 def api_clean_table(req: CleanTableRequest):
@@ -559,13 +619,6 @@ def api_run_dag_pipeline(session_id: str):
 
 # ----------------- Modern Data Stack: Reverse ETL & Activation -----------------
 
-class ReverseSyncRequest(BaseModel):
-    session_id: str
-    source_table: str
-    dest_conn_str: str
-    dest_table_name: str
-    mode: str = "replace"
-
 @app.post("/api/v1/retl/sync")
 def api_reverse_sync(req: ReverseSyncRequest):
     mgr = SessionManager()
@@ -573,15 +626,9 @@ def api_reverse_sync(req: ReverseSyncRequest):
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
-    return DestinationSync.sync_table_to_destination(con, req.source_table, req.dest_conn_str, req.dest_table_name, req.mode)
-
-class AudienceExportRequest(BaseModel):
-    session_id: str
-    source_table: str
-    filter_sql: Optional[str] = None
-    export_columns: Optional[List[str]] = None
-    format_type: str = "json"
-    limit: int = 1000
+    return DestinationSync.sync_table_to_destination(
+        con, req.source_table, req.dest_conn_str, req.dest_table_name, req.mode, chunk_size=req.chunk_size,
+    )
 
 @app.post("/api/v1/retl/audience")
 def api_export_audience(req: AudienceExportRequest):
@@ -592,23 +639,11 @@ def api_export_audience(req: AudienceExportRequest):
     con = sess.get_duckdb_conn()
     return AudienceExporter.export_cohort(con, req.source_table, req.filter_sql, req.export_columns, req.format_type, req.limit)
 
-class WebhookAlertRequest(BaseModel):
-    webhook_url: str
-    title: str
-    message: str
-    platform: str = "generic"
-    extra_metrics: Optional[Dict[str, Any]] = None
-
 @app.post("/api/v1/retl/alert")
 def api_send_webhook_alert(req: WebhookAlertRequest):
     return WebhookPusher.send_alert(req.webhook_url, req.title, req.message, req.platform, req.extra_metrics)
 
 # ----------------- Modern Data Stack: Observability & Quality -----------------
-
-class QualitySuiteRequest(BaseModel):
-    session_id: str
-    table: str
-    rules: List[Dict[str, Any]]
 
 @app.post("/api/v1/observability/assert")
 def api_run_quality_assertions(req: QualitySuiteRequest):
@@ -618,11 +653,6 @@ def api_run_quality_assertions(req: QualitySuiteRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
     return DataQualityAssertions.run_suite(con, req.table, req.rules)
-
-class SchemaDriftRequest(BaseModel):
-    session_id: str
-    table: str
-    baseline_schema: Dict[str, str]
 
 @app.post("/api/v1/observability/drift")
 def api_detect_schema_drift(req: SchemaDriftRequest):
@@ -634,6 +664,10 @@ def api_detect_schema_drift(req: SchemaDriftRequest):
     return SchemaDrifter.detect_drift(con, req.table, req.baseline_schema)
 
 # ----------------- Palantir-Style Agentic Ontology Endpoints -----------------
+
+@app.get("/api/v1/ontology/entity_graph")
+def api_entity_graph():
+    return get_ontology_engine().entity_graph()
 
 @app.get("/api/v1/ontology/schema")
 def api_get_ontology_schema():
@@ -670,13 +704,6 @@ def api_register_ontology_action(action: ActionType):
     engine = get_ontology_engine()
     return engine.register_action_type(action)
 
-class OntologyQueryRequest(BaseModel):
-    session_id: str
-    object_type: str
-    filters: Optional[str] = None
-    properties: Optional[List[str]] = None
-    limit: int = 50
-
 @app.post("/api/v1/ontology/instances/query")
 def api_query_ontology_instances(req: OntologyQueryRequest):
     mgr = SessionManager()
@@ -687,13 +714,6 @@ def api_query_ontology_instances(req: OntologyQueryRequest):
     engine = get_ontology_engine()
     return engine.query_object_instances(con, req.object_type, req.filters, req.properties, req.limit)
 
-class OntologyTraverseRequest(BaseModel):
-    session_id: str
-    source_object_type: str
-    source_instance_id: Any
-    link_name: str
-    limit: int = 50
-
 @app.post("/api/v1/ontology/instances/traverse")
 def api_traverse_ontology_links(req: OntologyTraverseRequest):
     mgr = SessionManager()
@@ -702,14 +722,18 @@ def api_traverse_ontology_links(req: OntologyTraverseRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
     engine = get_ontology_engine()
-    return engine.traverse_links(con, req.source_object_type, req.source_instance_id, req.link_name, req.limit)
-
-class OntologyActionExecRequest(BaseModel):
-    session_id: str
-    action_name: str
-    instance_id: Any
-    parameters: Dict[str, Any]
-    dry_run: bool = False
+    try:
+        return engine.traverse_links(
+            con,
+            req.source_object_type,
+            req.source_instance_id,
+            req.link_name,
+            req.limit,
+            link_path=req.link_path,
+            max_hops=req.max_hops,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
 
 @app.post("/api/v1/ontology/actions/execute")
 def api_execute_ontology_action(req: OntologyActionExecRequest):
@@ -719,7 +743,10 @@ def api_execute_ontology_action(req: OntologyActionExecRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
     engine = get_ontology_engine()
-    return engine.execute_action(con, req.action_name, req.instance_id, req.parameters, req.dry_run)
+    try:
+        return engine.execute_action(con, req.action_name, req.instance_id, req.parameters, req.dry_run)
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
 
 @app.get("/api/v1/ontology/audit")
 def api_list_ontology_audits(limit: int = 50):
@@ -738,27 +765,30 @@ async def api_import_file(
     limit: Optional[int] = Form(None)
 ):
     mgr = SessionManager()
-    sess = mgr.get_or_create_session(session_id)
-    
     target_path = file_path
-    if file:
-        os.makedirs("data/uploads", exist_ok=True)
-        target_path = f"data/uploads/{file.filename}"
-        with open(target_path, "wb") as f_out:
-            while chunk := await file.read(1024 * 1024 * 5): # 5MB stream chunks
-                f_out.write(chunk)
+    try:
+        sess = mgr.get_or_create_session(session_id)
+        if file:
+            os.makedirs("data/uploads", exist_ok=True)
+            target_path = f"data/uploads/{_upload_basename(file.filename or '')}"
+            with open(target_path, "wb") as f_out:
+                while chunk := await file.read(1024 * 1024 * 5): # 5MB stream chunks
+                    f_out.write(chunk)
 
-    if not target_path or not os.path.exists(target_path):
-        raise HTTPException(status_code=400, detail="Invalid file or file_path provided")
+        if not target_path or not os.path.exists(target_path):
+            raise HTTPException(status_code=400, detail="Invalid file or file_path provided")
 
-    conn_str = f"file://{target_path}"
-    connector = ConnectorFactory.get_connector(conn_str)
-    arrow_table = connector.fetch_to_arrow(
-        query_or_table=sheet_name or "Sheet1",
-        limit=limit
-    )
-
-    meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": target_path})
+        conn_str = f"file://{target_path}"
+        connector = ConnectorFactory.get_connector(conn_str)
+        arrow_table = connector.fetch_to_arrow(
+            query_or_table=sheet_name or "",
+            limit=limit
+        )
+        meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": target_path})
+    except HTTPException:
+        raise
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
 
     # Register into Catalog
     cat = get_meta_registry(sess.session_id)
@@ -786,13 +816,6 @@ async def api_import_file(
 
 # ----------------- Trace Ingestion (Path B): import traces as a data source -----------------
 
-class TraceImportRequest(BaseModel):
-    source: Optional[str] = None
-    records: Optional[List[Dict[str, Any]]] = None
-    dataset_name: str = "traces"
-    session_id: Optional[str] = None
-    format: Optional[str] = None
-
 @app.post("/api/v1/import/traces")
 def api_import_traces(req: TraceImportRequest):
     """Ingest OTLP/JSON/NDJSON/CSV/Parquet trace data into an analytical session.
@@ -802,8 +825,8 @@ def api_import_traces(req: TraceImportRequest):
     the same engine used by the DB-connector path.
     """
     mgr = SessionManager()
-    sess = mgr.get_or_create_session(req.session_id)
     try:
+        sess = mgr.get_or_create_session(req.session_id)
         arrow_table = TraceImporter.load_source(source=req.source, records=req.records, fmt=req.format)
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e))

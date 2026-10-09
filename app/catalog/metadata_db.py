@@ -123,6 +123,7 @@ class MetadataDB:
                 materialization TEXT,
                 depends_on_json TEXT,
                 description TEXT,
+                unique_key TEXT,
                 updated_at TEXT
             );
             CREATE TABLE IF NOT EXISTS semantic_models (
@@ -145,6 +146,7 @@ class MetadataDB:
                 "ALTER TABLE ontology_links ADD COLUMN junction_table TEXT",
                 "ALTER TABLE ontology_links ADD COLUMN junction_source_key TEXT",
                 "ALTER TABLE ontology_links ADD COLUMN junction_target_key TEXT",
+                "ALTER TABLE dag_models_meta ADD COLUMN unique_key TEXT",
             ):
                 try:
                     conn.execute(stmt)
@@ -293,20 +295,22 @@ class MetadataDB:
         with self._lock:
             with self._get_conn() as conn:
                 conn.execute("""
-                INSERT INTO dag_models_meta (name, sql, materialization, depends_on_json, description, updated_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
+                INSERT INTO dag_models_meta (name, sql, materialization, depends_on_json, description, unique_key, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(name) DO UPDATE SET
                     sql=excluded.sql,
                     materialization=excluded.materialization,
                     depends_on_json=excluded.depends_on_json,
                     description=excluded.description,
+                    unique_key=excluded.unique_key,
                     updated_at=excluded.updated_at
                 """, (
                     model_dict["name"],
                     model_dict["sql"],
                     model_dict.get("materialization", "table"),
                     json.dumps(model_dict.get("depends_on", [])),
-                    model_dict.get("description", "")
+                    model_dict.get("description", ""),
+                    model_dict.get("unique_key"),
                 ))
 
     def list_dag_models(self) -> List[Dict[str, Any]]:
@@ -318,8 +322,15 @@ class MetadataDB:
                     "sql": r["sql"],
                     "materialization": r["materialization"],
                     "depends_on": json.loads(r["depends_on_json"] or "[]"),
-                    "description": r["description"]
+                    "description": r["description"],
+                    "unique_key": r["unique_key"] if "unique_key" in r.keys() else None,
                 } for r in rows]
+
+    def delete_dag_model(self, name: str) -> bool:
+        with self._lock:
+            with self._get_conn() as conn:
+                cur = conn.execute("DELETE FROM dag_models_meta WHERE name = ?", (name,))
+                return cur.rowcount > 0
 
     # --- Ontology Methods ---
     def save_ontology_object(self, obj_dict: Dict[str, Any]):

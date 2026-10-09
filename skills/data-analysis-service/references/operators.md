@@ -1,11 +1,11 @@
-# Operators Reference (21 Operators Across 6 MDS Layers)
+# Operators Reference (22 Operators Across 6 MDS Layers)
 
 ## 1. Ingestion & Pushdown Connectors
 * `connect_and_load_db`: Connects to PostgreSQL, MySQL, SQL Server, SQLite, Parquet/CSV via Rust ConnectorX with predicate & projection pushdown.
 
 ## 2. Profiling & Insights
-* `eda_profile`: Single-pass sufficient statistics (mean, std, P25, P50, P75, P95, P99, skewness, kurtosis, data quality score). Tables over 100,000 rows use `approx_count_distinct` and `approx_quantile`.
-* `detect_automated_insights`: 3-Sigma/Isolation Forest anomaly detection, temporal slope change points, Gini coefficient & Pareto 80/20.
+* `eda_profile`: Single-pass sufficient statistics (mean, std, P25, P50, P75, P95, P99, skewness, kurtosis, data quality score). Tables over 100,000 rows use `approx_count_distinct` and `approx_quantile`. Undefined skewness, kurtosis, and std stay null. When `quantile_method` is `quantile_cont`, p50 is `quantile_cont`.
+* `detect_automated_insights`: 3-Sigma/Isolation Forest anomaly detection, temporal slope change points, Gini coefficient & Pareto 80/20. REST exposes the same three operators at `POST /api/v1/insights/outliers`, `/trends`, and `/dominance`.
 
 ## 3. OLAP & Root-Cause Attribution
 * `memory_olap_aggregation`: Slice & Dice, Rollup, Cube multi-dimensional aggregations in memory.
@@ -13,14 +13,15 @@
 * `duckdb_sql_sandbox`: Safe read-only DuckDB SQL query execution sandbox.
 
 ## 4. SPSS Statistical Inference & Econometrics
-* `spss_hypothesis_test`: Independent t-test (Levene equality and Welch correction, Cohen's d), paired t-test on two numeric columns, one-way ANOVA (Tukey HSD and eta-squared), two-way ANOVA with `factor_b` (type II, including the interaction), chi-square (Cramér's V), Mann-Whitney U.
+* `variance_decomposition`: Law of total variance across categorical dimensions. Between and within sums of squares close. `sun_shapley` averages order-sensitive increments (at most 4 dimensions). Interaction is present only for a balanced two-dimension design.
+* `spss_hypothesis_test`: Independent t-test (Levene equality and Welch correction, Cohen's d), paired t-test on two numeric columns, one-way ANOVA (Tukey HSD, eta-squared, and `variance_decomposition`), two-way ANOVA with `factor_b` (type II, including the interaction, plus `variance_decomposition`), chi-square (Cramér's V), Mann-Whitney U (exactly 2 groups). More than 5,000,000 scanned cells returns 请先聚合再检验.
 * `spss_regression_analysis`: OLS multi-linear regression (R2, F-test, VIF multicollinearity, Durbin-Watson autocorrelation, Jarque-Bera normality) and Logistic regression.
 
 ## 5. Web Telemetry & User Analytics
 * `analyze_conversion_funnel`: Multi-step sequential windowed conversion rates and drop-off analysis.
 * `analyze_user_flow`: N-Gram page transition matrix with Sankey diagram topology.
 * `analyze_cohort_retention`: Cohort user retention heatmap matrix.
-* `analyze_page_performance`: PV, UV, average stay dwell seconds, and bounce rate.
+* `analyze_page_performance`: PV, UV, sessions, and average dwell seconds. There is no bounce-rate field.
 * `inspect_trace_and_replay`: OpenTelemetry span waterfall tree and interactive action breadcrumb timeline replay.
 
 ## 6. Modern Data Stack (Catalog, Transform, rETL, Quality)
@@ -29,7 +30,8 @@
 * `execute_data_cleaning`: Automated deduplication, missing value imputation (mean/median/mode/constant), and outlier clipping.
 * `run_dag_pipeline`: Topological DAG model execution using Kahn's algorithm with dependency-ordered materialization.
 * `reverse_sync_destination`: Reverse ETL sync of analytical tables/RFM scores back to target databases or files.
-* `export_audience_cohort`: Export specific audience segment to JSON/CSV for CRM activation.
-* `send_operational_webhook_alert`: Automated operational alert cards sent to Feishu, DingTalk, Slack, or Webhook.
+* `export_audience_cohort`: Export a segment to JSON/CSV. `total_audience_count` is the filtered total, `exported_count` is the page, and `truncated` records the limit.
+* `create_wide_table`: Join a fact table to dimension tables. The result includes `columns`.
+* `send_operational_webhook_alert`: Feishu post card, DingTalk markdown, Slack `text`, and WeCom markdown for `wecom`, `wechat`, `weixin`, `qywx`, `wxwork`, `wechat_work`. Failure is `FAILED` even when `simulated_payload` is present.
 * `assert_data_quality`: Great-Expectations style declarative assertions (nulls, uniqueness, ranges, row counts).
 * `detect_table_schema_drift`: Compare table schema against registered baseline to detect added, removed, or altered columns.

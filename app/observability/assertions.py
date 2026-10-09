@@ -131,6 +131,8 @@ class DataQualityAssertions:
             elif rtype == "row_count":
                 # uses _total_count
                 clause_map.append((idx, r, "row_count"))
+            else:
+                clause_map.append((idx, r, "unsupported"))
 
         consolidated_sql = f"SELECT {', '.join(agg_clauses)} FROM {safe_table_ref(table)}"
         row = con.execute(consolidated_sql, params).fetchone()
@@ -187,6 +189,14 @@ class DataQualityAssertions:
                     "max_rows": r["max_rows"],
                     "actual_rows": total_rows,
                     "passed": passed
+                })
+            else:
+                passed = False
+                results.append({
+                    "assertion": "unsupported_rule",
+                    "rule_type": r.get("type"),
+                    "passed": False,
+                    "message": "Rule type is not implemented. Supported: not_null, unique, between, row_count.",
                 })
 
             if passed:

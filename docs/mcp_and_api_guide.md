@@ -33,3 +33,37 @@
 ### OpenAPI 文档地址：
 * Swagger UI: `http://localhost:8000/docs`
 * OpenAPI JSON: `http://localhost:8000/openapi.json`
+
+---
+
+## 3. 输出契约（与当前实现一致）
+
+HTTP 分析端点使用 `AnalysisResponse`：`summary_text`、`statistics`、`chart_spec`、`data_preview`。MCP 把同一段叙述放在 `summary`，统计结果用各自的键（`statistics`、`model_report`、`forecast`、`funnel` 等）。
+
+已挂上的 `chart_spec`：
+
+| 结果 | 规格 |
+| :--- | :--- |
+| 归因 | Vega-Lite v5 瀑布，`$schema` 指向 v5，`y`/`y2` 为累计起止 |
+| 预测 | Vega-Lite 折线，预测段带 95% `errorband`。数据来自 `historical_preview` 与 `forecasts` |
+| 漏斗 | Vega-Lite 柱，步骤名 × `user_count`。REST 与漏斗字段同层；MCP 在 `funnel` 旁 |
+| 留存 | Vega-Lite 热力，把 `day_N.rate` 展成行。REST 与矩阵同层；MCP 在 `retention` 旁 |
+| 用户流 | ECharts sankey（`series.type=sankey`）。REST 与 `nodes`/`links` 同层；MCP 在 `user_flow` 旁 |
+
+回归结果没有观测点行，所以不会附上 `build_scatter_regression_chart`。页面指标没有跳出率，也没有图表 spec。
+
+叙述：EDA 会带上 `type_inference_sample_rows` 以及列上的 `distinct_count_method` / `quantile_method`。归因会带上 `method`，并在 `sun_shapley` 为空时直接说空。假设检验按返回的 `significant` 叙述，不把「不显著」写成 `p >= 0.05`。Logistic 用 Pseudo R² 与 LLR p，不用 OLS 的 R² / VIF 模板。
+
+`POST /api/v1/insights/outliers`、`/trends`、`/dominance` 调用与 MCP `detect_automated_insights` 相同的算子，响应是 `AnalysisResponse`（`statistics` 为完整结果，`data_preview` 为异常点、序列预览或头部贡献者）。MCP 仍把三项包在 `insights` 里。
+
+`POST /api/v1/tools/variance_decomposition` 与 MCP `variance_decomposition` 调用 `run_variance_decomposition`。HTTP 把算子字典放在 `statistics`。MCP 把同一字典放在 `variance_decomposition`，含 `evidence`。归因 MCP 另外返回 `evidence`；Laspeyres 仍只拆第一个维度。
+
+省略 Excel `sheet_name` 时读第一张工作表。工作表名不在文件里时，HTTP 返回 400。上传文件名只取 basename，路径里有 `..` 或绝对路径时拒绝。`connect`、文件导入、本体下钻和动作的 `ValueError` / `FileNotFoundError` 也是 400。
+
+`GET /api/v1/ontology/entity_graph` 与 MCP `ontology_entity_graph` 返回实体图。下钻请求带 `link_path` 和 `max_hops`。查询结果的 `matched_count` 是过滤后全量；下钻的 `truncated` 表示某一跳被 `limit` 截断。Webhook 失败即使带 `simulated_payload` 也是 `FAILED`。
+
+`POST /api/v1/transform/wide` 与 MCP `create_wide_table` 调用已有的 `Materializer.create_wide_table`。`reverse_sync` 接受 `chunk_size`。受众导出带 `exported_count` 和 `truncated`。DAG 同一阶段顺序执行，不是并发。
+
+质量规则只实现 `not_null`、`unique`、`between`、`row_count`。其余 type 记为失败的 `unsupported_rule`。
+
+本体查询：MCP 是 `{status, data}`，`instances` 在 `data` 里。REST 直接返回引擎对象。动作的 `dry_run`：MCP 默认 true，REST 默认 false。

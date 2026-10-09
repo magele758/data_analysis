@@ -13,6 +13,7 @@ from app.logging_setup import configure_logging
 # configure_logging() 默认写 stdout 会污染协议流，这里先导入模块让后续代码能用 logger
 configure_logging()
 from app.operators.eda import run_eda_profile
+from app.operators.variance import run_variance_decomposition
 from app.operators.correlation import run_correlation_analysis
 from app.operators.olap import run_olap_query, run_pivot_table
 from app.distributed_ops.dist_driver import DistributedDriverAnalysis
@@ -38,6 +39,7 @@ from app.catalog.meta_registry import get_meta_registry, TableAsset, ColumnMeta
 from app.catalog.lineage_tracker import get_lineage_tracker
 from app.catalog.semantic_store import get_semantic_store, MetricDefinition, SemanticModel, EntityRef
 from app.transform.data_cleaner import DataCleaner
+from app.transform.materializer import Materializer
 from app.transform.pipeline_dag import get_pipeline_engine, DAGModel
 from app.retl.destination_sync import DestinationSync
 from app.retl.audience_exporter import AudienceExporter
@@ -60,19 +62,22 @@ def connect_and_load_db(
     limit: Optional[int] = None,
     mode: str = "materialize"
 ) -> str:
-    mgr = SessionManager()
-    sess = mgr.get_or_create_session(session_id)
-    connector = ConnectorFactory.get_connector(conn_str)
-    arrow_table = connector.fetch_to_arrow(
-        query_or_table=query_or_table,
-        filter_sql=filter_sql,
-        select_cols=select_cols,
-        partition_col=partition_col,
-        num_partitions=num_partitions,
-        limit=limit,
-        mode=mode
-    )
-    meta = sess.register_dataset(dataset_name, arrow_table, {"conn_str": conn_str, "source": query_or_table})
+    try:
+        mgr = SessionManager()
+        sess = mgr.get_or_create_session(session_id)
+        connector = ConnectorFactory.get_connector(conn_str)
+        arrow_table = connector.fetch_to_arrow(
+            query_or_table=query_or_table,
+            filter_sql=filter_sql,
+            select_cols=select_cols,
+            partition_col=partition_col,
+            num_partitions=num_partitions,
+            limit=limit,
+            mode=mode,
+        )
+        meta = sess.register_dataset(dataset_name, arrow_table, {"conn_str": conn_str, "source": query_or_table})
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     
     # Auto-register into Data Catalog
     cat = get_meta_registry(sess.session_id)
@@ -98,7 +103,7 @@ def connect_and_load_db(
         "summary": f"Successfully loaded {meta.row_count:,} rows across {meta.column_count} columns into session '{sess.session_id}' (table '{dataset_name}')."
     }, ensure_ascii=False)
 
-@mcp.tool(name="eda_profile", description="Run comprehensive EDA data profiling, distribution statistics, and data quality scoring. Tables over 100,000 rows label distinct_count_method and quantile_method as approximate.")
+@mcp.tool(name="eda_profile", description="Run comprehensive EDA data profiling, distribution statistics, and data quality scoring. Tables over 100,000 rows label distinct_count_method and quantile_method as approximate. skewness, kurtosis, and std are null when the moment is undefined, not 0. When quantile_method is quantile_cont, p50 is also quantile_cont.")
 def eda_profile(session_id: str, dataset_name: str) -> str:
     res = run_eda_profile(session_id, dataset_name)
     summary = NarrativeBuilder.generate_eda_narrative(res)
@@ -153,10 +158,11 @@ def driver_attribution_analysis(
         "orderings_used": res.get("orderings_used"),
         "sun_shapley": res.get("sun_shapley"),
         "driver_hierarchy": res.get("hierarchy"),
-        "chart_spec": chart_spec
+        "chart_spec": chart_spec,
+        "evidence": res.get("evidence"),
     }, ensure_ascii=False)
 
-@mcp.tool(name="spss_hypothesis_test", description="Execute hypothesis tests: independent_t_test, paired_t_test, one_way_anova, two_way_anova (requires factor_b), chi_square, mann_whitney.")
+@mcp.tool(name="spss_hypothesis_test", description="Execute hypothesis tests: independent_t_test, paired_t_test, one_way_anova, two_way_anova (requires factor_b), chi_square, mann_whitney. one_way_anova and two_way_anova include statistics.variance_decomposition. mann_whitney errors unless there are exactly 2 groups. More than 5,000,000 scanned cells returns 请先聚合再检验.")
 def spss_hypothesis_test(
     session_id: str,
     dataset_name: str,
@@ -176,6 +182,17 @@ def spss_hypothesis_test(
         "statistics": res
     }, ensure_ascii=False)
 
+@mcp.tool(name="variance_decomposition", description="Decompose a numeric metric across categorical dimensions. Between-group and within-group sums of squares close. sun_shapley averages sequential increments over dimension order (at most 4 dimensions, 24 orderings). An interaction term is returned only for exactly two dimensions when the design is balanced.")
+def variance_decomposition(
+    session_id: str,
+    dataset_name: str,
+    metric: str,
+    dimensions: List[str],
+    filters: Optional[str] = None,
+) -> str:
+    res = run_variance_decomposition(session_id, dataset_name, metric, dimensions, filters)
+    return json.dumps({"status": "success", "variance_decomposition": res}, ensure_ascii=False)
+
 @mcp.tool(name="spss_regression_analysis", description="Run OLS or Logistic regression with full diagnostic battery (R2, F-test, VIF, DW residual test).")
 def spss_regression_analysis(
     session_id: str,
@@ -192,24 +209,36 @@ def spss_regression_analysis(
         "model_report": res
     }, ensure_ascii=False)
 
-@mcp.tool(name="detect_automated_insights", description="Detect anomaly outliers, temporal change points, and Gini dominance patterns.")
+@mcp.tool(name="detect_automated_insights", description="Detect anomaly outliers, temporal change points, and Gini dominance patterns. outlier_method is z_score, iqr, or isolation_forest. group_col is passed only to the trend action. top_k limits outliers and dominance.")
 def detect_automated_insights(
     session_id: str,
     dataset_name: str,
     metric: str,
     category_col: Optional[str] = None,
-    time_col: Optional[str] = None
+    time_col: Optional[str] = None,
+    outlier_method: str = "z_score",
+    threshold: float = 3.0,
+    dimension_cols: Optional[List[str]] = None,
+    top_k: int = 10,
+    group_col: Optional[str] = None,
 ) -> str:
     insights = {}
     if metric:
-        outliers = detect_outliers(session_id, dataset_name, metric)
-        insights["outliers"] = outliers
+        insights["outliers"] = detect_outliers(
+            session_id, dataset_name, metric,
+            dimension_cols=dimension_cols,
+            method=outlier_method,
+            threshold=threshold,
+            top_k=top_k,
+        )
     if category_col and metric:
-        dominance = detect_dominance(session_id, dataset_name, category_col, metric)
-        insights["dominance"] = dominance
+        insights["dominance"] = detect_dominance(
+            session_id, dataset_name, category_col, metric, top_k=top_k
+        )
     if time_col and metric:
-        trends = detect_trends(session_id, dataset_name, time_col, metric)
-        insights["trends"] = trends
+        insights["trends"] = detect_trends(
+            session_id, dataset_name, time_col, metric, group_col=group_col
+        )
 
     return json.dumps({"status": "success", "insights": insights}, ensure_ascii=False)
 
@@ -222,9 +251,14 @@ def memory_olap_aggregation(
     agg_funcs: Optional[List[str]] = None,
     filters: Optional[str] = None,
     rollup: bool = False,
+    cube: bool = False,
+    order_by: Optional[str] = None,
     limit: int = 100
 ) -> str:
-    res = run_olap_query(session_id, dataset_name, dimensions, metrics, agg_funcs, filters, rollup=rollup, limit=limit)
+    res = run_olap_query(
+        session_id, dataset_name, dimensions, metrics, agg_funcs, filters,
+        rollup=rollup, cube=cube, order_by=order_by, limit=limit,
+    )
     return json.dumps({"status": "success", "result": res}, ensure_ascii=False)
 
 @mcp.tool(name="duckdb_sql_sandbox", description="Execute read-only SQL directly against DuckDB in-memory session.")
@@ -252,10 +286,16 @@ def rfm_segmentation(session_id: str, dataset_name: str, user_col: str, date_col
     res = run_rfm_segmentation(session_id, dataset_name, user_col, date_col, amount_col)
     return json.dumps({"status": "success", "rfm": res}, ensure_ascii=False)
 
-@mcp.tool(name="timeseries_forecast", description="Time-series forecast (ARIMA-family) for a value column over a horizon.")
+@mcp.tool(name="timeseries_forecast", description="Time-series forecast (ARIMA-family) for a value column over a horizon. chart_spec is a Vega-Lite line with a 95% interval band built from historical_preview and forecasts.")
 def timeseries_forecast(session_id: str, dataset_name: str, time_col: str, value_col: str, horizon: int = 12, model_type: str = "arima") -> str:
     res = run_timeseries_forecast(session_id, dataset_name, time_col, value_col, horizon, model_type)
-    return json.dumps({"status": "success", "forecast": res}, ensure_ascii=False)
+    chart_spec = ChartSpecBuilder.build_time_series_forecast_chart(
+        res.get("historical_preview") or [],
+        res.get("forecasts") or [],
+        time_col,
+        value_col,
+    )
+    return json.dumps({"status": "success", "forecast": res, "chart_spec": chart_spec}, ensure_ascii=False)
 
 @mcp.tool(name="discover_insights", description="Automated insight discovery: orchestrates Analysis Actions (anomaly/correlation/dominance/trend) into ranked insights, an Insight Graph, and a data-story narrative. Rank is severity unless DATA_AGENT_LLM_BASE_URL is set, in which case the endpoint reorders ids from evidence fields and falls back to severity. Optional intent biases which actions run.")
 def discover_insights(session_id: str, dataset_name: str, intent: Optional[str] = None, target_metric: Optional[str] = None, category_col: Optional[str] = None, time_col: Optional[str] = None, max_insights: int = 8) -> str:
@@ -269,14 +309,14 @@ def import_traces(
     source: Optional[str] = None,
     dataset_name: str = "traces",
     session_id: Optional[str] = None,
-    fmt: Optional[str] = None
+    fmt: Optional[str] = None,
+    records: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_or_create_session(session_id)
-    arrow_table = TraceImporter.load_source(source=source, fmt=fmt)
+    arrow_table = TraceImporter.load_source(source=source, records=records, fmt=fmt)
     meta = sess.register_dataset(dataset_name, arrow_table, {"source": source, "kind": "trace"})
 
-    from app.catalog.meta_registry import get_meta_registry
     cat = get_meta_registry(sess.session_id)
     cols = [_CM(name=c, data_type="UNKNOWN") for c in meta.column_names]
     cat.register_table(_TA(
@@ -296,20 +336,23 @@ def import_traces(
 
 # ---------------- Trace / Web Analytics (on a session-resident table) ----------------
 
-@mcp.tool(name="analyze_conversion_funnel", description="Calculate sequential conversion funnel, drop-off and step conversion over a session-resident trace/event table.")
+@mcp.tool(name="analyze_conversion_funnel", description="Calculate sequential conversion funnel, drop-off and step conversion over a session-resident trace/event table. chart_spec is a Vega-Lite bar of step user counts.")
 def analyze_conversion_funnel(session_id: str, dataset_name: str, steps: List[str], date_from: Optional[str] = None, date_to: Optional[str] = None) -> str:
     res = calculate_funnel(session_id, dataset_name, steps, date_from, date_to)
-    return json.dumps({"status": "success", "funnel": res}, ensure_ascii=False)
+    chart_spec = ChartSpecBuilder.build_funnel_chart(res.get("steps") or [])
+    return json.dumps({"status": "success", "funnel": res, "chart_spec": chart_spec}, ensure_ascii=False)
 
-@mcp.tool(name="analyze_user_flow", description="Calculate page navigation transition matrix and Sankey nodes/links over a session-resident trace/event table.")
+@mcp.tool(name="analyze_user_flow", description="Calculate page navigation transition matrix and an ECharts Sankey option over a session-resident trace/event table.")
 def analyze_user_flow(session_id: str, dataset_name: str, limit_paths: int = 15) -> str:
     res = calculate_user_flow(session_id, dataset_name, limit_paths=limit_paths)
-    return json.dumps({"status": "success", "user_flow": res}, ensure_ascii=False)
+    chart_spec = ChartSpecBuilder.build_sankey_chart(res.get("nodes") or [], res.get("links") or [])
+    return json.dumps({"status": "success", "user_flow": res, "chart_spec": chart_spec}, ensure_ascii=False)
 
-@mcp.tool(name="analyze_cohort_retention", description="Calculate N-day cohort retention grid over a session-resident trace/event table.")
+@mcp.tool(name="analyze_cohort_retention", description="Calculate N-day cohort retention grid over a session-resident trace/event table. chart_spec is a Vega-Lite heatmap of day rates.")
 def analyze_cohort_retention(session_id: str, dataset_name: str, days: int = 7) -> str:
     res = calculate_retention(session_id, dataset_name, days=days)
-    return json.dumps({"status": "success", "retention": res}, ensure_ascii=False)
+    chart_spec = ChartSpecBuilder.build_retention_heatmap(res.get("retention_matrix") or [])
+    return json.dumps({"status": "success", "retention": res, "chart_spec": chart_spec}, ensure_ascii=False)
 
 @mcp.tool(name="analyze_page_performance", description="Calculate PV/UV and average dwell by page path over a session-resident trace/event table.")
 def analyze_page_performance(session_id: str, dataset_name: str, limit: int = 20) -> str:
@@ -342,7 +385,7 @@ def query_semantic_metric(
     versions = {name: store.metric_version(name) for name in metric_names}
     return json.dumps({"status": "success", "compiled_sql": sql, "result": res, "governed": True, "metric_versions": versions}, ensure_ascii=False)
 
-@mcp.tool(name="register_semantic_metric", description="Register a metric formula on a session table. Dimensions listed here are the only ones compile will accept for that metric.")
+@mcp.tool(name="register_semantic_metric", description="Register a metric formula on a session table. On the single-table compile path, a non-empty dimension list is a whitelist; an empty list does not restrict the caller. A registered semantic model uses the governed join path.")
 def register_semantic_metric(
     session_id: str,
     name: str,
@@ -430,7 +473,24 @@ def execute_data_cleaning(
     res = DataCleaner.clean_table(con, source_table, target_table, dedup_keys, fillna_rules, outlier_clip_cols)
     return json.dumps({"status": "success", "cleaning_result": res}, ensure_ascii=False)
 
-@mcp.tool(name="run_dag_pipeline", description="Execute dbt-style topological DAG SQL transformation pipeline.")
+@mcp.tool(name="create_wide_table", description="Join a fact table to dimension tables into one wide table. Returns wide_table_name, row_count, and columns.")
+def create_wide_table(
+    session_id: str,
+    target_name: str,
+    fact_table: str,
+    dimension_joins: List[Dict[str, Any]],
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_session(session_id)
+    if not sess:
+        return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
+    try:
+        res = Materializer.create_wide_table(sess.get_duckdb_conn(), target_name, fact_table, dimension_joins)
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
+    return json.dumps({"status": "success", "wide_table": res}, ensure_ascii=False)
+
+@mcp.tool(name="run_dag_pipeline", description="Execute a dbt-style DAG. Models in the same stage run one after another on the session connection, not concurrently.")
 def run_dag_pipeline(session_id: str) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
@@ -447,17 +507,23 @@ def reverse_sync_destination(
     source_table: str,
     dest_conn_str: str,
     dest_table_name: str,
-    mode: str = "replace"
+    mode: str = "replace",
+    chunk_size: int = 50000,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
     if not sess:
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
-    res = DestinationSync.sync_table_to_destination(con, source_table, dest_conn_str, dest_table_name, mode)
+    try:
+        res = DestinationSync.sync_table_to_destination(
+            con, source_table, dest_conn_str, dest_table_name, mode, chunk_size=chunk_size,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "sync_result": res}, ensure_ascii=False)
 
-@mcp.tool(name="export_audience_cohort", description="Export specific audience segment or churn-risk users to JSON or CSV for CRM/marketing activation.")
+@mcp.tool(name="export_audience_cohort", description="Export an audience segment to JSON or CSV. total_audience_count is the filtered total. exported_count is the returned page. truncated is true when the page is shorter than the total.")
 def export_audience_cohort(
     session_id: str,
     source_table: str,
@@ -474,7 +540,7 @@ def export_audience_cohort(
     res = AudienceExporter.export_cohort(con, source_table, filter_sql, export_columns, format_type, limit)
     return json.dumps({"status": "success", "audience": res}, ensure_ascii=False)
 
-@mcp.tool(name="send_operational_webhook_alert", description="Send automated operational alerts or attribution findings to Feishu, DingTalk, Slack, or Webhook.")
+@mcp.tool(name="send_operational_webhook_alert", description="Send an alert. feishu is a post card, dingtalk and slack have their own bodies. wecom, wechat, weixin, qywx, wxwork, and wechat_work send WeCom markdown. Any other platform sends generic JSON. A failed send is status FAILED and still includes simulated_payload.")
 def send_operational_webhook_alert(
     webhook_url: str,
     title: str,
@@ -531,7 +597,7 @@ def ontology_query_objects(
     res = engine.query_object_instances(con, object_type, filters, properties, limit)
     return json.dumps({"status": "success", "data": res}, ensure_ascii=False)
 
-@mcp.tool(name="ontology_traverse_links", description="Graph-traverse from a source entity instance along relation links to discover connected business entities.")
+@mcp.tool(name="ontology_traverse_links", description="Graph-traverse from a source entity instance along relation links. link_path and max_hops are passed through. The traversal includes hop_details and truncated.")
 def ontology_traverse_links(
     session_id: str,
     source_object_type: str,
@@ -539,6 +605,7 @@ def ontology_traverse_links(
     link_name: str,
     limit: int = 50,
     link_path: Optional[List[str]] = None,
+    max_hops: int = 4,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
@@ -546,12 +613,21 @@ def ontology_traverse_links(
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
     engine = get_ontology_engine()
-    res = engine.traverse_links(
-        con, source_object_type, source_instance_id, link_name, limit, link_path=link_path
-    )
+    try:
+        res = engine.traverse_links(
+            con, source_object_type, source_instance_id, link_name, limit,
+            link_path=link_path, max_hops=max_hops,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "traversal": res}, ensure_ascii=False)
 
-@mcp.tool(name="ontology_execute_action", description="Execute an atomic business action on an entity instance with audit logging. dry_run defaults to true so a tool call previews the action before it writes.")
+@mcp.tool(name="ontology_entity_graph", description="Return the ontology entity graph: nodes, edges, and broken_edges whose endpoints are not registered.")
+def ontology_entity_graph() -> str:
+    graph = get_ontology_engine().entity_graph()
+    return json.dumps({"status": "success", "entity_graph": graph}, ensure_ascii=False)
+
+@mcp.tool(name="ontology_execute_action", description="Execute an atomic business action on an entity instance with audit logging. dry_run defaults to true so a tool call previews the action before it writes. A webhook push that returns FAILED is audited as FAILED even when the result still carries simulated_payload.")
 def ontology_execute_action(
     session_id: str,
     action_name: str,
@@ -565,11 +641,14 @@ def ontology_execute_action(
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
     engine = get_ontology_engine()
-    audit = engine.execute_action(con, action_name, instance_id, parameters, dry_run)
+    try:
+        audit = engine.execute_action(con, action_name, instance_id, parameters, dry_run)
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "action_audit": audit}, ensure_ascii=False)
 
 
-@mcp.tool(name="import_excel_or_csv", description="High-performance ingestion of large Excel (.xlsx, .xls) and CSV files into memory with zero copy.")
+@mcp.tool(name="import_excel_or_csv", description="Ingest .xlsx or CSV into a session. Omitting sheet_name reads the first worksheet. A sheet name that is not in the workbook is an error. Legacy .xls is rejected.")
 def import_excel_or_csv(
     file_path: str,
     dataset_name: str,
@@ -577,15 +656,18 @@ def import_excel_or_csv(
     sheet_name: Optional[str] = None,
     limit: Optional[int] = None
 ) -> str:
-    mgr = SessionManager()
-    sess = mgr.get_or_create_session(session_id)
-    conn_str = f"file://{file_path}"
-    connector = ConnectorFactory.get_connector(conn_str)
-    arrow_table = connector.fetch_to_arrow(
-        query_or_table=sheet_name or "Sheet1",
-        limit=limit
-    )
-    meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": file_path})
+    try:
+        mgr = SessionManager()
+        sess = mgr.get_or_create_session(session_id)
+        conn_str = f"file://{file_path}"
+        connector = ConnectorFactory.get_connector(conn_str)
+        arrow_table = connector.fetch_to_arrow(
+            query_or_table=sheet_name or "",
+            limit=limit
+        )
+        meta = sess.register_dataset(dataset_name, arrow_table, {"source_file": file_path})
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
 
     # Register into Catalog
     cat = get_meta_registry(sess.session_id)

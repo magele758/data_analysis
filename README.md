@@ -40,7 +40,7 @@
 
 ### 3. ETL / ELT 转换与建模引擎 (`app/transform/`)
 * **自动化数据清洗**：去重、空值智能填充（均值/中位数/众数/常数）、极值缩尾截断。
-* **事务性与分层并行 SQL DAG 编排**：基于 Kahn 拓扑排序算法，同层模型并发物化，采用影子表原子切换（Staging Swap）与失败自动回滚。
+* **事务性 SQL DAG 编排**：基于 Kahn 拓扑排序算法，同一阶段的模型在一条 DuckDB 连接上顺序物化，采用影子表原子切换（Staging Swap）与失败自动回滚。
 
 ### 4b. Insight Copilot（自动洞察发现编排层, `app/copilot/`）
 * **`discover_insights`**：把 EDA/异常/相关/集中/趋势等确定性算子当作 **Analysis Actions** 编排，产出 ①排序后的结构化洞察 ②**洞察图谱 (Insight Graph)** ——洞察间关系网络 ③**数据叙事 (data story)**。可选 `intent` 轻量偏置要跑的动作。默认按严重度排序。配置 `DATA_AGENT_LLM_BASE_URL` 后，模型只收到 id、标题、严重度和证据字段，并返回一组 id 作为新顺序；失败时退回严重度。语义理解和多智能体推理仍由调用方 Agent 负责。
