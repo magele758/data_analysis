@@ -180,6 +180,14 @@ def test_rest_attaches_chart_specs_beside_existing_fields():
     assert funnel_body["initial_users"] == 1
     assert funnel_body["chart_spec"]["$schema"].endswith("vega-lite/v5.json")
 
+    retention = client.get("/api/v1/analytics/retention", params={
+        "session_id": "proto_out_sess", "dataset_name": "proto_traces", "days": 1,
+    })
+    assert retention.status_code == 200
+    retention_body = retention.json()
+    assert "retention_matrix" in retention_body
+    assert retention_body["chart_spec"]["mark"] == "rect"
+
     con = sess.get_duckdb_conn()
     con.execute("CREATE TABLE proto_driver (month INT, region VARCHAR, profit DOUBLE)")
     con.execute("INSERT INTO proto_driver VALUES (1, 'East', 10), (2, 'East', 4)")
@@ -195,3 +203,21 @@ def test_rest_attaches_chart_specs_beside_existing_fields():
     driver_body = driver.json()
     assert driver_body["chart_spec"]["$schema"].endswith("vega-lite/v5.json")
     assert "additive_contribution" in driver_body["summary_text"]
+
+    con.execute("CREATE TABLE proto_ts (day VARCHAR, amount DOUBLE)")
+    con.execute(
+        "INSERT INTO proto_ts VALUES "
+        + ", ".join(f"('2024-01-{day:02d}', {float(day)})" for day in range(1, 13))
+    )
+    forecast = client.post("/api/v1/tools/timeseries", json={
+        "session_id": "proto_out_sess",
+        "dataset_name": "proto_ts",
+        "time_col": "day",
+        "value_col": "amount",
+        "horizon": 2,
+        "model_type": "arima",
+    })
+    assert forecast.status_code == 200
+    forecast_body = forecast.json()
+    assert forecast_body["chart_spec"]["layer"][0]["mark"]["type"] == "errorband"
+    assert forecast_body["statistics"]["forecasts"]
