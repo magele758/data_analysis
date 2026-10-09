@@ -17,6 +17,7 @@ keyword bias, not full NLU.
 
 from typing import Any, Dict, List, Optional
 
+from app.copilot.llm_ranker import rank_insights
 from app.operators.eda import run_eda_profile
 from app.operators.correlation import run_correlation_analysis
 from app.operators.insights.outliers import detect_outliers
@@ -167,7 +168,7 @@ def discover_insights(
             except Exception as exc:
                 _fail("trend", m, exc)
 
-    insights.sort(key=lambda x: x["severity"], reverse=True)
+    insights, rank_meta = rank_insights(insights)
     insights = insights[:max_insights]
 
     graph = _build_graph(insights)
@@ -182,6 +183,8 @@ def discover_insights(
         "insight_graph": graph,
         "narrative": narrative,
         "caveats": caveats,
+        "ranking_method": rank_meta["ranking_method"],
+        "ranking_caveat": rank_meta["caveat"],
     }
 
 

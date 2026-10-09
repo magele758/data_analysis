@@ -43,12 +43,12 @@
 * **事务性与分层并行 SQL DAG 编排**：基于 Kahn 拓扑排序算法，同层模型并发物化，采用影子表原子切换（Staging Swap）与失败自动回滚。
 
 ### 4b. Insight Copilot（自动洞察发现编排层, `app/copilot/`）
-* **`discover_insights`**：把 EDA/异常/相关/集中/趋势等确定性算子当作 **Analysis Actions** 编排，产出 ①排序后的结构化洞察 ②**洞察图谱 (Insight Graph)** ——洞察间关系网络 ③**数据叙事 (data story)**。可选 `intent` 轻量偏置要跑的动作。这是新一代自动洞察范式（InsightPilot / DataSage 风格）中**可本地确定性实现**的部分；语义意图理解与多智能体推理交给调用方 Agent（符合"算法本地自研、LLM 高层编排"的边界）。
+* **`discover_insights`**：把 EDA/异常/相关/集中/趋势等确定性算子当作 **Analysis Actions** 编排，产出 ①排序后的结构化洞察 ②**洞察图谱 (Insight Graph)** ——洞察间关系网络 ③**数据叙事 (data story)**。可选 `intent` 轻量偏置要跑的动作。默认按严重度排序。配置 `DATA_AGENT_LLM_BASE_URL` 后，模型只收到 id、标题、严重度和证据字段，并返回一组 id 作为新顺序；失败时退回严重度。语义理解和多智能体推理仍由调用方 Agent 负责。
 
 ### 4. 专业数理统计、异动归因与自动化洞察
 * **SPSS 级假设检验**：独立/配对 t 检验（Levene 方差齐性与 Welch 校正）、单因素 ANOVA + Tukey HSD、双因素 ANOVA（含交互项）、卡方独立性检验。
 * **计量经济学回归**：OLS 多元回归全报告（$R^2$、F检验、VIF 多重共线性预警、Durbin-Watson 残差检验）。
-* **波动下钻归因**：差异分解树。SUM 指标用可闭合的加法贡献；比率×数量用 Laspeyres 分解（量、率、交互项）。这不是 Shapley 值。自动输出瀑布图。
+* **波动下钻归因**：差异分解树。SUM 指标用可闭合的加法贡献，并给出维度排列的 Sun-Shapley 平均。比率×数量只拆第一个维度，同时给出 Laspeyres（量、率、交互项）和两种因子顺序的 Sun-Shapley。自动输出瀑布图。
 * **数据挖掘与洞察**：3-Sigma/孤立森林异常点检测、时序突变拐点、基尼/帕累托集中度、KMeans 聚类与 RFM 客户价值模型。
 
 ### 5. Reverse ETL 与业务数据激活 (`app/retl/`)

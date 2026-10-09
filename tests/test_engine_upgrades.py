@@ -1,6 +1,7 @@
 """Contracts added with the engine upgrade. Existing suites keep their own asserts."""
 import json
 
+import duckdb
 import pyarrow as pa
 import pytest
 
@@ -526,10 +527,15 @@ def test_regression_asks_to_aggregate_before_a_wide_fit(con):
 def test_large_table_distinct_is_approximate(con):
     from app.distributed_ops.dist_eda import DistributedEDA
 
-    con.execute("CREATE OR REPLACE TABLE wide_card AS SELECT i AS id, i % 7 AS bucket FROM range(100001) t(i)")
+    con.execute(
+        "CREATE OR REPLACE TABLE wide_card AS "
+        "SELECT i AS id, i % 7 AS bucket, i * 1.0 AS amount FROM range(100001) t(i)"
+    )
     report = DistributedEDA.profile_table(con, "wide_card")
     assert report["columns"]["id"]["distinct_count_method"] == "approx_count_distinct"
     assert report["columns"]["id"]["distinct_count"] > 0
+    assert report["columns"]["amount"]["quantile_method"] == "approx_quantile"
+    assert any("approx_quantile" in item for item in report["evidence"]["caveats"])
 
 
 def test_forecast_counts_a_missing_month(con):
@@ -567,3 +573,127 @@ def test_erp_seed_revenue_locks(con):
     value = con.execute(sql).fetchone()[0]
     assert abs(float(value) - 4616575.71) < 0.02
     assert store.metric_version("erp_sales_amount")
+
+
+def test_sun_shapley_averages_factor_orders_and_sum_dimensions(con):
+    ratio = DistributedDriverAnalysis.analyze_driver(
+        con, "upgrade_price", "price", ["region"], "month = 1", "month = 2",
+        rate_col="price", volume_col="qty",
+    )
+    branch = ratio["hierarchy"][0]["branches"][0]
+    assert branch["volume_effect"] == 10.0
+    assert branch["rate_effect"] == 4.0
+    assert branch["interaction_effect"] == 2.0
+    assert branch["shapley_volume_effect"] == 11.0
+    assert branch["shapley_rate_effect"] == 5.0
+    assert abs(branch["shapley_volume_effect"] + branch["shapley_rate_effect"] - branch["diff_value"]) < 0.05
+    assert ratio["orderings_used"] == 1
+    assert ratio["sun_shapley"]["orderings_used"] == 2
+    assert ratio["sun_shapley"]["closes"] is True
+    assert ratio["method"] == "laspeyres_rate_volume"
+
+    summed = DistributedDriverAnalysis.analyze_driver(
+        con, "upgrade_sales", "profit", ["region", "category"], "month = 1", "month = 2", top_k=3
+    )
+    assert summed["hierarchy"][0]["dimension_level"] == "region"
+    assert summed["hierarchy"][1]["top_negative_drivers"][0]["dimension_value"] == "East / Digital"
+    shapley = summed["sun_shapley"]
+    assert shapley["orderings_used"] == 2
+    assert shapley["order_invariant"] is True
+    region = next(item for item in shapley["dimensions"] if item["dimension"] == "region")
+    east = next(item for item in region["branches"] if item["dimension_value"] == "East")
+    assert east["diff_value"] == -2500.0
+
+    from app.mcp_server import driver_attribution_analysis
+
+    tool_payload = json.loads(driver_attribution_analysis(
+        SID, "upgrade_price", "price", ["region"], "month = 1", "month = 2",
+        rate_col="price", volume_col="qty",
+    ))
+    assert tool_payload["method"] == "laspeyres_rate_volume"
+    assert tool_payload["orderings_used"] == 1
+    assert tool_payload["sun_shapley"]["orderings_used"] == 2
+    assert tool_payload["sun_shapley"]["closes"] is True
+    assert tool_payload["driver_hierarchy"][0]["branches"][0]["volume_effect"] == 10.0
+
+    deeper = DistributedDriverAnalysis.analyze_driver(
+        con, "upgrade_price", "price", ["region", "month"], "month = 1", "month = 2",
+        rate_col="price", volume_col="qty",
+    )
+    assert len(deeper["hierarchy"]) == 1
+    assert deeper["hierarchy"][0]["dimension_level"] == "region"
+    assert any("first dimension" in item for item in deeper["evidence"]["caveats"])
+
+
+def test_partition_merge_matches_one_duckdb_scan(con, monkeypatch):
+    from app.distributed_ops.ray_exec import pearson_partition
+
+    def local_only(tasks):
+        return [pearson_partition(task) for task in tasks], "local"
+
+    monkeypatch.setattr("app.distributed_ops.ray_exec.run_partition_tasks", local_only)
+    monkeypatch.setattr(settings, "RAY_ENABLED", False)
+    single = run_correlation_analysis(SID, "upgrade_corr", columns=["x", "y"])
+    monkeypatch.setattr(settings, "RAY_ENABLED", True)
+    monkeypatch.setattr(settings, "RAY_MIN_ROWS", 1)
+    monkeypatch.setattr(settings, "RAY_PARTITIONS", 3)
+    parted = run_correlation_analysis(SID, "upgrade_corr", columns=["x", "y"])
+    note = next(item for item in parted["evidence"]["caveats"] if "partitions" in item)
+    assert "backend=" in note
+    assert parted["sample_size"] == single["sample_size"]
+    for left, right in zip(single["matrix"], parted["matrix"]):
+        for cell, other in zip(left, right):
+            assert abs(cell["r"] - other["r"]) < 1e-4
+
+
+def test_parquet_hash_slices_add_up_to_one_scan(tmp_path):
+    from app.distributed_ops.ray_exec import merge_sum_rows, pearson_partition
+
+    path = tmp_path / "cols.parquet"
+    scan = duckdb.connect()
+    scan.execute(
+        f"COPY (SELECT i AS x, i * 2.0 AS y FROM range(40) t(i)) TO '{path.as_posix()}' (FORMAT PARQUET)"
+    )
+    tasks = [
+        {"parquet": str(path), "part": index, "parts": 4, "columns": ["x", "y"]}
+        for index in range(4)
+    ]
+    merged = merge_sum_rows([pearson_partition(task) for task in tasks])
+    direct = scan.execute("SELECT COUNT(*), SUM(x), SUM(y), SUM(x * y) FROM read_parquet(?)", [str(path)]).fetchone()
+    assert int(merged["__n"]) == int(direct[0])
+    assert abs(merged["__s0"] - float(direct[1])) < 1e-6
+    assert abs(merged["__s1"] - float(direct[2])) < 1e-6
+    assert abs(merged["__sp0_1"] - float(direct[3])) < 1e-6
+    scan.close()
+
+
+def test_llm_rank_reorders_ids_and_falls_back(monkeypatch):
+    from app.copilot.llm_ranker import rank_insights
+
+    insights = [
+        {"id": "i0", "type": "anomaly", "title": "wide", "severity": 0.9, "statement": "a", "subject": {"columns": ["x"]}, "evidence": {"operator": "outliers", "rows_used": 10, "caveats": []}},
+        {"id": "i1", "type": "correlation", "title": "tight", "severity": 0.2, "statement": "b", "subject": {"columns": ["y"]}, "evidence": {"operator": "correlation_analysis", "method": "pearson", "rows_used": 10, "caveats": ["Pearson r is a linear association."]}},
+    ]
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "")
+    ranked, meta = rank_insights(insights)
+    assert meta["ranking_method"] == "severity"
+    assert [item["id"] for item in ranked] == ["i0", "i1"]
+
+    def transport(brief):
+        dumped = json.dumps(brief)
+        assert "statement" not in dumped
+        assert "9999" not in dumped
+        return ["i1", "i0"]
+
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "http://127.0.0.1:9")
+    ranked, meta = rank_insights(insights, transport=transport)
+    assert meta["ranking_method"] == "llm"
+    assert [item["id"] for item in ranked] == ["i1", "i0"]
+
+    def boom(_brief):
+        raise TimeoutError("slow")
+
+    ranked, meta = rank_insights(insights, transport=boom)
+    assert meta["ranking_method"] == "severity"
+    assert ranked[0]["id"] == "i0"
+    assert "TimeoutError" in meta["caveat"]

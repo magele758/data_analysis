@@ -4,12 +4,12 @@
 * `connect_and_load_db`: Connects to PostgreSQL, MySQL, SQL Server, SQLite, Parquet/CSV via Rust ConnectorX with predicate & projection pushdown.
 
 ## 2. Profiling & Insights
-* `eda_profile`: Single-pass sufficient statistics (mean, std, P25, P50, P75, P95, P99, skewness, kurtosis, data quality score).
+* `eda_profile`: Single-pass sufficient statistics (mean, std, P25, P50, P75, P95, P99, skewness, kurtosis, data quality score). Tables over 100,000 rows use `approx_count_distinct` and `approx_quantile`.
 * `detect_automated_insights`: 3-Sigma/Isolation Forest anomaly detection, temporal slope change points, Gini coefficient & Pareto 80/20.
 
 ## 3. OLAP & Root-Cause Attribution
 * `memory_olap_aggregation`: Slice & Dice, Rollup, Cube multi-dimensional aggregations in memory.
-* `driver_attribution_analysis`: Hierarchical deviation tree. SUM uses a closed additive contribution. `rate_col` + `volume_col` uses a Laspeyres rate/volume split (volume, rate, interaction). Not a Shapley value. Waterfall chart spec is built from the first level.
+* `driver_attribution_analysis`: Hierarchical deviation tree. SUM uses a closed additive contribution and a `sun_shapley` average over dimension permutations. Other aggregations set `sun_shapley` to null. `rate_col` + `volume_col` keeps the Laspeyres split on the first dimension only and adds a two-ordering Sun-Shapley of rate and volume. Waterfall chart spec is built from the first level.
 * `duckdb_sql_sandbox`: Safe read-only DuckDB SQL query execution sandbox.
 
 ## 4. SPSS Statistical Inference & Econometrics

@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 
 import duckdb
 
+from app.distributed_ops.sun_shapley import average_member_diffs, two_factor_shapley
 from app.engine.evidence import Stopwatch, evidence
 from app.engine.sql_guard import safe_ident, safe_predicate, safe_table_ref
 
@@ -12,9 +13,10 @@ class DistributedDriverAnalysis:
     """Hierarchical fluctuation breakdown.
 
     SUM metrics use an additive contribution that closes: at every level the
-    child diffs sum to the parent diff. That is not a Shapley value. A ratio of
-    rate and volume uses a Laspeyres split (volume, rate, interaction) and is
-    labeled as such.
+    child diffs sum to the parent diff. The hierarchy follows the caller order.
+    sun_shapley is a separate average: two factor orders for rate x volume, and
+    dimension permutations for an additive SUM. A ratio of rate and volume also
+    keeps the Laspeyres split (volume, rate, interaction).
     """
 
     @classmethod
@@ -55,7 +57,7 @@ class DistributedDriverAnalysis:
 
         method = "additive_contribution" if func == "SUM" else "level_comparison"
         caveats: List[str] = [
-            "orderings_used is 1. The drill follows the caller dimension order. Sun-Shapley across permutations is not computed."
+            "orderings_used is 1. The hierarchy follows the caller dimension order."
         ]
         if func != "SUM":
             caveats.append(
@@ -127,6 +129,12 @@ class DistributedDriverAnalysis:
                 "branches": layer_items[: top_k * 2],
             })
 
+        sun_shapley = None
+        if func == "SUM" and dimension_path:
+            sun_shapley = cls._sum_sun_shapley(
+                con, table_ref, metric_col, dimension_path, base_filter, current_filter, func, diff_total, sqls, caveats
+            )
+
         return {
             "target_metric": target_metric,
             "method": method,
@@ -135,6 +143,7 @@ class DistributedDriverAnalysis:
             "diff_total": round(diff_total, 2),
             "growth_rate_pct": round(growth_rate, 2),
             "orderings_used": 1,
+            "sun_shapley": sun_shapley,
             "hierarchy": hierarchy,
             "evidence": evidence(
                 operator="driver_attribution_analysis",
@@ -144,6 +153,71 @@ class DistributedDriverAnalysis:
                 caveats=caveats,
             ),
         }
+
+    @classmethod
+    def _sum_sun_shapley(
+        cls, con, table_ref, metric_col, dimension_path, base_filter, current_filter, func, diff_total, sqls, caveats,
+    ) -> Dict[str, Any]:
+        member_diffs: Dict[str, Dict[str, float]] = {}
+        for dim in dimension_path:
+            grouped, grouped_sql = cls._grouped_diffs(
+                con, table_ref, metric_col, dim, base_filter, current_filter, func
+            )
+            member_diffs[dim] = grouped
+            sqls.append(grouped_sql)
+        averaged, used, skipped = average_member_diffs(member_diffs)
+        if skipped:
+            caveats.append(
+                "Sun-Shapley enumerated the first 4 dimensions (24 orderings). Further dimensions stay in the hierarchy only."
+            )
+        invariant = True
+        dimensions = []
+        for dim, values in averaged.items():
+            branches = []
+            for value, diff in sorted(values.items(), key=lambda item: abs(item[1]), reverse=True):
+                raw = member_diffs[dim].get(value, 0.0)
+                if abs(diff - raw) > 1e-6:
+                    invariant = False
+                ratio = (diff / diff_total) if diff_total else 0.0
+                branches.append({
+                    "dimension_value": value,
+                    "diff_value": round(diff, 2),
+                    "contribution_ratio": round(ratio, 4),
+                })
+            dimensions.append({"dimension": dim, "branches": branches[:50]})
+        caveats.append(
+            "sun_shapley averages an additive SUM over dimension permutations. "
+            f"orderings_used is {used}. A pure SUM member diff does not depend on order, so the average equals the standalone diff."
+            if invariant else
+            "sun_shapley averages an additive SUM over dimension permutations. "
+            f"orderings_used is {used}."
+        )
+        return {
+            "method": "sun_shapley",
+            "orderings_used": used,
+            "order_invariant": invariant,
+            "dimensions": dimensions,
+        }
+
+    @classmethod
+    def _grouped_diffs(cls, con, table_ref, metric_col, dim, base_filter, current_filter, func):
+        dim_sql = safe_ident(dim)
+        sql = f"""
+        WITH base_agg AS (
+            SELECT {dim_sql} AS dim_val, {func}({metric_col}) AS base_val
+            FROM {table_ref} WHERE {base_filter} GROUP BY 1
+        ),
+        curr_agg AS (
+            SELECT {dim_sql} AS dim_val, {func}({metric_col}) AS curr_val
+            FROM {table_ref} WHERE {current_filter} GROUP BY 1
+        )
+        SELECT COALESCE(c.dim_val, b.dim_val),
+               COALESCE(c.curr_val, 0) - COALESCE(b.base_val, 0)
+        FROM curr_agg c
+        FULL OUTER JOIN base_agg b ON c.dim_val IS NOT DISTINCT FROM b.dim_val
+        """
+        rows = con.execute(sql).fetchall()
+        return {str(value): float(diff or 0.0) for value, diff in rows}, sql
 
     @classmethod
     def _laspeyres(
@@ -185,11 +259,21 @@ class DistributedDriverAnalysis:
         rows = con.execute(sql).fetchall()
         items = []
         base_total = curr_total = 0.0
+        shapley_volume_total = shapley_rate_total = 0.0
+        caveats = [
+            "Laspeyres split is an accounting identity for rate x volume, not a causal effect.",
+            "structure_effect is the price-volume cross term. orderings_used is 1 for that Laspeyres view.",
+            "sun_shapley averages the two factor orders and splits the cross term evenly. orderings_used there is 2.",
+            "This split uses the first dimension only. Later names are not drilled.",
+        ]
         for dim_val, v0, v1, p0, p1, q0, q1 in rows:
             v0, v1, p0, p1, q0, q1 = map(float, (v0, v1, p0, p1, q0, q1))
             volume_effect = p0 * (q1 - q0)
             rate_effect = q0 * (p1 - p0)
             interaction = (p1 - p0) * (q1 - q0)
+            shapley_volume, shapley_rate = two_factor_shapley(p0, p1, q0, q1)
+            shapley_volume_total += shapley_volume
+            shapley_rate_total += shapley_rate
             items.append({
                 "dimension": dim,
                 "dimension_value": str(dim_val),
@@ -200,6 +284,8 @@ class DistributedDriverAnalysis:
                 "rate_effect": round(rate_effect, 2),
                 "interaction_effect": round(interaction, 2),
                 "structure_effect": round(interaction, 2),
+                "shapley_volume_effect": round(shapley_volume, 2),
+                "shapley_rate_effect": round(shapley_rate, 2),
                 "is_positive_driver": (v1 - v0) > 0,
             })
             base_total += v0
@@ -210,6 +296,14 @@ class DistributedDriverAnalysis:
             item["contribution_ratio"] = round(ratio, 4)
             item["contribution_percentage"] = round(ratio * 100, 2)
         items.sort(key=lambda it: abs(it["diff_value"]), reverse=True)
+        sun_shapley = {
+            "method": "sun_shapley",
+            "orderings_used": 2,
+            "factors": ["volume", "rate"],
+            "volume_effect": round(shapley_volume_total, 2),
+            "rate_effect": round(shapley_rate_total, 2),
+            "closes": abs((shapley_volume_total + shapley_rate_total) - diff_total) < 0.05,
+        }
         return {
             "target_metric": target_metric,
             "method": "laspeyres_rate_volume",
@@ -218,6 +312,7 @@ class DistributedDriverAnalysis:
             "diff_total": round(diff_total, 2),
             "growth_rate_pct": round((diff_total / abs(base_total)) * 100, 2) if base_total else 0.0,
             "orderings_used": 1,
+            "sun_shapley": sun_shapley,
             "hierarchy": [{
                 "dimension_level": dim,
                 "all_branches_count": len(items),
@@ -232,9 +327,6 @@ class DistributedDriverAnalysis:
                 method="laspeyres_rate_volume",
                 sql=[sql],
                 duration_ms=clock.ms(),
-                caveats=[
-                    "Laspeyres split is an accounting identity for rate x volume, not a causal effect.",
-                    "structure_effect is the price-volume cross term. orderings_used is 1: only the first dimension is split, and Sun-Shapley is not computed.",
-                ],
+                caveats=caveats,
             ),
         }

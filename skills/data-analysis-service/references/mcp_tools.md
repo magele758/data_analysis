@@ -13,7 +13,7 @@ Catalog / metrics / DAG / lineage are scoped per `session_id` (isolated across s
 | `ontology_traverse_links` | Ontology | `session_id`, `source_object_type`, `source_instance_id`, `link_name`, `link_path` | `status`, `traversal` (linked instances, hops, path) |
 | `ontology_execute_action` | Ontology | `session_id`, `action_name`, `instance_id`, `parameters`, `dry_run` (default true) | `status`, `action_audit` |
 | `eda_profile` | Profiling | `session_id`, `dataset_name` | `summary`, `quality_score`, `total_rows`, `columns` |
-| `driver_attribution_analysis` | Attribution | `session_id`, `dataset_name`, `target_metric`, `dimension_path`, `base_filter`, `current_filter`, `rate_col`, `volume_col` | `summary`, `driver_hierarchy`, `chart_spec` |
+| `driver_attribution_analysis` | Attribution | `session_id`, `dataset_name`, `target_metric`, `dimension_path`, `base_filter`, `current_filter`, `rate_col`, `volume_col` | `summary`, `method`, `orderings_used`, `sun_shapley`, `driver_hierarchy`, `chart_spec` |
 | `spss_hypothesis_test` | Statistics | `session_id`, `dataset_name`, `test_type`, `dependent_var`, `group_var`, `factor_b`, `alpha` | `summary`, `statistics` |
 | `spss_regression_analysis` | Statistics | `session_id`, `dataset_name`, `dependent_var`, `independent_vars`, `model_type` | `summary`, `model_report` |
 | `detect_automated_insights` | Insights | `session_id`, `dataset_name`, `metric`, `category_col`, `time_col` | `status`, `insights` |
@@ -24,7 +24,7 @@ Catalog / metrics / DAG / lineage are scoped per `session_id` (isolated across s
 | `kmeans_clustering` | Mining | `session_id`, `dataset_name`, `feature_cols`, `n_clusters`, `auto_k_range` | `clustering` (optimal_k, silhouette) |
 | `rfm_segmentation` | Mining | `session_id`, `dataset_name`, `user_col`, `date_col`, `amount_col` | `rfm` (segments) |
 | `timeseries_forecast` | Mining | `session_id`, `dataset_name`, `time_col`, `value_col`, `horizon`, `model_type` | `forecast` (forecasts, holdout vs naive and seasonal naive, calendar gaps) |
-| `discover_insights` | Insight Copilot | `session_id`, `dataset_name`, `intent`, `target_metric`, `category_col`, `time_col` | `insight_report` (insights, insight_graph, narrative) |
+| `discover_insights` | Insight Copilot | `session_id`, `dataset_name`, `intent`, `target_metric`, `category_col`, `time_col` | `insight_report` (insights, insight_graph, narrative, ranking_method, ranking_caveat) |
 | `analyze_conversion_funnel` | Trace Analytics | `session_id`, `dataset_name`, `steps`, `date_from`, `date_to` | `total_steps`, `initial_users`, `overall_conversion_rate` |
 | `analyze_user_flow` | Trace Analytics | `session_id`, `dataset_name`, `limit_paths` | `nodes`, `links`, `total_transitions` |
 | `analyze_cohort_retention` | Trace Analytics | `session_id`, `dataset_name`, `days` | `cohorts`, `days_analyzed`, `retention_matrix` |

@@ -55,8 +55,8 @@ class DriverAnalysisRequest(BaseModel):
     current_filter: str = Field(..., description="Current condition, e.g. 'month = 2'")
     agg_func: str = "SUM"
     top_k: int = 5
-    rate_col: Optional[str] = Field(None, description="Rate column for a Laspeyres rate x volume split")
-    volume_col: Optional[str] = Field(None, description="Volume column paired with rate_col")
+    rate_col: Optional[str] = Field(None, description="Rate column. With volume_col, only the first dimension is a Laspeyres split plus a two-ordering Sun-Shapley.")
+    volume_col: Optional[str] = Field(None, description="Volume column paired with rate_col. Later dimensions are not drilled.")
 
 class HypothesisTestRequest(BaseModel):
     session_id: str

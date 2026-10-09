@@ -3,10 +3,9 @@ import threading
 import json
 import os
 import time
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from contextlib import contextmanager
-
-from app.ontology.action_type import utc_stamp
 
 class MetadataDB:
     _instance = None
@@ -456,7 +455,7 @@ class MetadataDB:
                     json.dumps(audit_dict.get("parameters", {})),
                     audit_dict.get("status", "SUCCESS"),
                     json.dumps(audit_dict.get("execution_result", {})),
-                    audit_dict.get("executed_at") or utc_stamp()
+                    audit_dict.get("executed_at") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
                 ))
 
     def list_action_audits(self, limit: int = 50) -> List[Dict[str, Any]]:

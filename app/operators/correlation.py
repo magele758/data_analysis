@@ -5,6 +5,8 @@ import duckdb
 from scipy import stats
 
 from app.cluster.session_manager import SessionManager
+from app.config import settings
+from app.distributed_ops.ray_exec import partition_count, partitioned_pearson_sums
 from app.engine.evidence import Stopwatch, evidence
 from app.engine.sql_guard import safe_columns, safe_ident, safe_table_ref
 
@@ -128,9 +130,23 @@ def run_correlation_analysis(
         for j in range(i + 1, len(work_quoted)):
             qj = work_quoted[j]
             select_parts.append(f"SUM({q} * {qj}) AS __sp{i}_{j}")
-    sql = f"SELECT {', '.join(select_parts)} FROM {source} s"
-    rel = con.execute(sql)
-    stats_row = dict(zip([d[0] for d in rel.description], rel.fetchone()))
+    select_list = ", ".join(select_parts)
+    one_scan = f"SELECT {select_list} FROM {source} s"
+    sql = one_scan
+    partition_note = None
+    stats_row = None
+    if settings.RAY_ENABLED and method_l == "pearson" and raw_n >= int(settings.RAY_MIN_ROWS) and raw_n > 0:
+        try:
+            copy_sql = f"SELECT {safe_columns(columns)} FROM {table_ref} WHERE {where}"
+            stats_row, partition_note = partitioned_pearson_sums(con, copy_sql, columns, partition_count())
+            sql = copy_sql
+        except Exception as exc:
+            partition_note = f"Partition merge failed ({type(exc).__name__}). Used one DuckDB scan."
+            stats_row = None
+    if stats_row is None:
+        rel = con.execute(one_scan)
+        stats_row = dict(zip([d[0] for d in rel.description], rel.fetchone()))
+        sql = one_scan
     n = int(stats_row["__n"] or 0)
 
     pair_ps: List[float] = []
@@ -180,6 +196,8 @@ def run_correlation_analysis(
         "q_value is a Benjamini-Hochberg adjustment across the column pairs in this call.",
         "fdr_significant requires q < 0.05 and |r| >= 0.1.",
     ]
+    if partition_note:
+        caveats.append(partition_note)
     if group_col and method_l == "pearson":
         caveats.extend(_simpson_notes(con, table_ref, columns, quoted, pair_meta, group_col))
     elif group_col:

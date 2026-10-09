@@ -32,6 +32,7 @@ def test_discover_insights_produces_report():
     # A coherent data story is composed.
     assert rep["narrative"]["headline"]
     assert rep["narrative"]["sections"]
+    assert rep["ranking_method"] == "severity"
 
 
 def test_discover_insights_finds_correlation_and_dominance():

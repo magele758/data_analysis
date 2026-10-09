@@ -50,10 +50,10 @@
 ## 五、 核心数理统计、归因与自动洞察
 
 ### 10. EDA 探索性数据画像算子 (`eda_profile`)
-* **作用**：一次聚合扫描输出空值、均值、标准差、分位数、偏度和峰度。语义类型仍来自前 5000 行样本，结果里写着 `type_inference_sample_rows`。表不超过 10 万行时 distinct 是精确计数；超过之后用 `approx_count_distinct`，并在列上标明 `distinct_count_method`。
+* **作用**：一次聚合扫描输出空值、均值、标准差、分位数、偏度和峰度。语义类型仍来自前 5000 行样本，结果里写着 `type_inference_sample_rows`。表不超过 10 万行时 distinct 是精确计数，分位数是 `quantile_cont`；超过之后 distinct 用 `approx_count_distinct`，分位数用 `approx_quantile`，列上分别标明 `distinct_count_method` 和 `quantile_method`。
 
 ### 11. 多维异动下钻与归因算子 (`driver_attribution_analysis`)
-* **作用**：针对指标波动，沿维度层级路径逐层下钻。`SUM` 使用加法贡献，每一层子项差值之和等于总差值，并在结果里记录 `closes`。`AVG`/`COUNT`/`MIN`/`MAX` 只做水平对比，不声称闭合。同时传入 `rate_col` 与 `volume_col` 时，按 Laspeyres 恒等式拆成量效应、率效应和交互项（`structure_effect` 与交互项是同一个交叉项）。结果里的 `orderings_used` 是 1：按调用方给出的维度顺序下钻，不计算 Sun-Shapley。方法名写在 `method` 字段里。这不是 Shapley 值。
+* **作用**：针对指标波动，沿维度层级路径逐层下钻。`SUM` 使用加法贡献，每一层子项差值之和等于总差值，并在结果里记录 `closes`。`AVG`/`COUNT`/`MIN`/`MAX` 只做水平对比，不声称闭合，`sun_shapley` 为 null。同时传入 `rate_col` 与 `volume_col` 时，只按路径里的第一个维度做 Laspeyres 恒等式，拆成量效应、率效应和交互项（`structure_effect` 与交互项是同一个交叉项）；后面的维度不进入这一拆分。加法层级的 `orderings_used` 是 1，按调用方给出的维度顺序。`sun_shapley` 另外给出两种因子顺序的平均：量效应 `((p0+p1)/2)·Δq`，率效应 `((q0+q1)/2)·Δp`，两者相加等于差值，那里的 `orderings_used` 是 2。`SUM` 的 `sun_shapley` 对维度排列取平均；加法成员的差值不随顺序变化，所以平均值等于单独聚合，`order_invariant` 为真。最多枚举 4 个维度、24 种顺序。
 
 ### 12. SPSS 级数理假设检验算子 (`spss_hypothesis_test`)
 * **支持类型**：独立样本 t 检验（含 Levene 方差齐性与 Welch 校正）、配对样本 t 检验（`paired_t_test`，两个数值列）、单因素 ANOVA（含事后 Tukey HSD 与 eta^2）、双因素 ANOVA（`two_way_anova`，需要 `factor_b`，含交互项）、卡方独立性检验（含 Cramér's V）、Mann-Whitney U 检验。`significant` 同时要求 p 值过线，以及效应量过线：|Cohen's d| ≥ 0.2、η² ≥ 0.01、Cramér's V ≥ 0.1、|rank-biserial r| ≥ 0.1。
@@ -71,14 +71,18 @@
 
 ### 实测：1000 万行上的 EDA 与相关
 
-2026-10-08，在 Darwin 24.6.0 arm64、Python 3.13.2、DuckDB 1.5.5 上测了一次。会话 `bench_slice` 用 `range(10000000)` 建表 `bench10m`，列是 `id`、`x = i % 1000`、`y = i % 50`、`z = sin(i)`。EDA 和相关各起一个新进程。macOS 的 `ru_maxrss` 单位是字节，峰值包含这张表。建表约 0.20 秒，不在下表的算子耗时里。这是这一次测量，不是性能承诺。
+2026-10-09，在 Darwin 24.6.0 arm64、Python 3.13.2、DuckDB 1.5.5 上测了一次。会话 `bench_slice` 用 `range(10000000)` 建表 `bench10m`，列是 `id`、`x = i % 1000`、`y = i % 50`、`z = sin(i)`。EDA 和相关各起一个新进程。macOS 的 `ru_maxrss` 单位是字节，峰值包含这张表。建表约 0.21 秒，不在下表的算子耗时里。这是这一次测量，不是性能承诺。
 
 | 算子 | 行数 | 耗时 | 进程峰值 RSS |
 | --- | ---: | ---: | ---: |
-| `DistributedEDA.profile_table` | 10,000,000 | 1.930 秒（evidence `duration_ms` 1930.06） | 3,229,220,864 字节（3079.6 MiB） |
-| `run_correlation_analysis`（`x`,`y`,`z`，Pearson） | 10,000,000 | 0.010 秒（evidence `duration_ms` 10.14） | 568,754,176 字节（542.4 MiB） |
+| `DistributedEDA.profile_table` | 10,000,000 | 0.354 秒（evidence `duration_ms` 354.16） | 592,691,200 字节（565.2 MiB） |
+| `run_correlation_analysis`（`x`,`y`,`z`，Pearson） | 10,000,000 | 0.011 秒（evidence `duration_ms` 10.73） | 569,966,592 字节（543.6 MiB） |
 
-EDA 四列的 `distinct_count_method` 都是 `approx_count_distinct`，`rows_scanned` 为 10000000。相关的 `rows_scanned` 和 `sample_size` 也是 10000000，返回的 `high_correlation_pairs` 为 0。
+`x`、`y`、`z` 的 `quantile_method` 是 `approx_quantile`，四列 `distinct_count_method` 都是 `approx_count_distinct`，`rows_scanned` 为 10000000。相关的 `sample_size` 也是 10000000，`high_correlation_pairs` 为 0。同一张表在 2026-10-08 用精确 `quantile_cont` 时，EDA 是 1.930 秒、峰值 3,229,220,864 字节（3079.6 MiB）。
+
+`DATA_AGENT_RAY_ENABLED=true` 时，行数达到 `DATA_AGENT_RAY_MIN_ROWS`（默认 100 万）的 Pearson 相关会把数值列写成临时 Parquet，按第一列的哈希把行切成多片，合并充分统计量。装了 `ray` 就用 Ray 任务，没装就在本进程跑同一份分片函数，结果与单次扫描一致。默认关闭。远程 `DATA_AGENT_RAY_ADDRESS` 要求 worker 能读到这台机器的临时文件。沙箱关掉外部访问后，这条连接不能再写出文件，分片就留在会话连接上，`backend=session`。
+
+`discover_insights` 在配置了 `DATA_AGENT_LLM_BASE_URL` 时，把洞察的 id、标题、严重度和证据字段发给兼容 OpenAI 的接口，只接受一组 id 作为新顺序。接口缺失或失败时按 `severity` 排，并在 `ranking_caveat` 里说明。统计量不由模型重算。
 
 ---
 
