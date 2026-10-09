@@ -1,7 +1,9 @@
 from typing import List, Optional
 import pyarrow as pa
 import connectorx as cx
-from app.connectors.base import BaseConnector, TableSchema, ColumnInfo, is_select, safe_select
+from app.connectors.base import (
+    BaseConnector, TableSchema, ColumnInfo, is_select, safe_select, sql_string_literal,
+)
 from app.connectors.duckdb_scanner import fetch_via_scanner
 from app.engine.sql_guard import safe_columns, safe_ident, safe_predicate, safe_table_ref
 
@@ -26,10 +28,18 @@ class MySQLConnector(BaseConnector):
         return [str(val) for val in table["table_name"].to_pylist()]
 
     def introspect_schema(self, table_name: str) -> TableSchema:
+        if not isinstance(table_name, str) or not table_name.strip():
+            raise ValueError("table_name is required")
+        if "." in table_name:
+            schema_part, table_part = table_name.split(".", 1)
+            schema_sql = sql_string_literal(schema_part, escape_backslash=True)
+        else:
+            schema_sql = "DATABASE()"
+            table_part = table_name
         query = f"""
         SELECT column_name, data_type, is_nullable
         FROM information_schema.columns
-        WHERE table_schema = DATABASE() AND table_name = '{table_name}'
+        WHERE table_schema = {schema_sql} AND table_name = {sql_string_literal(table_part, escape_backslash=True)}
         ORDER BY ordinal_position;
         """
         arrow_res = cx.read_sql(self.conn_str, query, return_type="arrow")

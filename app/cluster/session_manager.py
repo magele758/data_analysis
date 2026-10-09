@@ -1,3 +1,4 @@
+import re
 import shutil
 import tempfile
 import time
@@ -7,7 +8,8 @@ from typing import Dict, Optional, Any, List
 import duckdb
 import pyarrow as pa
 from app.config import settings
-from app.engine.sql_guard import safe_ident
+
+_DATASET_NAME_RE = re.compile(r"[\x00-\x1f;\"]")
 
 class DatasetMeta:
     def __init__(self, name: str, arrow_table: pa.Table, source_info: Optional[Dict[str, Any]] = None):
@@ -30,19 +32,24 @@ class SessionContext:
         self.created_at = time.time()
         self.last_accessed_at = time.time()
         self.datasets: Dict[str, DatasetMeta] = {}
-        self._con = duckdb.connect(":memory:")
-        self._temp_dir = tempfile.mkdtemp(prefix=f"duckdb-{session_id[:12]}-")
-        # One session cannot claim the whole machine. Spill lands in temp_directory.
-        session_limit = f"{int(settings.MAX_MEMORY_PER_SESSION_MB)}MB"
-        self._con.execute(f"SET memory_limit = '{session_limit}'")
-        self._con.execute(f"SET threads = {settings.DUCKDB_THREADS}")
-        try:
-            escaped = self._temp_dir.replace("'", "''")
-            self._con.execute(f"SET temp_directory = '{escaped}'")
-        except duckdb.Error:
-            pass
+        slug = re.sub(r"[^A-Za-z0-9_-]", "_", session_id)[:12] or "sess"
+        self._temp_dir = tempfile.mkdtemp(prefix=f"duckdb-{slug}-")
         self._lock = threading.Lock()
-        self.memory_limit = session_limit
+        try:
+            self._con = duckdb.connect(":memory:")
+            # One session cannot claim the whole machine. Spill lands in temp_directory.
+            session_limit = f"{int(settings.MAX_MEMORY_PER_SESSION_MB)}MB"
+            self._con.execute(f"SET memory_limit = '{session_limit}'")
+            self._con.execute(f"SET threads = {settings.DUCKDB_THREADS}")
+            try:
+                escaped = self._temp_dir.replace("'", "''")
+                self._con.execute(f"SET temp_directory = '{escaped}'")
+            except duckdb.Error:
+                pass
+            self.memory_limit = session_limit
+        except Exception:
+            shutil.rmtree(self._temp_dir, ignore_errors=True)
+            raise
 
     def touch(self):
         self.last_accessed_at = time.time()
@@ -51,6 +58,7 @@ class SessionContext:
         return (time.time() - self.last_accessed_at) > ttl_seconds
 
     def register_dataset(self, name: str, table: Any, source_info: Optional[Dict[str, Any]] = None):
+        _validate_dataset_name(name)
         if isinstance(table, pa.RecordBatchReader):
             table = table.read_all()
         with self._lock:
@@ -71,7 +79,7 @@ class SessionContext:
             self._con.register(name, table)
             meta = DatasetMeta(name, table, _redact_source(source_info))
             try:
-                summary = self._con.execute(f"SUMMARIZE {safe_ident(name)}").fetchall()
+                summary = self._con.execute(f"SUMMARIZE {_quote_dataset_name(name)}").fetchall()
                 meta.summarize = [
                     {"column": r[0], "type": r[1], "approx_unique": r[4], "null_percentage": r[10]}
                     if len(r) > 10 else {"column": r[0]}
@@ -80,7 +88,7 @@ class SessionContext:
             except Exception:
                 meta.summarize = None
             try:
-                self._con.execute(f"ANALYZE {safe_ident(name)}")
+                self._con.execute(f"ANALYZE {_quote_dataset_name(name)}")
                 meta.stats_collected = True
             except Exception:
                 # Views over Arrow often have no persistent-table statistics.
@@ -96,8 +104,13 @@ class SessionContext:
         with self._lock:
             self.touch()
             clean_sql = sql.strip().rstrip(";")
-            if limit and "LIMIT" not in clean_sql.upper():
-                clean_sql += f" LIMIT {limit}"
+            if limit is not None:
+                if isinstance(limit, bool) or not isinstance(limit, int):
+                    raise ValueError(f"limit must be a non-negative integer, got {limit!r}")
+                if limit < 0:
+                    raise ValueError("limit must be >= 0")
+                if limit and not re.search(r"\bLIMIT\b", clean_sql, re.IGNORECASE):
+                    clean_sql += f" LIMIT {limit}"
             res = self._con.execute(clean_sql)
             tbl = res.arrow()
             if isinstance(tbl, pa.RecordBatchReader):
@@ -116,6 +129,29 @@ class SessionContext:
                 pass
             self.datasets.clear()
             shutil.rmtree(self._temp_dir, ignore_errors=True)
+
+
+def _validate_session_id(session_id: str) -> str:
+    if not isinstance(session_id, str) or not session_id.strip() or len(session_id) > 128:
+        raise ValueError("Invalid session_id: expected 1-128 non-blank characters")
+    if any(ord(ch) < 32 for ch in session_id) or "/" in session_id or "\\" in session_id or ".." in session_id:
+        raise ValueError(
+            "Invalid session_id: slashes, control characters, and '..' are not allowed"
+        )
+    return session_id
+
+
+def _validate_dataset_name(name: str) -> str:
+    if not isinstance(name, str) or not name.strip() or len(name) > 128 or _DATASET_NAME_RE.search(name):
+        raise ValueError(
+            f"Invalid dataset name {name!r}: use 1-128 characters without quotes, semicolons, or control characters"
+        )
+    return name
+
+
+def _quote_dataset_name(name: str) -> str:
+    _validate_dataset_name(name)
+    return '"' + name + '"'
 
 
 def _redact_source(source_info: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -142,6 +178,7 @@ class SessionManager:
     def get_or_create_session(self, session_id: Optional[str] = None) -> SessionContext:
         with self._lock:
             sid = session_id or str(uuid.uuid4())
+            _validate_session_id(sid)
             if sid not in self._sessions:
                 self._sessions[sid] = SessionContext(sid)
             else:
@@ -149,6 +186,8 @@ class SessionManager:
             return self._sessions[sid]
 
     def get_session(self, session_id: str) -> Optional[SessionContext]:
+        if session_id is not None:
+            _validate_session_id(session_id)
         with self._lock:
             sess = self._sessions.get(session_id)
             if sess:
@@ -156,6 +195,7 @@ class SessionManager:
             return sess
 
     def drop_session(self, session_id: str) -> bool:
+        _validate_session_id(session_id)
         with self._lock:
             if session_id in self._sessions:
                 sess = self._sessions.pop(session_id)
