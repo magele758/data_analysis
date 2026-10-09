@@ -1,7 +1,6 @@
 import threading
 import time
 from typing import Dict, List, Set, Any, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
 import duckdb
 from app.catalog.lineage_tracker import _lineage_sources, get_lineage_tracker
@@ -38,9 +37,14 @@ class PipelineDAG:
 
     @classmethod
     def get_instance(cls) -> "PipelineDAG":
+        """Process-wide engine. Same object as get_pipeline_engine("_global")."""
         with cls._lock:
             if cls._instance is None:
-                cls._instance = cls(persistent=True)
+                existing = cls._session_instances.get("_global")
+                cls._instance = existing if existing is not None else cls(
+                    session_id="_global", persistent=True
+                )
+            cls._session_instances["_global"] = cls._instance
             return cls._instance
 
     def _restore_from_db(self):
@@ -87,38 +91,58 @@ class PipelineDAG:
 
     def get_execution_stages(self) -> List[List[str]]:
         """
-        Partition DAG models into execution stages (Levels).
-        Models in the same stage have no mutual dependencies and can execute in parallel.
+        Partition DAG models into execution stages.
+
+        Models in one stage have no mutual dependencies. Execution is still
+        sequential: one DuckDB connection cannot run those models concurrently.
         """
         with self._lock:
-            in_degree = {name: 0 for name in self._models}
-            adj = {name: [] for name in self._models}
+            return self._stages_unlocked()
 
-            for name, m in self._models.items():
-                for dep in m.depends_on:
-                    if dep in self._models:
-                        adj[dep].append(name)
-                        in_degree[name] += 1
+    def _stages_unlocked(self) -> List[List[str]]:
+        in_degree = {name: 0 for name in self._models}
+        adj = {name: [] for name in self._models}
 
-            current_queue = [name for name, deg in in_degree.items() if deg == 0]
-            stages = []
-            visited_count = 0
+        for name, m in self._models.items():
+            for dep in m.depends_on:
+                if dep in self._models:
+                    adj[dep].append(name)
+                    in_degree[name] += 1
 
-            while current_queue:
-                stages.append(list(current_queue))
-                visited_count += len(current_queue)
-                next_queue = []
-                for curr in current_queue:
-                    for neighbor in adj[curr]:
-                        in_degree[neighbor] -= 1
-                        if in_degree[neighbor] == 0:
-                            next_queue.append(neighbor)
-                current_queue = next_queue
+        current_queue = [name for name, deg in in_degree.items() if deg == 0]
+        stages = []
+        visited_count = 0
 
-            if visited_count != len(self._models):
-                raise ValueError("Cyclic dependency detected in DAG transformation pipeline!")
+        while current_queue:
+            stages.append(list(current_queue))
+            visited_count += len(current_queue)
+            next_queue = []
+            for curr in current_queue:
+                for neighbor in adj[curr]:
+                    in_degree[neighbor] -= 1
+                    if in_degree[neighbor] == 0:
+                        next_queue.append(neighbor)
+            current_queue = next_queue
 
-            return stages
+        if visited_count != len(self._models):
+            raise ValueError("Cyclic dependency detected in DAG transformation pipeline!")
+
+        return stages
+
+    def _closure_unlocked(self, names: List[str]) -> Set[str]:
+        """Selected models plus ancestor models. Source tables are not models."""
+        missing = [name for name in names if name not in self._models]
+        if missing:
+            raise ValueError(f"Unknown DAG model(s): {', '.join(missing)}")
+        wanted = set(names)
+        stack = list(names)
+        while stack:
+            current = stack.pop()
+            for dep in self._models[current].depends_on:
+                if dep in self._models and dep not in wanted:
+                    wanted.add(dep)
+                    stack.append(dep)
+        return wanted
 
     def _execute_single_model(self, con: duckdb.DuckDBPyConnection, model: DAGModel) -> Dict[str, Any]:
         """Execute model with atomic shadow-table swap & rollback."""
@@ -171,21 +195,28 @@ class PipelineDAG:
         exists = _relation_exists(con, name_ref)
         if not exists or not model.unique_key:
             con.execute(f"CREATE OR REPLACE TABLE {staging_ref} AS {model_sql}")
-            con.execute(f"DROP TABLE IF EXISTS {name_ref}")
-            con.execute(f"ALTER TABLE {staging_ref} RENAME TO {name_ref}")
+            try:
+                if model.unique_key:
+                    _require_unique_key(con, staging_ref, model.unique_key)
+                con.execute(f"DROP TABLE IF EXISTS {name_ref}")
+                con.execute(f"ALTER TABLE {staging_ref} RENAME TO {name_ref}")
+            except Exception:
+                con.execute(f"DROP TABLE IF EXISTS {staging_ref}")
+                raise
             return "full_refresh"
         key = safe_ident(model.unique_key)
         con.execute(f"CREATE OR REPLACE TABLE {staging_ref} AS {model_sql}")
-        described = con.execute(f"DESCRIBE {staging_ref}").fetchall()
-        cols = ", ".join(safe_ident(row[0]) for row in described)
-        con.execute("BEGIN TRANSACTION")
         try:
-            con.execute(f"DELETE FROM {name_ref} WHERE {key} IN (SELECT {key} FROM {staging_ref})")
-            con.execute(f"INSERT INTO {name_ref} ({cols}) SELECT {cols} FROM {staging_ref}")
-            con.execute("COMMIT")
-        except Exception:
-            con.execute("ROLLBACK")
-            raise
+            described = _require_unique_key(con, staging_ref, model.unique_key)
+            cols = ", ".join(safe_ident(row[0]) for row in described)
+            con.execute("BEGIN TRANSACTION")
+            try:
+                con.execute(f"DELETE FROM {name_ref} WHERE {key} IN (SELECT {key} FROM {staging_ref})")
+                con.execute(f"INSERT INTO {name_ref} ({cols}) SELECT {cols} FROM {staging_ref}")
+                con.execute("COMMIT")
+            except Exception:
+                con.execute("ROLLBACK")
+                raise
         finally:
             con.execute(f"DROP TABLE IF EXISTS {staging_ref}")
         return "merge"
@@ -198,18 +229,22 @@ class PipelineDAG:
         """
         Execute the DAG transformation across dependency stages with atomic materialization.
         """
-        stages = self.get_execution_stages()
+        with self._lock:
+            # None runs the whole graph. A list runs that set plus ancestor models
+            # so a downstream select still has its parents materialized.
+            selected = None if models is None else self._closure_unlocked(models)
+            stages = self._stages_unlocked()
+            plan: List[DAGModel] = []
+            for stage in stages:
+                for model_name in stage:
+                    if selected is not None and model_name not in selected:
+                        continue
+                    plan.append(self._models[model_name])
+
         all_results = []
         start_time = time.time()
-
-        target_set = set(models) if models else None
-        for stage_idx, stage_models in enumerate(stages):
-            for model_name in stage_models:
-                if target_set and model_name not in target_set:
-                    continue
-                m = self._models[model_name]
-                res = self._execute_single_model(con, m)
-                all_results.append(res)
+        for model in plan:
+            all_results.append(self._execute_single_model(con, model))
 
         total_duration = round((time.time() - start_time) * 1000, 2)
 
@@ -221,6 +256,16 @@ class PipelineDAG:
             "results": all_results
         }
 
+def _require_unique_key(con: duckdb.DuckDBPyConnection, staging_ref: str, unique_key: str):
+    described = con.execute(f"DESCRIBE {staging_ref}").fetchall()
+    columns = [row[0] for row in described]
+    if unique_key not in columns:
+        raise ValueError(
+            f"incremental unique_key {unique_key!r} is not in the model output columns {columns}"
+        )
+    return described
+
+
 def _relation_exists(con: duckdb.DuckDBPyConnection, name_ref: str) -> bool:
     try:
         con.execute(f"SELECT 1 FROM {name_ref} LIMIT 0")
@@ -230,9 +275,11 @@ def _relation_exists(con: duckdb.DuckDBPyConnection, name_ref: str) -> bool:
 
 
 def get_pipeline_engine(session_id: str = "_global") -> PipelineDAG:
+    if session_id == "_global":
+        return PipelineDAG.get_instance()
     with PipelineDAG._lock:
         inst = PipelineDAG._session_instances.get(session_id)
         if inst is None:
-            inst = PipelineDAG(session_id=session_id, persistent=(session_id == "_global"))
+            inst = PipelineDAG(session_id=session_id, persistent=False)
             PipelineDAG._session_instances[session_id] = inst
         return inst
