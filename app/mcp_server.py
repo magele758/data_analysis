@@ -98,7 +98,7 @@ def connect_and_load_db(
         "summary": f"Successfully loaded {meta.row_count:,} rows across {meta.column_count} columns into session '{sess.session_id}' (table '{dataset_name}')."
     }, ensure_ascii=False)
 
-@mcp.tool(name="eda_profile", description="Run comprehensive EDA data profiling, distribution statistics, and data quality scoring.")
+@mcp.tool(name="eda_profile", description="Run comprehensive EDA data profiling, distribution statistics, and data quality scoring. Tables over 100,000 rows label distinct_count_method and quantile_method as approximate.")
 def eda_profile(session_id: str, dataset_name: str) -> str:
     res = run_eda_profile(session_id, dataset_name)
     summary = NarrativeBuilder.generate_eda_narrative(res)
@@ -110,7 +110,7 @@ def eda_profile(session_id: str, dataset_name: str) -> str:
         "columns": res.get("columns")
     }, ensure_ascii=False)
 
-@mcp.tool(name="driver_attribution_analysis", description="Drill a metric change by dimension. SUM uses an additive contribution that closes; rate_col + volume_col uses a Laspeyres rate/volume split. This is not a Shapley value.")
+@mcp.tool(name="driver_attribution_analysis", description="Drill a metric change by dimension. SUM uses an additive contribution that closes and a Sun-Shapley average over dimension order. Other aggregations leave sun_shapley null. rate_col + volume_col returns Laspeyres on the first dimension only, plus a two-ordering Sun-Shapley of rate and volume.")
 def driver_attribution_analysis(
     session_id: str,
     dataset_name: str,
@@ -149,6 +149,9 @@ def driver_attribution_analysis(
     return json.dumps({
         "status": "success",
         "summary": summary,
+        "method": res.get("method"),
+        "orderings_used": res.get("orderings_used"),
+        "sun_shapley": res.get("sun_shapley"),
         "driver_hierarchy": res.get("hierarchy"),
         "chart_spec": chart_spec
     }, ensure_ascii=False)
@@ -229,7 +232,7 @@ def duckdb_sql_sandbox(session_id: str, sql_query: str, limit: int = 100) -> str
     res = run_duckdb_sql(session_id, sql_query, limit)
     return json.dumps({"status": "success", "result": res}, ensure_ascii=False)
 
-@mcp.tool(name="correlation_analysis", description="Compute a Pearson/Spearman correlation matrix and surface strongly-correlated column pairs.")
+@mcp.tool(name="correlation_analysis", description="Compute a Pearson/Spearman correlation matrix and surface strongly-correlated column pairs. When DATA_AGENT_RAY_ENABLED is set, a large Pearson scan merges hash partitions and records the backend in evidence caveats.")
 def correlation_analysis(session_id: str, dataset_name: str, columns: Optional[List[str]] = None, method: str = "pearson", group_col: Optional[str] = None) -> str:
     res = run_correlation_analysis(session_id, dataset_name, columns, method, group_col=group_col)
     return json.dumps({"status": "success", "correlation": res}, ensure_ascii=False)
@@ -254,7 +257,7 @@ def timeseries_forecast(session_id: str, dataset_name: str, time_col: str, value
     res = run_timeseries_forecast(session_id, dataset_name, time_col, value_col, horizon, model_type)
     return json.dumps({"status": "success", "forecast": res}, ensure_ascii=False)
 
-@mcp.tool(name="discover_insights", description="Automated insight discovery: orchestrates Analysis Actions (anomaly/correlation/dominance/trend) over a dataset into ranked structured insights, an Insight Graph (relationships between findings), and a coherent data-story narrative. Optional 'intent' lightly biases which actions run; deeper NLU/agent reasoning is the caller's job.")
+@mcp.tool(name="discover_insights", description="Automated insight discovery: orchestrates Analysis Actions (anomaly/correlation/dominance/trend) into ranked insights, an Insight Graph, and a data-story narrative. Rank is severity unless DATA_AGENT_LLM_BASE_URL is set, in which case the endpoint reorders ids from evidence fields and falls back to severity. Optional intent biases which actions run.")
 def discover_insights(session_id: str, dataset_name: str, intent: Optional[str] = None, target_metric: Optional[str] = None, category_col: Optional[str] = None, time_col: Optional[str] = None, max_insights: int = 8) -> str:
     res = _discover_insights(session_id, dataset_name, intent=intent, target_metric=target_metric, category_col=category_col, time_col=time_col, max_insights=max_insights)
     return json.dumps({"status": "success", "insight_report": res}, ensure_ascii=False)

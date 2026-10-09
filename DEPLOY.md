@@ -67,4 +67,4 @@ git push origin v1.2.3
 
 `helm/` 提供 Service + Ingress（含会话亲和）。设置 `image.repository=ghcr.io/magele758/data_analysis`、`image.tag=<版本>`，并通过 Secret 注入 `DATA_AGENT_API_KEYS`。
 
-> Ray 已非必需（分布式算子现为单机内存 DuckDB 实现），`rayCluster.enabled` 默认关闭。
+> 默认路径是单机 DuckDB，`rayCluster.enabled` 保持关闭。应用侧 `DATA_AGENT_RAY_ENABLED=true` 时，大表 Pearson 相关会把数值列落到临时 Parquet，再按第一列哈希分片、合并充分统计量。安装可选依赖 `ray`（`pip install 'data-analysis-service[distributed]'`）后分片走 Ray 任务；没安装就在本进程跑同一份函数。远程 `DATA_AGENT_RAY_ADDRESS` 要求 worker 能读到这份临时文件。沙箱关掉外部访问后，同一条连接不能再写出文件，分片留在会话里，`backend=session`。会话表本身仍然只在当前进程里。

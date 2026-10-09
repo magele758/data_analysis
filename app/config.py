@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     # ----------------- Observability -----------------
     LOG_LEVEL: str = "INFO"
 
+    # Optional Ray merge of Pearson sufficient statistics. Off keeps one DuckDB scan.
+    RAY_ENABLED: bool = False
+    RAY_ADDRESS: str = ""
+    RAY_MIN_ROWS: int = 1_000_000
+    RAY_PARTITIONS: int = 0
+
+    # Optional OpenAI-compatible endpoint for insight order. Empty keeps severity order.
+    LLM_BASE_URL: str = ""
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = ""
+    LLM_TIMEOUT_SECONDS: float = 3.0
+
     @property
     def api_key_list(self) -> List[str]:
         return [k.strip() for k in self.API_KEYS.split(",") if k.strip()]

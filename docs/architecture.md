@@ -34,7 +34,7 @@
 |  - Apache Arrow zero-copy register                                      |
 |  - Scipy / Statsmodels / Sklearn on the aggregated rows                 |
 |  - Spill under MAX_MEMORY_PER_SESSION_MB; sessions stay on this process |
-|  - KubeRay is not on this path (DEPLOY.md does not require Ray)         |
+|  - Ray is off by default; optional partition merge only (see DEPLOY.md) |
 +-------------------------------------------------------------------------+
                                     ^
                                     | (load into the session connection)
@@ -60,8 +60,8 @@
 * 自动检测循环依赖（Cycle Detection）并按依赖层级分层物化（`Staging -> DWD -> DWS/Marts`）。
 
 ### 2.3 单机会话内的充分统计量
-* 运行中的服务就是图里这一台 DuckDB。KubeRay 不在这条进程的执行路径上，`DEPLOY.md` 也不要求 Ray。
-* 相关、EDA 在这一条连接上做单遍聚合。表超过 10 万行时，distinct 用 `approx_count_distinct`。回归超过 40 个自变量或 500 万个单元格时，直接要求调用方先聚合。
+* 运行中的服务就是图里这一台 DuckDB。默认不启动 Ray，`DEPLOY.md` 也不要求它。`DATA_AGENT_RAY_ENABLED=true` 时，大表 Pearson 相关把充分统计量按第一列哈希分片合并；装了 `ray` 才把分片交给 Ray 任务。这条连接不能再写临时文件时，分片留在会话上，`backend=session`。
+* 相关、EDA 在这一条连接上做单遍聚合。表超过 10 万行时，distinct 用 `approx_count_distinct`，分位数用 `approx_quantile`。回归超过 40 个自变量或 500 万个单元格时，直接要求调用方先聚合。
 
 ### 2.4 反向 ETL 与数据激活闭环 (Reverse ETL)
 * 将分析洞察结果（如 RFM 用户分群标签、时序预测数据）秒级反写至业务数据库，并支持一键向飞书/企业微信/Slack 推送富文本归因卡片。
@@ -69,5 +69,5 @@
 ### 2.5 会话内计算契约
 * 每个会话一条 DuckDB 连接，内存上限是 `MAX_MEMORY_PER_SESSION_MB`，溢写目录在会话关闭时删除。连接串写入目录前会被打码。
 * 算子结果带 evidence：`operator`、`method`、`sql`、扫描行数、使用行数、丢弃空值、耗时、caveats。调用方用这些字段叙述，不重新心算。
-* SUM 归因是加法贡献。比率×数量是 Laspeyres 分解。相关矩阵附 Benjamini-Hochberg `q_value`。预测在全序列上拟合，另给一段留出 MAPE 与朴素基线比较。
+* SUM 归因是加法贡献，并附上维度排列的 Sun-Shapley 平均。非 SUM 的 `sun_shapley` 为 null。比率×数量只拆第一个维度，同时给出 Laspeyres 和两种因子顺序的 Sun-Shapley。相关矩阵附 Benjamini-Hochberg `q_value`。预测在全序列上拟合，另给一段留出 MAPE 与朴素基线比较。洞察默认按严重度排序；配置了模型地址才按返回的 id 重排，失败时 `ranking_caveat` 写明原因。
 * 语义层先在指标自己的表上聚合，再沿外键到主键连接。本体多跳遍历和动作预演（MCP `dry_run` 默认为真）走同一条连接。

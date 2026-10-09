@@ -38,16 +38,22 @@ class DistributedEDA:
             dist_expr = f"approx_count_distinct({quoted})" if use_approx else f"COUNT(DISTINCT {quoted})"
             select_parts.append(f'{dist_expr} AS "__dist_{i}"')
             if meta["semantic_type"] == SemanticType.MEASURE.value:
+                quantile_fn = "approx_quantile" if use_approx else "quantile_cont"
+                p50 = (
+                    f'approx_quantile({quoted}, 0.50) AS "__p50_{i}"'
+                    if use_approx
+                    else f'MEDIAN({quoted}) AS "__p50_{i}"'
+                )
                 select_parts.extend([
                     f'AVG({quoted}) AS "__mean_{i}"',
                     f'STDDEV_SAMP({quoted}) AS "__std_{i}"',
                     f'MIN({quoted}) AS "__min_{i}"',
                     f'MAX({quoted}) AS "__max_{i}"',
-                    f'MEDIAN({quoted}) AS "__p50_{i}"',
-                    f'QUANTILE_CONT({quoted}, 0.25) AS "__p25_{i}"',
-                    f'QUANTILE_CONT({quoted}, 0.75) AS "__p75_{i}"',
-                    f'QUANTILE_CONT({quoted}, 0.95) AS "__p95_{i}"',
-                    f'QUANTILE_CONT({quoted}, 0.99) AS "__p99_{i}"',
+                    p50,
+                    f'{quantile_fn}({quoted}, 0.25) AS "__p25_{i}"',
+                    f'{quantile_fn}({quoted}, 0.75) AS "__p75_{i}"',
+                    f'{quantile_fn}({quoted}, 0.95) AS "__p95_{i}"',
+                    f'{quantile_fn}({quoted}, 0.99) AS "__p99_{i}"',
                     f'SKEWNESS({quoted}) AS "__skew_{i}"',
                     f'KURTOSIS({quoted}) AS "__kurt_{i}"',
                 ])
@@ -108,6 +114,9 @@ class DistributedEDA:
                 "null_percentage": round(null_rate, 2),
                 "distinct_count": dist_cnt,
                 "distinct_count_method": distinct_method,
+                "quantile_method": (
+                    "approx_quantile" if use_approx else "quantile_cont"
+                ) if meta["semantic_type"] == SemanticType.MEASURE.value else None,
             }
             if meta["semantic_type"] == SemanticType.MEASURE.value and stats.get(f"__mean_{i}") is not None:
                 def _num(key: str):
@@ -157,6 +166,11 @@ class DistributedEDA:
                         "distinct_count uses DuckDB approx_count_distinct because the table has more than 100,000 rows."
                         if use_approx
                         else "distinct_count is an exact COUNT(DISTINCT). Tables over 100,000 rows switch to approx_count_distinct."
+                    ),
+                    (
+                        "Quantiles use approx_quantile because the table has more than 100,000 rows."
+                        if use_approx
+                        else "Quantiles use exact quantile_cont. Tables over 100,000 rows switch to approx_quantile."
                     ),
                 ],
             ),

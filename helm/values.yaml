@@ -7,8 +7,9 @@ image:
   tag: latest
   pullPolicy: IfNotPresent
 
-# Legacy: the distributed engine now runs single-node in-memory DuckDB; Ray is no
-# longer required. Keep disabled unless you specifically wire up a Ray backend.
+# Optional. The service runs one DuckDB per session. Enable this chart only when
+# workers share the spill directory used by DATA_AGENT_RAY_ADDRESS. The app flag
+# DATA_AGENT_RAY_ENABLED defaults to false.
 rayCluster:
   enabled: false
   head:
