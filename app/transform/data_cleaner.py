@@ -4,6 +4,14 @@ import duckdb
 from app.engine.sql_guard import safe_ident, safe_table_ref
 
 
+def _require_known_columns(requested: List[str], known: List[str], kind: str) -> None:
+    for col in requested:
+        safe_ident(col)
+    missing = [col for col in requested if col not in known]
+    if missing:
+        raise ValueError(f"Unknown {kind} column(s): {', '.join(missing)}")
+
+
 def _finite_bound(val: Any, col: str, side: str) -> Optional[float]:
     """Coerce a clip bound to a finite float so it is safe to inline."""
     if val is None:
@@ -35,6 +43,12 @@ class DataCleaner:
         # 1. Build SELECT expressions
         cols_info = con.execute(f"DESCRIBE {source_ref}").fetchall()
         col_names = [r[0] for r in cols_info]
+        if dedup_keys:
+            _require_known_columns(dedup_keys, col_names, "dedup")
+        if fillna_rules:
+            _require_known_columns(list(fillna_rules), col_names, "fillna")
+        if outlier_clip_cols:
+            _require_known_columns(list(outlier_clip_cols), col_names, "clip")
 
         # ponytail: two layers, not one nested expr -- clip repeats its input 3x in
         # CASE WHEN, which would duplicate any '?' a fillna bound underneath it.
@@ -81,8 +95,13 @@ class DataCleaner:
             col_ref = safe_ident(col)
             expr = col_ref
             if outlier_clip_cols and col in outlier_clip_cols:
-                min_v = _finite_bound(outlier_clip_cols[col].get("min"), col, "min")
-                max_v = _finite_bound(outlier_clip_cols[col].get("max"), col, "max")
+                bounds = outlier_clip_cols[col]
+                if not isinstance(bounds, dict):
+                    raise ValueError(f"Invalid clip bounds for {col!r}: expected a dict with min/max")
+                min_v = _finite_bound(bounds.get("min"), col, "min")
+                max_v = _finite_bound(bounds.get("max"), col, "max")
+                if min_v is not None and max_v is not None and min_v > max_v:
+                    raise ValueError(f"Invalid clip bounds for {col!r}: min {min_v} > max {max_v}")
                 # bounds are validated floats -> inlining cannot inject
                 if min_v is not None and max_v is not None:
                     expr = (
