@@ -237,43 +237,79 @@
     }
   ];
 
+  var INK = '#0e0d0b';
+  var LIFT = '#161410';
+  var LINE = 'rgba(243,239,230,0.12)';
+  var IVORY = '#f4f0e6';
+  var MUTED = '#a39b8e';
+  var GOLD = '#c6a15b';
+  var FONT_UI = '"Outfit","Noto Sans SC","PingFang SC","WenQuanYi Micro Hei",sans-serif';
+  var FONT_TITLE = '"Cormorant Garamond","Noto Serif SC","Songti SC",serif';
+
+  function ensureFonts() {
+    if (document.getElementById('sec-analyze-fonts')) return;
+    var link = document.createElement('link');
+    link.id = 'sec-analyze-fonts';
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Noto+Sans+SC:wght@400;500&family=Noto+Serif+SC:wght@500;600&family=Outfit:wght@400;500;600&display=swap';
+    document.head.appendChild(link);
+  }
+
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
+    ensureFonts();
     var style = document.createElement('style');
     style.id = STYLE_ID;
+    var root = '#mount.sec-analyze-root';
     style.textContent = [
-      '.sec-analyze-root{background:#fff;color:#1a1d21;font:13px/1.45 "IBM Plex Sans","PingFang SC","Noto Sans SC",sans-serif;padding:2px;}',
-      '.sec-analyze-root *{box-sizing:border-box;}',
-      '.sec-analyze-tabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 10px;}',
-      '.sec-analyze-tab{appearance:none;border:1px solid #d5d9de;background:#fff;color:#3c434c;border-radius:3px;padding:3px 8px;font:inherit;font-size:12px;line-height:1.3;cursor:pointer;}',
-      '.sec-analyze-tab-active{background:#1a1d21;border-color:#1a1d21;color:#fff;}',
-      '.sec-analyze-layout{display:grid;grid-template-columns:minmax(240px,300px) minmax(0,1fr);gap:12px;align-items:start;}',
-      '@media (max-width:800px){.sec-analyze-layout{grid-template-columns:1fr;}}',
-      '.sec-analyze-form,.sec-analyze-result{border:1px solid #e4e7eb;background:#fff;padding:10px;min-width:0;}',
-      '.sec-analyze-result{min-height:240px;}',
-      '.sec-analyze-session,.sec-analyze-endpoint,.sec-analyze-hint,.sec-analyze-note,.sec-analyze-empty{font-size:12px;color:#5c6570;margin:0 0 8px;}',
-      '.sec-analyze-note{color:#3c434c;}',
-      '.sec-analyze-session code,.sec-analyze-endpoint{font-family:ui-monospace,SFMono-Regular,monospace;color:#1a1d21;}',
-      '.sec-analyze-field{display:flex;flex-direction:column;gap:2px;margin:0 0 8px;}',
-      '.sec-analyze-field label,.sec-analyze-check{font-size:12px;color:#5c6570;}',
-      '.sec-analyze-field input,.sec-analyze-field select{border:1px solid #d5d9de;background:#fff;color:#1a1d21;border-radius:3px;padding:4px 6px;font:inherit;font-size:12px;width:100%;}',
-      '.sec-analyze-check{display:flex;align-items:center;gap:6px;margin:0 0 8px;}',
-      '.sec-analyze-check input{margin:0;}',
-      '.sec-analyze-run{border:1px solid #1a1d21;background:#1a1d21;color:#fff;border-radius:3px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer;}',
-      '.sec-analyze-run:disabled{opacity:.55;cursor:default;}',
-      '.sec-analyze-tab:focus-visible,.sec-analyze-run:focus-visible,.sec-analyze-field input:focus-visible,.sec-analyze-field select:focus-visible{outline:2px solid #1a1d21;outline-offset:1px;}',
-      '.sec-analyze-summary{margin:0 0 8px;font-size:13px;white-space:pre-wrap;}',
-      '.sec-analyze-kicker{font-size:12px;font-weight:650;margin:0 0 4px;}',
-      '.sec-analyze-block{margin:0 0 8px;}',
-      '.sec-analyze-block-title{margin:8px 0 4px;font-size:12px;font-weight:650;}',
-      '.sec-analyze-table{width:100%;border-collapse:collapse;font-size:12px;margin:0 0 8px;}',
-      '.sec-analyze-table th,.sec-analyze-table td{border-bottom:1px solid #e4e7eb;text-align:left;padding:3px 6px;vertical-align:top;word-break:break-word;}',
-      '.sec-analyze-table th{color:#5c6570;font-weight:600;background:#fafbfc;}',
-      '.sec-analyze-pre{margin:0 0 8px;max-height:140px;overflow:auto;background:#fafbfc;border:1px solid #e4e7eb;padding:6px;font:11px/1.4 ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;}',
-      '.sec-analyze-chart{width:100%;height:280px;margin:0 0 8px;}',
-      '.sec-analyze-error{border:1px solid #e7b4ae;background:#fff;color:#9d2c23;padding:8px;}',
-      '.sec-analyze-error-label{font-size:11px;letter-spacing:.04em;margin:0 0 4px;}',
-      '.sec-analyze-error pre{margin:0;white-space:pre-wrap;font:12px/1.4 ui-monospace,SFMono-Regular,monospace;color:#9d2c23;}'
+      root + '{background:' + INK + ';color:' + IVORY + ';color-scheme:dark;accent-color:' + GOLD + ';border:0;border-radius:0;box-shadow:none;margin:-16px;min-height:calc(100vh - 48px);padding:28px 32px 40px;font:13px/1.5 ' + FONT_UI + ';scrollbar-color:rgba(198,161,91,.45) transparent;}',
+      root + ' *{box-sizing:border-box;border-radius:0;}',
+      root + ' .sec-analyze-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin:0 0 22px;}',
+      root + ' .sec-analyze-kicker{margin:0 0 8px;color:' + GOLD + ';font-family:' + FONT_UI + ';font-size:11px;font-weight:500;letter-spacing:.22em;line-height:1;}',
+      root + ' .sec-analyze-rule{width:28px;height:1px;margin:0 0 12px;background:' + GOLD + ';}',
+      root + ' .sec-analyze-title{margin:0;color:' + IVORY + ';font-family:' + FONT_TITLE + ';font-size:40px;font-weight:500;line-height:.95;letter-spacing:.01em;}',
+      root + ' .sec-analyze-session{margin:0;color:' + MUTED + ';font-size:11px;letter-spacing:.14em;text-align:right;}',
+      root + ' .sec-analyze-session code{display:block;margin-top:6px;color:' + IVORY + ';font-family:' + FONT_UI + ';font-size:12px;letter-spacing:0;}',
+      root + ' .sec-analyze-tabs{display:flex;flex-wrap:wrap;gap:0 18px;margin:0 0 22px;border-bottom:1px solid ' + LINE + ';}',
+      root + ' .sec-analyze-tab{appearance:none;margin:0 0 -1px;padding:8px 0 10px;border:0;border-bottom:1px solid transparent;background:transparent;color:' + MUTED + ';font-family:' + FONT_UI + ';font-size:12px;font-weight:500;letter-spacing:.08em;line-height:1.2;cursor:pointer;}',
+      root + ' .sec-analyze-tab:hover{color:' + IVORY + ';}',
+      root + ' .sec-analyze-tab-active{background:transparent;border-bottom-color:' + GOLD + ';color:' + IVORY + ';}',
+      root + ' .sec-analyze-layout{display:grid;grid-template-columns:minmax(300px,360px) minmax(0,1fr);gap:28px;align-items:stretch;}',
+      '@media (max-width:800px){' + root + ' .sec-analyze-layout{grid-template-columns:1fr;}' + root + ' .sec-analyze-head{flex-direction:column;align-items:flex-start;}' + root + ' .sec-analyze-session{text-align:left;}}',
+      root + ' .sec-analyze-form{min-width:0;padding:2px 4px 0 0;border:0;background:transparent;}',
+      root + ' .sec-analyze-result{min-width:0;min-height:460px;padding:18px 20px 16px;border:1px solid ' + LINE + ';background:' + LIFT + ';display:flex;flex-direction:column;}',
+      root + ' .sec-analyze-result-head{margin:0 0 16px;padding-bottom:12px;border-bottom:1px solid ' + LINE + ';}',
+      root + ' .sec-analyze-result-title{margin:0;color:' + IVORY + ';font-family:' + FONT_TITLE + ';font-size:28px;font-weight:500;line-height:1;}',
+      root + ' .sec-analyze-result-body{flex:1;min-width:0;}',
+      root + ' .sec-analyze-hint,' + root + ' .sec-analyze-note{margin:0 0 14px;color:' + MUTED + ';font-size:12px;line-height:1.55;}',
+      root + ' .sec-analyze-endpoint{margin:10px 0 0;color:' + MUTED + ';font-family:"Noto Sans Mono",ui-monospace,SFMono-Regular,monospace;font-size:11px;letter-spacing:.02em;}',
+      root + ' .sec-analyze-field{display:grid;grid-template-columns:88px minmax(0,1fr);column-gap:12px;align-items:center;margin:0;padding:8px 0;border-bottom:1px solid ' + LINE + ';}',
+      root + ' .sec-analyze-field label{color:' + MUTED + ';font-size:12px;letter-spacing:.04em;}',
+      root + ' .sec-analyze-field input,' + root + ' .sec-analyze-field select{width:100%;margin:0;padding:2px 0;border:0;background:transparent;color:' + IVORY + ';font:inherit;font-size:13px;}',
+      root + ' .sec-analyze-field input::placeholder{color:rgba(163,155,142,.72);}',
+      root + ' .sec-analyze-field select option{background:' + LIFT + ';color:' + IVORY + ';}',
+      root + ' .sec-analyze-field:focus-within{border-bottom-color:' + GOLD + ';}',
+      root + ' .sec-analyze-field-note{grid-column:1 / -1;margin:4px 0 0;color:' + MUTED + ';font-size:11px;line-height:1.45;}',
+      root + ' .sec-analyze-check{display:flex;align-items:center;gap:10px;margin:0;padding:8px 0;border-bottom:1px solid ' + LINE + ';color:' + IVORY + ';font-size:12px;letter-spacing:.04em;}',
+      root + ' .sec-analyze-check input{margin:0;accent-color:' + GOLD + ';}',
+      root + ' .sec-analyze-run{appearance:none;width:100%;margin-top:16px;padding:10px 12px;border:0;background:' + GOLD + ';color:' + INK + ';font-family:' + FONT_UI + ';font-size:12px;font-weight:500;letter-spacing:.18em;cursor:pointer;}',
+      root + ' .sec-analyze-run:hover{background:#d4b56e;}',
+      root + ' .sec-analyze-run:disabled{opacity:.45;cursor:default;}',
+      root + ' .sec-analyze-tab:focus-visible,' + root + ' .sec-analyze-run:focus-visible,' + root + ' .sec-analyze-field input:focus-visible,' + root + ' .sec-analyze-field select:focus-visible,' + root + ' .sec-analyze-check input:focus-visible{outline:1px solid ' + GOLD + ';outline-offset:3px;}',
+      root + ' .sec-analyze-idle{min-height:280px;display:flex;align-items:center;}',
+      root + ' .sec-analyze-empty{margin:0;color:' + MUTED + ';font-size:12px;line-height:1.5;}',
+      root + ' .sec-analyze-summary{margin:0 0 12px;color:' + IVORY + ';font-size:14px;line-height:1.65;white-space:pre-wrap;}',
+      root + ' .sec-analyze-block{margin:0 0 14px;}',
+      root + ' .sec-analyze-block-title{margin:2px 0 8px;color:' + IVORY + ';font-family:' + FONT_TITLE + ';font-size:22px;font-weight:500;line-height:1.1;}',
+      root + ' table.sec-analyze-table{width:100%;margin:0 0 12px;border-collapse:collapse;background:transparent;color:' + IVORY + ';font-size:12px;line-height:1.45;}',
+      root + ' .sec-analyze-table th,' + root + ' .sec-analyze-table td{border-bottom:1px solid ' + LINE + ';background:transparent;color:' + IVORY + ';padding:8px 12px 8px 0;text-align:left;vertical-align:top;font-weight:400;word-break:break-word;}',
+      root + ' .sec-analyze-table th{color:' + MUTED + ';background:transparent;font-size:11px;font-weight:500;letter-spacing:.06em;}',
+      root + ' .sec-analyze-pre{margin:0 0 12px;max-height:160px;overflow:auto;padding:10px 12px;border:1px solid ' + LINE + ';background:' + INK + ';color:' + IVORY + ';font:11px/1.5 "Noto Sans Mono",ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;}',
+      root + ' .sec-analyze-chart{width:100%;height:300px;margin:0 0 12px;background:' + INK + ';border:1px solid ' + LINE + ';}',
+      root + ' .sec-analyze-chart .vega-embed,' + root + ' .sec-analyze-chart svg,' + root + ' .sec-analyze-chart canvas{background:' + INK + ';}',
+      root + ' .sec-analyze-error{border:0;border-top:1px solid ' + GOLD + ';background:transparent;color:' + IVORY + ';padding:12px 0 0;}',
+      root + ' .sec-analyze-error-label{margin:0 0 6px;color:' + GOLD + ';font-family:' + FONT_TITLE + ';font-size:20px;font-weight:500;letter-spacing:.03em;}',
+      root + ' .sec-analyze-error pre{margin:0;padding:0;border:0;background:transparent;color:' + IVORY + ';font:12px/1.5 ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -435,6 +471,196 @@
     node.textContent = '';
   }
 
+  function fontsReady() {
+    if (document.fonts && document.fonts.ready) {
+      return document.fonts.ready.catch(function () { return null; });
+    }
+    return Promise.resolve();
+  }
+
+  function cloneSpec(spec) {
+    try { return JSON.parse(JSON.stringify(spec)); }
+    catch (err) { return spec; }
+  }
+
+  function isColorLiteral(value) {
+    return /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value)
+      || /^(?:firebrick|steelblue|green|red|blue|white|black|gray|grey|orange|purple|yellow)$/i.test(value);
+  }
+
+  function mappedColor(value, key) {
+    var v = String(value).trim().toLowerCase();
+    if (key === 'background' || key === 'backgroundColor') return INK;
+    if (v === '#d62728' || v === '#ff0000' || v === 'red' || v === 'firebrick' || v === '#e45756') return MUTED;
+    if (v === '#fff' || v === '#ffffff' || v === 'white') return IVORY;
+    return GOLD;
+  }
+
+  function paintSpecColors(node, key) {
+    if (Array.isArray(node)) {
+      return node.map(function (item) { return paintSpecColors(item, key); });
+    }
+    if (node && typeof node === 'object') {
+      var out = {};
+      Object.keys(node).forEach(function (childKey) {
+        if (childKey === 'data' || childKey === 'dataset' || childKey === 'datasets') {
+          out[childKey] = node[childKey];
+          return;
+        }
+        out[childKey] = paintSpecColors(node[childKey], childKey);
+      });
+      return out;
+    }
+    if (typeof node === 'string' && isColorLiteral(node)) return mappedColor(node, key);
+    return node;
+  }
+
+  function paintVegaEncodings(node) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      node.forEach(paintVegaEncodings);
+      return;
+    }
+    if (node.encoding && node.encoding.color && typeof node.encoding.color === 'object' && node.encoding.color.field) {
+      var color = node.encoding.color;
+      var scale = color.scale && typeof color.scale === 'object' ? color.scale : {};
+      scale.range = color.type === 'quantitative'
+        ? ['#2a261f', GOLD]
+        : [GOLD, IVORY, '#8d7340', '#d8c7a1', '#5c5346'];
+      delete scale.scheme;
+      color.scale = scale;
+    }
+    ['layer', 'concat', 'hconcat', 'vconcat', 'spec'].forEach(function (childKey) {
+      if (node[childKey]) paintVegaEncodings(node[childKey]);
+    });
+  }
+
+  function themeVega(spec) {
+    var view = paintSpecColors(cloneSpec(spec), '');
+    view.background = INK;
+    if (!view.width) view.width = 'container';
+    var config = view.config && typeof view.config === 'object' ? view.config : {};
+    config.background = INK;
+    config.font = 'Outfit';
+    config.view = Object.assign({}, config.view, { stroke: 'transparent' });
+    config.axis = Object.assign({}, config.axis, {
+      labelColor: MUTED,
+      titleColor: IVORY,
+      gridColor: LINE,
+      domainColor: LINE,
+      tickColor: LINE,
+      labelFont: 'Outfit',
+      titleFont: 'Outfit',
+      labelFontSize: 11,
+      titleFontSize: 12
+    });
+    config.legend = Object.assign({}, config.legend, {
+      labelColor: MUTED,
+      titleColor: IVORY,
+      labelFont: 'Outfit',
+      titleFont: 'Outfit'
+    });
+    var titleConfig = config.title && typeof config.title === 'object' ? config.title : {};
+    config.title = Object.assign({}, titleConfig, {
+      color: IVORY,
+      font: 'Cormorant Garamond',
+      fontSize: 18,
+      fontWeight: 500,
+      anchor: 'start'
+    });
+    config.range = {
+      category: [GOLD, IVORY, '#8d7340', '#d8c7a1', '#5c5346'],
+      heatmap: ['#2a261f', GOLD],
+      ramp: ['#2a261f', GOLD],
+      diverging: [MUTED, INK, GOLD]
+    };
+    config.mark = Object.assign({}, config.mark, { color: GOLD });
+    config.bar = Object.assign({}, config.bar, { color: GOLD });
+    config.line = Object.assign({}, config.line, { color: GOLD });
+    config.rect = Object.assign({}, config.rect, { color: GOLD });
+    config.point = Object.assign({}, config.point, { color: GOLD });
+    config.area = Object.assign({}, config.area, { color: GOLD, opacity: 0.28 });
+    config.rule = Object.assign({}, config.rule, { color: GOLD });
+    config.errorband = Object.assign({}, config.errorband, { color: GOLD, opacity: 0.28 });
+    view.config = config;
+    paintVegaEncodings(view);
+    if (view.title && typeof view.title === 'object') {
+      view.title.color = IVORY;
+      view.title.font = 'Cormorant Garamond';
+    }
+    return view;
+  }
+
+  function paintEchartsAxis(axis) {
+    if (!axis) return axis;
+    if (Array.isArray(axis)) return axis.map(paintEchartsAxis);
+    if (typeof axis !== 'object') return axis;
+    var next = Object.assign({}, axis);
+    var axisLine = next.axisLine && typeof next.axisLine === 'object' ? next.axisLine : {};
+    var splitLine = next.splitLine && typeof next.splitLine === 'object' ? next.splitLine : {};
+    next.axisLine = Object.assign({}, axisLine, {
+      lineStyle: Object.assign({}, axisLine.lineStyle || {}, { color: LINE })
+    });
+    next.axisTick = Object.assign({}, next.axisTick, { lineStyle: { color: LINE } });
+    next.axisLabel = Object.assign({}, next.axisLabel, { color: MUTED, fontFamily: 'Outfit, sans-serif' });
+    next.nameTextStyle = Object.assign({}, next.nameTextStyle, { color: IVORY, fontFamily: 'Outfit, sans-serif' });
+    next.splitLine = Object.assign({}, splitLine, {
+      lineStyle: Object.assign({}, splitLine.lineStyle || {}, { color: LINE })
+    });
+    return next;
+  }
+
+  function themeEcharts(spec) {
+    var view = paintSpecColors(cloneSpec(spec), '');
+    var palette = [GOLD, '#e6d3a8', '#8d7340', IVORY, '#5c5346', '#b08948'];
+    view.backgroundColor = INK;
+    view.textStyle = Object.assign({}, view.textStyle, { color: IVORY, fontFamily: 'Outfit, "Noto Sans SC", sans-serif' });
+    view.color = palette;
+    if (view.title && typeof view.title === 'object' && !Array.isArray(view.title)) {
+      view.title.textStyle = Object.assign({}, view.title.textStyle, {
+        color: IVORY,
+        fontFamily: 'Cormorant Garamond, "Noto Serif SC", serif',
+        fontWeight: 500,
+        fontSize: 18
+      });
+    }
+    if (view.legend && typeof view.legend === 'object' && !Array.isArray(view.legend)) {
+      view.legend.textStyle = Object.assign({}, view.legend.textStyle, { color: MUTED, fontFamily: 'Outfit, sans-serif' });
+    }
+    var tooltip = view.tooltip && typeof view.tooltip === 'object' && !Array.isArray(view.tooltip) ? view.tooltip : {};
+    view.tooltip = Object.assign({}, tooltip, {
+      backgroundColor: LIFT,
+      borderColor: LINE,
+      textStyle: Object.assign({}, tooltip.textStyle || {}, { color: IVORY, fontFamily: 'Outfit, sans-serif' })
+    });
+    if (view.xAxis) view.xAxis = paintEchartsAxis(view.xAxis);
+    if (view.yAxis) view.yAxis = paintEchartsAxis(view.yAxis);
+    if (Array.isArray(view.series)) {
+      view.series = view.series.map(function (series) {
+        if (!series || typeof series !== 'object') return series;
+        var next = Object.assign({}, series);
+        next.label = Object.assign({}, next.label, { color: IVORY, fontFamily: 'Outfit, sans-serif' });
+        if (next.type === 'sankey') {
+          next.itemStyle = Object.assign({}, next.itemStyle, { borderColor: INK, borderWidth: 0 });
+          next.lineStyle = Object.assign({}, next.lineStyle, { color: 'source', opacity: 0.28 });
+          if (Array.isArray(next.data)) {
+            next.data = next.data.map(function (node, index) {
+              if (!node || typeof node !== 'object') return node;
+              var copy = Object.assign({}, node);
+              copy.itemStyle = Object.assign({}, copy.itemStyle, {
+                color: palette[index % palette.length],
+                borderColor: INK
+              });
+              return copy;
+            });
+          }
+        }
+        return next;
+      });
+    }
+    return view;
+  }
+
   function renderChart(node, spec) {
     var kind = chartKind(spec);
     clearChartNode(node);
@@ -443,15 +669,17 @@
       return Promise.resolve();
     }
     if (kind === 'vega') {
-      return ensureVega().then(function () {
-        var view = Object.assign({}, spec);
-        if (!view.width) view.width = 'container';
-        return window.vegaEmbed(node, view, { actions: false, renderer: 'svg' });
+      return fontsReady().then(ensureVega).then(function () {
+        return window.vegaEmbed(node, themeVega(spec), {
+          actions: false,
+          renderer: 'svg',
+          config: { background: INK, font: 'Outfit' }
+        });
       });
     }
-    return ensureEcharts().then(function () {
-      var chart = window.echarts.init(node);
-      chart.setOption(spec);
+    return fontsReady().then(ensureEcharts).then(function () {
+      var chart = window.echarts.init(node, null, { renderer: 'canvas' });
+      chart.setOption(themeEcharts(spec));
       node._secAnalyzeChart = chart;
       if (typeof ResizeObserver === 'function') {
         var observer = new ResizeObserver(function () { chart.resize(); });
@@ -760,7 +988,7 @@
     wrap.appendChild(label);
     wrap.appendChild(input);
     if (field.options && field.type !== 'select' && typeof field.options === 'string') {
-      wrap.appendChild(el('div', 'sec-analyze-hint', field.options));
+      wrap.appendChild(el('div', 'sec-analyze-field-note', field.options));
     }
     return wrap;
   }
@@ -775,26 +1003,53 @@
     container.textContent = '';
     container.classList.add('sec-analyze-root');
 
+    var head = el('header', 'sec-analyze-head');
+    var headCopy = el('div', 'sec-analyze-head-copy');
+    headCopy.appendChild(el('p', 'sec-analyze-kicker', '分析'));
+    headCopy.appendChild(el('div', 'sec-analyze-rule'));
+    var titleEl = el('h2', 'sec-analyze-title', '');
+    headCopy.appendChild(titleEl);
+    var session = el('p', 'sec-analyze-session', '会话');
+    var sessionCode = el('code', '', '');
+    session.appendChild(sessionCode);
+    head.appendChild(headCopy);
+    head.appendChild(session);
+
     var tabs = el('div', 'sec-analyze-tabs');
     tabs.setAttribute('role', 'tablist');
     var layout = el('div', 'sec-analyze-layout');
     var form = el('form', 'sec-analyze-form');
     form.setAttribute('novalidate', 'novalidate');
     var result = el('div', 'sec-analyze-result');
+    var resultHead = el('div', 'sec-analyze-result-head');
+    resultHead.appendChild(el('p', 'sec-analyze-kicker', '记录'));
+    resultHead.appendChild(el('h3', 'sec-analyze-result-title', '结果'));
+    var resultBody = el('div', 'sec-analyze-result-body');
+    result.appendChild(resultHead);
+    result.appendChild(resultBody);
     layout.appendChild(form);
     layout.appendChild(result);
+    container.appendChild(head);
     container.appendChild(tabs);
     container.appendChild(layout);
+
+    function refreshSession() {
+      sessionCode.textContent = currentSession(ctx) || '未连接';
+    }
+
+    function paintIdle() {
+      resultBody.textContent = '';
+      var idle = el('div', 'sec-analyze-idle');
+      idle.appendChild(el('p', 'sec-analyze-empty', '运行后显示统计量与图表。'));
+      resultBody.appendChild(idle);
+    }
 
     function renderForm() {
       var tab = tabById(activeId);
       rememberedTab = tab.id;
+      titleEl.textContent = tab.label;
+      refreshSession();
       form.textContent = '';
-      var session = el('p', 'sec-analyze-session');
-      session.appendChild(document.createTextNode('会话 '));
-      session.appendChild(el('code', '', currentSession(ctx) || '（无）'));
-      form.appendChild(session);
-      form.appendChild(el('p', 'sec-analyze-endpoint', tab.method + ' ' + tab.path));
       if (tab.hint) form.appendChild(el('p', 'sec-analyze-hint', tab.hint));
       if (tab.note) form.appendChild(el('p', 'sec-analyze-note', tab.note));
 
@@ -803,7 +1058,7 @@
       datasetInput.type = 'text';
       datasetInput.name = 'dataset_name';
       datasetInput.id = uid + '-dataset';
-      datasetInput.placeholder = 'dataset_name';
+      datasetInput.placeholder = '表名';
       datasetInput.autocomplete = 'off';
       datasetInput.spellcheck = false;
       datasetInput.value = rememberedDataset;
@@ -820,6 +1075,7 @@
       var button = el('button', 'sec-analyze-run', '运行');
       button.type = 'submit';
       form.appendChild(button);
+      form.appendChild(el('p', 'sec-analyze-endpoint', tab.method + ' ' + tab.path));
     }
 
     function selectTab(id) {
@@ -853,7 +1109,7 @@
       if (!sessionId) missing.unshift('会话');
       if (!dataset) missing.unshift('数据集');
       if (missing.length) {
-        showError(result, '无法提交', '请填写：' + missing.join('、'));
+        showError(resultBody, '无法提交', '请填写：' + missing.join('、'));
         return;
       }
       var request = typeof tab.request === 'function'
@@ -869,16 +1125,16 @@
         button.disabled = true;
         button.textContent = '运行中';
       }
-      result.textContent = '';
-      result.appendChild(el('p', 'sec-analyze-empty', '正在计算…'));
+      resultBody.textContent = '';
+      resultBody.appendChild(el('p', 'sec-analyze-empty', '计算中'));
       callApi(ctx, request.method, request.path, request.body).then(function (data) {
         if (token !== runToken) return;
-        paintResult(result, data);
+        paintResult(resultBody, data);
         notify(ctx, tab.label + ' 已完成');
       }).catch(function (err) {
         if (token !== runToken) return;
         var detail = failureDetail(err);
-        showError(result, 'detail', detail);
+        showError(resultBody, '详情', detail);
         notify(ctx, formatDetail(detail));
       }).then(function () {
         if (token !== runToken) return;
@@ -889,7 +1145,7 @@
       });
     });
 
-    result.appendChild(el('p', 'sec-analyze-empty', '填写左侧条件后运行。统计量和图表显示在这里。'));
+    paintIdle();
     selectTab(activeId);
   }
 
