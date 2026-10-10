@@ -438,7 +438,10 @@ function openView(btn) {
   try {
     Promise.resolve()
       .then(() => mod.mount(root, makeCtx(view)))
-      .then(() => selectGovernTab(root, view))
+      .then(() => {
+        selectGovernTab(root, view);
+        selectIngestTab(root, view);
+      })
       .catch((err) => {
         notify("失败：" + (err && err.message ? err.message : err));
         showMountError(view.label, err);
@@ -452,6 +455,21 @@ function openView(btn) {
 function selectGovernTab(root, view) {
   if (!view || view.section !== "govern" || !view.id) return;
   const tab = root.querySelector('[data-govern-tab="' + CSS.escape(view.id) + '"]');
+  if (!tab || tab.getAttribute("aria-selected") === "true") return;
+  tab.click();
+}
+
+const INGEST_TABS = {
+  "import-file": "file",
+  "connect-db": "db",
+  "import-trace": "trace",
+};
+
+function selectIngestTab(root, view) {
+  if (!view || view.section !== "ingest") return;
+  const id = INGEST_TABS[view.id];
+  if (!id) return;
+  const tab = root.querySelector('.sec-ingest-tab[data-tab="' + CSS.escape(id) + '"]');
   if (!tab || tab.getAttribute("aria-selected") === "true") return;
   tab.click();
 }

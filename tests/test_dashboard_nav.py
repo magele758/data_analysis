@@ -89,6 +89,15 @@ def test_section_scripts_and_missing_copy():
     assert 'id="mount"' in HTML
 
 
+def test_ingest_sidebar_opens_matching_panel():
+    """数据 items map onto ingest.js tabs file, db, and trace."""
+    assert 'src="/static/sections/ingest.js"' in HTML
+    assert "function selectIngestTab(root, view)" in JS
+    assert '"import-file": "file"' in JS
+    assert '"connect-db": "db"' in JS
+    assert '"import-trace": "trace"' in JS
+
+
 def test_govern_sidebar_opens_matching_tab():
     """质量 and 激活 share govern.js; the shell selects the sidebar tab after mount."""
     assert 'src="/static/sections/govern.js"' in HTML
