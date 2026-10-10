@@ -36,7 +36,7 @@
   var QUIET = "#a39b8e";
   var GOLD = "#c6a15b";
   var FAIL = "#c45c4a";
-  var TITLE = '"Cormorant Garamond","Noto Serif CJK SC","Songti SC",serif';
+  var TITLE = '"Cormorant Garamond","Noto Serif SC","Noto Serif CJK SC","Songti SC",serif';
   var UI = 'Outfit,"Noto Sans CJK SC","PingFang SC","Microsoft YaHei",sans-serif';
 
   var CSS = [
@@ -66,9 +66,9 @@
     ".sec-govern-pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;}",
     ".sec-govern-rule{border:1px solid " + LINE + ";border-radius:0;padding:12px;display:flex;flex-direction:column;gap:8px;background:" + INK + ";}",
     ".sec-govern-rule-top,.sec-govern-inline{display:flex;gap:10px;align-items:center;}",
-    ".sec-govern-rule-top .sec-govern-select{flex:1;}",
+    ".sec-govern-rule-top .sec-govern-select,.sec-govern-inline .sec-govern-input{width:auto;flex:1;min-width:0;}",
     ".sec-govern-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;}",
-    ".sec-govern-btn{border:1px solid " + LINE + ";background:transparent;color:" + PAPER + ";border-radius:0;padding:8px 14px;font:inherit;font-size:12px;letter-spacing:.12em;cursor:pointer;}",
+    ".sec-govern-btn{border:1px solid " + LINE + ";background:transparent;color:" + PAPER + ";border-radius:0;padding:8px 14px;font:inherit;font-size:12px;letter-spacing:.08em;white-space:nowrap;flex:none;cursor:pointer;}",
     ".sec-govern-btn:hover{background:transparent;border-color:rgba(243,239,230,0.28);color:" + PAPER + ";}",
     ".sec-govern-btn-primary{background:" + GOLD + ";border-color:" + GOLD + ";color:" + INK + ";}",
     ".sec-govern-btn-primary:hover{background:" + GOLD + ";border-color:" + GOLD + ";color:" + INK + ";}",
@@ -82,15 +82,15 @@
     ".sec-govern-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:18px;margin:0 0 18px;}",
     ".sec-govern-stat{border:0;border-top:1px solid " + LINE + ";border-radius:0;padding:8px 0 0;background:transparent;}",
     ".sec-govern-stat-label{font-size:11px;letter-spacing:.04em;color:" + QUIET + ";font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}",
-    ".sec-govern-stat-value{margin-top:4px;font-family:" + TITLE + ";font-size:32px;font-weight:500;line-height:1;color:" + PAPER + ";font-variant-numeric:tabular-nums;}",
+    ".sec-govern-stat-value{margin-top:4px;font-family:" + UI + ";font-size:28px;font-weight:500;line-height:1.15;color:" + PAPER + ";font-variant-numeric:lining-nums tabular-nums;}",
     ".sec-govern-tone-ok{color:" + PAPER + ";}",
     ".sec-govern-tone-bad{color:" + FAIL + ";}",
     ".sec-govern-block{margin-top:18px;}",
     ".sec-govern-block-title{margin:0 0 8px;font-family:" + TITLE + ";font-size:22px;font-weight:500;letter-spacing:.06em;color:" + PAPER + ";}",
     ".sec-govern-table-wrap{overflow:auto;max-height:240px;border:0;border-top:1px solid " + LINE + ";border-radius:0;}",
     ".sec-govern-table{border-collapse:collapse;width:100%;font-size:12px;background:transparent;}",
-    ".sec-govern-table th,.sec-govern-table td{border-bottom:1px solid " + LINE + ";text-align:left;padding:8px 10px 8px 0;white-space:nowrap;color:" + PAPER + ";}",
-    ".sec-govern-table th{color:" + QUIET + ";font-weight:500;letter-spacing:.06em;background:" + INK + ";position:sticky;top:0;}",
+    ".sec-govern-table th,.sec-govern-table td{border-bottom:1px solid " + LINE + " !important;text-align:left;padding:8px 10px 8px 0;white-space:nowrap;color:" + PAPER + " !important;background:transparent !important;}",
+    ".sec-govern-table th{color:" + QUIET + " !important;font-weight:500;letter-spacing:.06em;background:" + INK + " !important;position:sticky;top:0;}",
     ".sec-govern-raw{margin-top:18px;}",
     ".sec-govern-summary{cursor:pointer;font-size:12px;letter-spacing:.08em;color:" + QUIET + ";}",
     "@media (max-width:720px){.sec-govern-split{grid-template-columns:1fr;}.sec-govern-form{border-right:0;border-bottom:1px solid " + LINE + ";}.sec-govern-session{margin-left:0;max-width:100%;}.sec-govern-bar{padding:18px 16px 0;}.sec-govern-form,.sec-govern-result{padding-left:16px;padding-right:16px;}}",
@@ -123,7 +123,7 @@
       var link = document.createElement("link");
       link.id = "sec-govern-font";
       link.rel = "stylesheet";
-      link.href = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Outfit:wght@400;500;600&display=swap";
+      link.href = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Serif+SC:wght@500&family=Outfit:wght@400;500;600&display=swap";
       document.head.appendChild(link);
     }
     if (document.getElementById("sec-govern-style")) return;
