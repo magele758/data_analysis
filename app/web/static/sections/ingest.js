@@ -34,12 +34,15 @@
       ".sec-ingest-tab{appearance:none;background:transparent;border:0;border-bottom:2px solid transparent;margin:0 0 -1px;padding:6px 10px;color:#667085;cursor:pointer;font:inherit;}",
       ".sec-ingest-tab-active{color:#1c1f24;border-bottom-color:#1c1f24;font-weight:600;}",
       ".sec-ingest-panel-hint{margin:0 0 10px;color:#667085;font-size:12px;}",
-      ".sec-ingest-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;}",
+      ".sec-ingest-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:stretch;}",
       ".sec-ingest-form,.sec-ingest-result{border:1px solid #e4e7ec;background:#fff;padding:12px;}",
       ".sec-ingest-field{margin:0 0 8px;}",
       ".sec-ingest-label{display:block;margin:0 0 2px;color:#3d4450;}",
-      ".sec-ingest-input,.sec-ingest-select,.sec-ingest-file{width:100%;border:1px solid #d0d5dd;background:#fff;color:#1c1f24;padding:5px 8px;border-radius:0;font:inherit;}",
-      ".sec-ingest-file{padding:4px;}",
+      ".sec-ingest-input,.sec-ingest-select{width:100%;border:1px solid #d0d5dd;background:#fff;color:#1c1f24;padding:5px 8px;border-radius:0;font:inherit;}",
+      ".sec-ingest-filepick{display:flex;align-items:center;gap:8px;min-width:0;}",
+      ".sec-ingest-filepick-btn{appearance:none;background:#fff;color:#1c1f24;border:1px solid #d0d5dd;padding:4px 8px;cursor:pointer;font:inherit;}",
+      ".sec-ingest-filepick-name{color:#667085;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+      ".sec-ingest-file-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}",
       ".sec-ingest-mono,.sec-ingest-out{font-family:ui-monospace,\"WenQuanYi Micro Hei Mono\",monospace;}",
       ".sec-ingest-hint{margin:4px 0 0;color:#667085;font-size:12px;}",
       ".sec-ingest-actions{display:flex;align-items:center;gap:16px;margin-top:4px;}",
@@ -52,7 +55,7 @@
       ".sec-ingest-out{margin:0;min-height:12rem;white-space:pre-wrap;word-break:break-word;color:#667085;font-size:12px;}",
       ".sec-ingest-out-ok{color:#1c1f24;}",
       ".sec-ingest-out-error{color:#b42318;}",
-      ".sec-ingest-tab:focus-visible,.sec-ingest-submit:focus-visible,.sec-ingest-textbtn:focus-visible,.sec-ingest-input:focus-visible,.sec-ingest-select:focus-visible,.sec-ingest-file:focus-visible{outline:2px solid #1c1f24;outline-offset:1px;}",
+      ".sec-ingest-tab:focus-visible,.sec-ingest-submit:focus-visible,.sec-ingest-textbtn:focus-visible,.sec-ingest-input:focus-visible,.sec-ingest-select:focus-visible,.sec-ingest-filepick-btn:focus-visible{outline:2px solid #1c1f24;outline-offset:1px;}",
       "@media (max-width:760px){.sec-ingest-layout{grid-template-columns:minmax(0,1fr);}}"
     ].join("");
     (document.head || document.documentElement).appendChild(style);
@@ -211,11 +214,25 @@
   }
 
   function fileInput(name, accept) {
-    var node = el("input", "sec-ingest-file");
+    var pick = el("div", "sec-ingest-filepick");
+    var button = el("button", "sec-ingest-filepick-btn");
+    button.type = "button";
+    button.textContent = "选择文件";
+    var node = el("input", "sec-ingest-file-input");
     node.type = "file";
     node.name = name;
     if (accept) node.accept = accept;
-    return node;
+    var nameEl = el("span", "sec-ingest-filepick-name");
+    nameEl.textContent = "未选择文件";
+    button.addEventListener("click", function () { node.click(); });
+    node.addEventListener("change", function () {
+      var file = node.files && node.files[0];
+      nameEl.textContent = file ? file.name : "未选择文件";
+    });
+    pick.appendChild(button);
+    pick.appendChild(node);
+    pick.appendChild(nameEl);
+    return pick;
   }
 
   function selectInput(name, options) {
