@@ -279,7 +279,15 @@
 
   let markerSeq = 0;
 
-  function graphMarkup(graph, title) {
+  function nodeIsCurrent(node, currentId) {
+    if (!node) return false;
+    if (node.current === true || node.is_current === true) return true;
+    const key = String(currentId || '').trim();
+    if (!key) return false;
+    return node.id === key || node.label === key;
+  }
+
+  function graphMarkup(graph, title, currentId) {
     const sourceNodes = (graph && graph.nodes) || [];
     const edges = ((graph && graph.edges) || []).map(function (edge) {
       return {
@@ -303,6 +311,7 @@
       return {
         id: node.id || node.name,
         label: node.display_name || node.name || node.id,
+        current: node.current === true || node.is_current === true,
       };
     });
     broken.forEach(function (edge) {
@@ -323,29 +332,37 @@
       const to = laid.pos[edge.target];
       if (!from || !to || (from.x === to.x && from.y === to.y)) return '';
       const clipped = clipEnds(from, to);
-      const color = edge.broken ? '#9b2c2c' : '#1f3a5f';
       const marker = edge.broken ? markerId + '-broken' : markerId;
-      const dash = edge.broken ? ' stroke-dasharray="4 3"' : '';
+      const dash = edge.broken ? ' stroke-dasharray="3 4" stroke-opacity="0.38"' : ' stroke-opacity="0.78"';
       const midX = (clipped.x1 + clipped.x2) / 2;
-      const midY = (clipped.y1 + clipped.y2) / 2 - 6;
+      const midY = (clipped.y1 + clipped.y2) / 2 - 7;
       return '<line x1="' + clipped.x1 + '" y1="' + clipped.y1 + '" x2="' + clipped.x2 + '" y2="' + clipped.y2
-        + '" stroke="' + color + '" stroke-width="1.25"' + dash + ' marker-end="url(#' + marker + ')"/>'
-        + '<text x="' + midX + '" y="' + midY + '" text-anchor="middle" font-size="10" fill="#5c6570">'
+        + '" stroke="#f3efe6" stroke-width="0.7"' + dash + ' marker-end="url(#' + marker + ')"/>'
+        + '<text x="' + midX + '" y="' + midY + '" text-anchor="middle" font-size="10" fill="#a39b8e">'
         + esc(edge.id) + '</text>';
     }).join('');
     const boxes = nodes.map(function (node) {
       const point = laid.pos[node.id];
-      const stroke = node.missing ? '#9b2c2c' : '#1f3a5f';
-      const fill = node.missing ? '#fff6f6' : '#f7f9fb';
-      return '<g><rect x="' + (point.x - 52) + '" y="' + (point.y - 14) + '" width="104" height="28" rx="3" fill="'
-        + fill + '" stroke="' + stroke + '"/>'
-        + '<text x="' + point.x + '" y="' + (point.y + 4) + '" text-anchor="middle" font-size="11" fill="#1c1f24">'
+      const current = nodeIsCurrent(node, currentId);
+      const stroke = current ? '#c6a15b' : '#f3efe6';
+      const opacity = current ? '1' : (node.missing ? '0.32' : '0.55');
+      const width = current ? '1.15' : '0.6';
+      const text = current ? '#c6a15b' : (node.missing ? '#a39b8e' : '#f4f0e6');
+      const dash = node.missing && !current ? ' stroke-dasharray="3 3"' : '';
+      const cls = 'sec-model-node' + (current ? ' sec-model-node-current' : '')
+        + (node.missing ? ' sec-model-node-missing' : '');
+      return '<g class="' + cls + '"><rect x="' + (point.x - 52) + '" y="' + (point.y - 14)
+        + '" width="104" height="28" rx="0" fill="#161410" stroke="' + stroke + '" stroke-opacity="' + opacity
+        + '" stroke-width="' + width + '"' + dash + '/>'
+        + '<text x="' + point.x + '" y="' + (point.y + 4) + '" text-anchor="middle" font-size="12" fill="' + text + '">'
         + esc(shortLabel(node.label)) + '</text></g>';
     }).join('');
     const nodeList = nodes.map(function (node) {
-      return '<li><span class="sec-model-node-name">' + esc(node.label) + '</span> <span class="sec-model-muted">'
-        + esc(node.id) + '</span>'
+      const current = nodeIsCurrent(node, currentId);
+      return '<li class="' + (current ? 'sec-model-node-current' : '') + '"><span class="sec-model-node-name">'
+        + esc(node.label) + '</span> <span class="sec-model-muted">' + esc(node.id) + '</span>'
         + (node.missing ? ' <span class="sec-model-missing">端点未注册</span>' : '')
+        + (current ? ' <span class="sec-model-current-mark">当前</span>' : '')
         + '</li>';
     }).join('');
     const edgeList = allEdges.map(function (edge) {
@@ -359,10 +376,10 @@
       + '<div class="sec-model-muted">' + esc(summary) + '</div>'
       + '<svg class="sec-model-graph" viewBox="0 0 ' + laid.width + ' ' + laid.height + '" width="100%" height="'
       + laid.height + '" role="img" aria-label="' + esc(title) + '">'
-      + '<defs><marker id="' + markerId + '" markerWidth="8" markerHeight="8" refX="8" refY="3" orient="auto">'
-      + '<path d="M0,0 L8,3 L0,6 Z" fill="#1f3a5f"/></marker>'
-      + '<marker id="' + markerId + '-broken" markerWidth="8" markerHeight="8" refX="8" refY="3" orient="auto">'
-      + '<path d="M0,0 L8,3 L0,6 Z" fill="#9b2c2c"/></marker></defs>'
+      + '<defs><marker id="' + markerId + '" markerWidth="7" markerHeight="7" refX="6.2" refY="2.6" orient="auto">'
+      + '<path d="M0,0 L7,2.6 L0,5.2 Z" fill="#f3efe6" fill-opacity="0.78"/></marker>'
+      + '<marker id="' + markerId + '-broken" markerWidth="7" markerHeight="7" refX="6.2" refY="2.6" orient="auto">'
+      + '<path d="M0,0 L7,2.6 L0,5.2 Z" fill="#f3efe6" fill-opacity="0.38"/></marker></defs>'
       + lines + boxes + '</svg>'
       + '<div class="sec-model-graph-lists"><div><div class="sec-model-kicker">节点</div><ul class="sec-model-node-list">'
       + nodeList + '</ul></div><div><div class="sec-model-kicker">边</div><ul class="sec-model-edge-list">'
@@ -421,7 +438,7 @@
     });
     const columns = Object.keys(groups).map(Number).sort(function (a, b) { return a - b; });
     const pos = {};
-    const colW = 168;
+    const colW = 228;
     const rowH = 58;
     let maxRows = 1;
     columns.forEach(function (column, columnIndex) {
@@ -552,57 +569,71 @@
   }
 
   const CSS = [
-    '.sec-model-root{background:#fff;color:#1c1f24;font:13px/1.45 ui-sans-serif,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;}',
+    '.sec-model-root{--sec-model-bg:#0e0d0b;--sec-model-lift:#161410;--sec-model-line:rgba(243,239,230,0.12);--sec-model-ink:#f4f0e6;--sec-model-muted:#a39b8e;--sec-model-gold:#c6a15b;background:#0e0d0b;color:#f4f0e6;color-scheme:dark;font:14px/1.55 Outfit,"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;margin:-16px -18px -24px;padding:36px 40px 48px;min-height:calc(100vh - 80px);}',
     '.sec-model-root *,.sec-model-root *::before,.sec-model-root *::after{box-sizing:border-box;}',
-    '.sec-model-root button,.sec-model-root input,.sec-model-root select,.sec-model-root textarea{font:inherit;color:inherit;}',
+    '.sec-model-root button,.sec-model-root input,.sec-model-root select,.sec-model-root textarea{font:inherit;border-radius:0;}',
     '.sec-model-root [hidden]{display:none !important;}',
-    '.sec-model-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:10px 12px 0;}',
-    '.sec-model-title{margin:0;font-size:14px;font-weight:650;letter-spacing:0;}',
-    '.sec-model-session{font-size:12px;color:#5c6570;}',
-    '.sec-model-sid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#1c1f24;}',
-    '.sec-model-tabs{display:flex;gap:4px;padding:8px 12px 0;border-bottom:1px solid #e1e4e8;}',
-    '.sec-model-tab{appearance:none;border:1px solid transparent;border-bottom:none;background:transparent;color:#5c6570;padding:6px 10px;cursor:pointer;}',
-    '.sec-model-tab-active{background:#fff;color:#1c1f24;font-weight:650;border-color:#e1e4e8;margin-bottom:-1px;}',
-    '.sec-model-pane{padding:12px;}',
-    '.sec-model-split{display:grid;grid-template-columns:minmax(240px,320px) minmax(0,1fr);gap:12px;align-items:start;}',
-    '.sec-model-form,.sec-model-result{border:1px solid #e1e4e8;background:#fff;padding:10px;min-width:0;}',
-    '.sec-model-result{background:#fafbfc;min-height:220px;overflow:auto;}',
-    '.sec-model-label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#5c6570;margin-bottom:8px;}',
-    '.sec-model-input,.sec-model-area{width:100%;border:1px solid #d5d9e0;background:#fff;border-radius:2px;padding:5px 7px;font-size:12px;}',
-    '.sec-model-area{min-height:58px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}',
-    '.sec-model-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}',
-    '.sec-model-check{display:flex;align-items:center;gap:6px;font-size:12px;color:#1c1f24;margin:0 0 8px;}',
-    '.sec-model-hint{margin:0 0 8px;font-size:12px;color:#5c6570;}',
-    '.sec-model-actions{display:flex;gap:8px;}',
-    '.sec-model-submit,.sec-model-ghost{border-radius:2px;padding:6px 10px;cursor:pointer;}',
-    '.sec-model-submit{border:1px solid #1f3a5f;background:#1f3a5f;color:#fff;}',
-    '.sec-model-ghost{border:1px solid #c5cad1;background:#fff;color:#1c1f24;}',
-    '.sec-model-submit:disabled,.sec-model-ghost:disabled{opacity:.55;cursor:default;}',
-    '.sec-model-table-wrap{overflow:auto;max-height:280px;}',
-    '.sec-model-table{width:100%;border-collapse:collapse;font-size:12px;}',
-    '.sec-model-table th,.sec-model-table td{text-align:left;padding:4px 6px;border-bottom:1px solid #e6e8eb;vertical-align:top;white-space:nowrap;}',
-    '.sec-model-table th{color:#5c6570;font-weight:600;}',
-    '.sec-model-json{margin:0;white-space:pre-wrap;word-break:break-word;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;max-height:220px;overflow:auto;}',
-    '.sec-model-raw{margin-top:8px;}',
-    '.sec-model-raw summary{cursor:pointer;color:#5c6570;font-size:12px;}',
-    '.sec-model-fail{border:1px solid #f0c2c0;background:#fff6f6;color:#8a1f17;padding:8px;}',
-    '.sec-model-fail-title{font-weight:650;margin-bottom:4px;}',
-    '.sec-model-detail{margin:6px 0 0;white-space:pre-wrap;word-break:break-word;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;}',
-    '.sec-model-banner{display:inline-block;padding:2px 8px;font-size:12px;font-weight:650;border:1px solid transparent;margin-bottom:8px;}',
-    '.sec-model-banner-success{background:#f1f8f3;color:#146c36;border-color:#c9e6d2;}',
-    '.sec-model-banner-failed{background:#fff6f6;color:#8a1f17;border-color:#f0c2c0;}',
-    '.sec-model-banner-simulated{background:#f7f5ef;color:#6b5420;border-color:#e6dcb8;}',
-    '.sec-model-empty,.sec-model-muted,.sec-model-kicker{color:#5c6570;font-size:12px;}',
-    '.sec-model-kicker{margin:8px 0 4px;font-weight:650;color:#1c1f24;}',
-    '.sec-model-warn{color:#8a5a12;font-size:12px;margin:4px 0;}',
-    '.sec-model-missing{color:#9b2c2c;}',
-    '.sec-model-graph{display:block;background:#fff;border:1px solid #e6e8eb;}',
-    '.sec-model-graph-lists{display:grid;grid-template-columns:1fr 1fr;gap:8px;}',
-    '.sec-model-node-list,.sec-model-edge-list{margin:0;padding-left:16px;font-size:12px;}',
-    '.sec-model-block-title{font-size:12px;font-weight:650;margin-bottom:4px;}',
-    '.sec-model-stack{display:flex;flex-direction:column;gap:8px;}',
-    '.sec-model-root :focus-visible{outline:2px solid #1f3a5f;outline-offset:1px;}',
-    '@media (max-width:760px){.sec-model-split,.sec-model-graph-lists,.sec-model-grid{grid-template-columns:1fr;}}',
+    '.sec-model-root ::selection{background:rgba(198,161,91,0.28);color:#f4f0e6;}',
+    '.sec-model-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;padding:0 0 22px;border-bottom:1px solid rgba(243,239,230,0.12);}',
+    '.sec-model-root .sec-model-title{margin:0 !important;font-family:"Cormorant Garamond","Noto Serif SC",serif !important;font-size:46px !important;font-weight:500 !important;line-height:0.9;letter-spacing:0.14em;color:#f4f0e6;}',
+    '.sec-model-title::after{content:"";display:block;width:36px;height:1px;margin-top:16px;background:#c6a15b;}',
+    '.sec-model-session{font-size:12px;letter-spacing:0.12em;color:#a39b8e;}',
+    '.sec-model-sid{font-family:Outfit,"Noto Sans SC",sans-serif;color:#f4f0e6;font-size:12px;}',
+    '.sec-model-tabs{display:flex;gap:28px;padding:0;margin:0;border-bottom:1px solid rgba(243,239,230,0.12);}',
+    '.sec-model-root .sec-model-tab{appearance:none;border:0;border-bottom:1px solid transparent;background:transparent;color:#a39b8e;padding:16px 0 14px;margin-bottom:-1px;cursor:pointer;letter-spacing:0.12em;}',
+    '.sec-model-root .sec-model-tab:hover{color:#f4f0e6;}',
+    '.sec-model-root .sec-model-tab-active{background:transparent;color:#f4f0e6;font-weight:500;border-bottom-color:#c6a15b;}',
+    '.sec-model-pane{padding:28px 0 0;}',
+    '.sec-model-split{display:grid;grid-template-columns:minmax(260px,340px) minmax(0,1fr);gap:28px;align-items:start;}',
+    '.sec-model-form,.sec-model-result{border:1px solid rgba(243,239,230,0.12);background:#161410;padding:22px 22px 18px;min-width:0;border-radius:0;}',
+    '.sec-model-result{background:#0e0d0b;min-height:280px;overflow:auto;}',
+    '.sec-model-label{display:flex;flex-direction:column;gap:6px;font-size:12px;letter-spacing:0.08em;color:#a39b8e;margin-bottom:14px;}',
+    '.sec-model-root .sec-model-input,.sec-model-root .sec-model-area{width:100%;border:1px solid rgba(243,239,230,0.12);background:#0e0d0b;border-radius:0;padding:8px 10px;font-size:14px;color:#f4f0e6;}',
+    '.sec-model-input::placeholder,.sec-model-area::placeholder{color:#a39b8e;opacity:0.7;}',
+    '.sec-model-area{min-height:72px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.5;letter-spacing:0;}',
+    '.sec-model-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px;}',
+    '.sec-model-check{display:flex;align-items:center;gap:8px;font-size:13px;letter-spacing:0.04em;color:#f4f0e6;margin:0 0 14px;}',
+    '.sec-model-check input{accent-color:#c6a15b;}',
+    '.sec-model-hint{margin:0 0 16px;font-size:13px;line-height:1.6;color:#a39b8e;letter-spacing:0;}',
+    '.sec-model-actions{display:flex;gap:12px;flex-wrap:wrap;}',
+    '.sec-model-root .sec-model-submit,.sec-model-root .sec-model-ghost{border-radius:0;padding:9px 16px;cursor:pointer;letter-spacing:0.14em;background:transparent;}',
+    '.sec-model-root .sec-model-submit{border:1px solid #c6a15b;color:#c6a15b;}',
+    '.sec-model-root .sec-model-submit:hover{background:#c6a15b;color:#0e0d0b;}',
+    '.sec-model-root .sec-model-ghost{border:1px solid rgba(243,239,230,0.12);color:#f4f0e6;}',
+    '.sec-model-root .sec-model-ghost:hover{border-color:#c6a15b;color:#c6a15b;}',
+    '.sec-model-root .sec-model-submit:disabled,.sec-model-root .sec-model-ghost:disabled{opacity:.4;cursor:default;background:transparent;color:#c6a15b;}',
+    '.sec-model-root .sec-model-ghost:disabled{color:#a39b8e;}',
+    '.sec-model-table-wrap{overflow:auto;max-height:320px;}',
+    '.sec-model-table{width:100%;border-collapse:collapse;font-size:13px;}',
+    '.sec-model-root .sec-model-table th,.sec-model-root .sec-model-table td{text-align:left;padding:8px 10px;border-bottom:1px solid rgba(243,239,230,0.12) !important;vertical-align:top;white-space:nowrap;color:#f4f0e6 !important;background:transparent !important;}',
+    '.sec-model-root .sec-model-table th{color:#a39b8e !important;font-weight:500 !important;letter-spacing:0.08em;font-size:11px;}',
+    '.sec-model-json{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;max-height:220px;overflow:auto;color:#f4f0e6;background:transparent;}',
+    '.sec-model-raw{margin-top:16px;}',
+    '.sec-model-raw summary{cursor:pointer;color:#a39b8e;font-size:12px;letter-spacing:0.1em;}',
+    '.sec-model-fail{border:1px solid rgba(243,239,230,0.12);background:#161410;color:#f4f0e6;padding:16px 18px;border-radius:0;}',
+    '.sec-model-fail-title{font-family:"Cormorant Garamond","Noto Serif SC",serif;font-weight:500;font-size:22px;letter-spacing:0.12em;color:#c6a15b;margin-bottom:6px;}',
+    '.sec-model-detail{margin:8px 0 0;white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#f4f0e6;}',
+    '.sec-model-banner{display:inline-block;padding:0 0 4px;font-size:12px;font-weight:500;letter-spacing:0.16em;border:0;border-bottom:1px solid rgba(243,239,230,0.12);background:transparent;margin-bottom:14px;border-radius:0;}',
+    '.sec-model-banner-success{color:#c6a15b;border-bottom-color:#c6a15b;}',
+    '.sec-model-banner-failed{color:#f4f0e6;border-bottom-color:rgba(243,239,230,0.12);}',
+    '.sec-model-banner-simulated{color:#a39b8e;border-bottom-color:rgba(243,239,230,0.12);}',
+    '.sec-model-empty,.sec-model-muted{color:#a39b8e;font-size:13px;}',
+    '.sec-model-empty{padding:8px 0 4px;}',
+    '.sec-model-kicker{margin:18px 0 8px;font-weight:500;font-size:12px;letter-spacing:0.16em;color:#a39b8e;}',
+    '.sec-model-warn{color:#c6a15b;font-size:13px;margin:8px 0;letter-spacing:0.02em;}',
+    '.sec-model-missing{color:#a39b8e;}',
+    '.sec-model-current-mark{color:#c6a15b;letter-spacing:0.14em;font-size:11px;}',
+    '.sec-model-node-current .sec-model-node-name{color:#c6a15b;}',
+    '.sec-model-graph{display:block;background:#0e0d0b;border:1px solid rgba(243,239,230,0.12);border-radius:0;margin:12px 0 4px;}',
+    '.sec-model-graph text{font-family:Outfit,"Noto Sans SC",sans-serif;}',
+    '.sec-model-graph-lists{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:16px;}',
+    '.sec-model-node-list,.sec-model-edge-list{margin:0;padding:0;list-style:none;font-size:13px;}',
+    '.sec-model-node-list li,.sec-model-edge-list li{padding:7px 0;border-bottom:1px solid rgba(243,239,230,0.12);}',
+    '.sec-model-block-title{font-family:"Cormorant Garamond","Noto Serif SC",serif;font-size:28px;font-weight:500;letter-spacing:0.12em;line-height:1;margin:0 0 8px;color:#f4f0e6;}',
+    '.sec-model-graph-block{margin-bottom:8px;}',
+    '.sec-model-stack{display:flex;flex-direction:column;gap:18px;}',
+    '.sec-model-root :focus-visible{outline:1px solid #c6a15b;outline-offset:2px;}',
+    '@media (max-width:760px){.sec-model-root{margin:-16px -18px -24px;padding:28px 20px 36px;}.sec-model-title{font-size:36px;}.sec-model-split,.sec-model-graph-lists,.sec-model-grid{grid-template-columns:1fr;}.sec-model-tabs{gap:18px;}}',
   ].join('');
 
   function field(name, label, placeholder, extra) {
@@ -1054,7 +1085,9 @@
         finish(ctx, host, res);
         return;
       }
-      host.innerHTML = graphMarkup(res.data, '实体图');
+      const source = root.querySelector('[data-form="traverse"]');
+      const currentId = source ? val(source, 'source_object_type').trim() : '';
+      host.innerHTML = graphMarkup(res.data, '实体图', currentId);
       notify(ctx, '已加载实体图', 'ok');
     });
   }
@@ -1091,7 +1124,10 @@
       okText = '已注册资产';
     } else if (op === 'lineage') {
       path = withQuery('/api/v1/catalog/lineage', { session_id: sid });
-      view = function (data) { return graphMarkup(data, '血缘'); };
+      view = function (data) {
+        const current = val(form, 'dataset_name').trim() || val(form, 'metric_table').trim();
+        return graphMarkup(data, '血缘', current);
+      };
       okText = '已刷新血缘';
     } else if (op === 'list-metrics') {
       path = withQuery('/api/v1/catalog/metrics', { session_id: sid });
@@ -1162,8 +1198,18 @@
     });
   }
 
+  function ensureFonts() {
+    if (document.getElementById('sec-model-fonts')) return;
+    const link = document.createElement('link');
+    link.id = 'sec-model-fonts';
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Noto+Sans+SC:wght@400;500&family=Noto+Serif+SC:wght@500;600&family=Outfit:wght@300;400;500&display=swap';
+    document.head.appendChild(link);
+  }
+
   function mount(container, ctx) {
     if (!container) throw new Error('模型段缺少容器');
+    ensureFonts();
     container.innerHTML = shell();
     const root = container.querySelector('.sec-model-root');
     paintSession(root, ctx || {});
