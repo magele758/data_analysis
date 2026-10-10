@@ -796,6 +796,7 @@
       form.appendChild(session);
       form.appendChild(el('p', 'sec-analyze-endpoint', tab.method + ' ' + tab.path));
       if (tab.hint) form.appendChild(el('p', 'sec-analyze-hint', tab.hint));
+      if (tab.note) form.appendChild(el('p', 'sec-analyze-note', tab.note));
 
       var datasetWrap = el('div', 'sec-analyze-field');
       var datasetInput = document.createElement('input');
@@ -816,7 +817,6 @@
       tab.fields.forEach(function (field) {
         form.appendChild(fieldNode(Object.assign({ uid: uid }, field)));
       });
-      if (tab.note) form.appendChild(el('p', 'sec-analyze-note', tab.note));
       var button = el('button', 'sec-analyze-run', '运行');
       button.type = 'submit';
       form.appendChild(button);
