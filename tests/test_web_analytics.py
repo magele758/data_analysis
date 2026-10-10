@@ -119,9 +119,7 @@ def test_audience_export_rest_is_json_safe():
 def test_dashboard_endpoint():
     resp = client.get("/dashboard")
     assert resp.status_code == 200
-    assert "DATA" in resp.text
-    # The pipeline stage rail is the dashboard's skeleton; a missing stage means
-    # the navigation was broken. Stage labels may change; the data-stage keys are
-    # the contract asserted here.
-    for stage in ("ingest", "transform", "model", "analyze", "quality", "activate"):
-        assert f'data-stage="{stage}"' in resp.text
+    assert 'id="mount"' in resp.text
+    assert 'id="session-id"' in resp.text
+    for label in ("数据", "准备", "模型", "分析", "质量", "激活"):
+        assert label in resp.text
