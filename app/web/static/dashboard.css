@@ -47,6 +47,14 @@
   unicode-range: U+b7, U+3001-3002, U+4e00, U+4e0a, U+4e0e, U+4e2d, U+4ec5, U+4ef6, U+4f17, U+4f1a, U+4f53, U+4f5c, U+4f8b, U+5141, U+5165, U+5173, U+5199, U+51c6, U+5206, U+5236, U+524d, U+529f-52a0, U+52bf, U+5355, U+5386, U+53d7, U+53f0, U+540c, U+544a, U+548c, U+56de, U+56e0, U+56fe, U+5728, U+578b, U+5904, U+5907, U+5931, U+5b58, U+5b8c, U+5b9e, U+5bbd, U+5bf9, U+5bfc, U+5c11, U+5de5, U+5dee, U+5df2, U+5e38, U+5e93, U+5f02, U+5f52-5f53, U+5f84, U+6210, U+628a, U+6307, U+636e, U+63a5, U+652f, U+653e, U+6570, U+6587, U+6597, U+65ad, U+65b9, U+672a, U+672c, U+673a, U+6784, U+6790, U+6807, U+68c0, U+6a21, U+6bb5, U+6ca1, U+6d17, U+6d3b, U+6d4b, U+6e05, U+6e90, U+6f02, U+6f0f, U+6fc0, U+7528, U+7559, U+793a, U+79fb, U+7ba1, U+7cfb, U+7ed3, U+7ed8, U+7f18, U+7f3a, U+80fd, U+811a, U+8840, U+884c, U+8868, U+88c5, U+89e3, U+8a00, U+8b66, U+8bb8, U+8bc1, U+8bdd, U+8bef, U+8c03, U+8c61, U+8d25, U+8d28, U+8d8b, U+8dd1, U+8def, U+8f7d, U+8fd0, U+8fd8-8fd9, U+8fdb, U+8fde, U+901a, U+904d, U+9053, U+914d, U+91cf, U+9519, U+952e, U+96c6, U+9884, U+9a8c, U+ff0c, U+ff1a-ff1b;
 }
 @font-face {
+  font-family: "ZCOOL XiaoWei";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/static/fonts/zcool-xiaowei-400.woff2) format("woff2");
+  unicode-range: U+b7, U+3001-3002, U+4e00, U+4f53, U+5173, U+5206, U+5355, U+540c, U+548c, U+5728, U+5904, U+628a, U+636e, U+653e, U+6570, U+672c, U+673a, U+6790, U+7cfb, U+8868, U+8bc1;
+}
+@font-face {
   font-family: 'Noto Serif SC';
   font-style: normal;
   font-weight: 500;
@@ -62,7 +70,7 @@
   --ink: #f4f0e6;
   --muted: #a39b8e;
   --gold: #c6a15b;
-  --serif: "Cormorant Garamond", "Songti SC", "STSong", "Noto Serif SC", serif;
+  --serif: "Cormorant Garamond", "ZCOOL XiaoWei", "Songti SC", "STSong", "Noto Serif SC", serif;
   --sans: "Outfit", "PingFang SC", "Noto Sans SC", sans-serif;
   --sidebar-w: 220px;
 }
@@ -91,6 +99,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   justify-content: flex-end;
   padding: 14vh 9vw 16vh;
   background: var(--bg);
@@ -109,14 +118,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .cover h1 {
   margin: 28px 0 0;
-  font-family: var(--serif);
-  font-weight: 500;
+  font-family: "Cormorant Garamond", "ZCOOL XiaoWei", "Songti SC", "Noto Serif SC", serif;
+  font-weight: 400;
   font-size: clamp(72px, 11vw, 128px);
   line-height: 0.92;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .cover-rule {
+  align-self: flex-start;
   width: 56px;
   height: 1px;
   margin: 36px 0 28px;
@@ -136,20 +146,24 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .btn {
   appearance: none;
+  align-self: flex-start;
   width: fit-content;
   margin: 0;
-  padding: 10px 18px;
-  border: 0;
+  padding: 9px 18px;
+  border: 1px solid var(--gold);
   border-radius: 2px;
-  background: var(--gold);
-  color: var(--bg);
+  background: transparent;
+  color: var(--ink);
   font-size: 14px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
+  font-weight: 400;
+  letter-spacing: 0.08em;
   cursor: pointer;
 }
 
-.btn:hover { filter: brightness(1.06); }
+.btn:hover {
+  background: var(--gold);
+  color: var(--bg);
+}
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn:focus-visible,
 .nav-item:focus-visible,
@@ -173,7 +187,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   top: 0;
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
   background: var(--bg);
   border-right: 1px solid var(--line);
 }
@@ -181,24 +195,32 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .brand {
   flex: 0 0 auto;
   margin: 0;
-  padding: 28px 22px 8px;
-  font-family: var(--serif);
-  font-size: 26px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  padding: 22px 18px 0;
+  font-family: "Cormorant Garamond", "ZCOOL XiaoWei", "Songti SC", "Noto Serif SC", serif;
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: 0;
   line-height: 1;
 }
 
-.nav { padding: 12px 0 32px; }
+.nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px 0 16px;
+  min-height: 0;
+}
 
 .nav-group { margin: 0; }
 
 .group-label {
   margin: 0;
-  padding: 22px 22px 6px;
-  font-size: 11px;
+  padding: 0 18px 4px;
+  font-size: 10px;
   font-weight: 400;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -206,11 +228,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: block;
   width: 100%;
   margin: 0;
-  padding: 6px 22px;
+  padding: 1px 18px 1px 17px;
   border: 0;
+  border-left: 1px solid transparent;
   border-radius: 0;
   background: transparent;
-  color: var(--ink);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 300;
+  line-height: 1.45;
   text-align: left;
   cursor: pointer;
 }
@@ -220,12 +246,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav-item[aria-current="page"] {
   background: transparent;
   color: var(--gold);
+  border-left-color: var(--gold);
 }
 
-.examples {
-  margin-top: 8px;
-  padding-top: 4px;
-}
+.examples { margin: 0; }
 
 .workspace {
   flex: 1;
@@ -267,15 +291,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 #session-id {
-  width: 168px;
+  width: 148px;
   padding: 2px 0 3px;
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--sans);
+  font-size: 13px;
+  letter-spacing: 0;
 }
 
 .notify {
