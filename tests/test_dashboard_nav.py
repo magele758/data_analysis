@@ -89,6 +89,14 @@ def test_section_scripts_and_missing_copy():
     assert 'id="mount"' in HTML
 
 
+def test_govern_sidebar_opens_matching_tab():
+    """质量 and 激活 share govern.js; the shell selects the sidebar tab after mount."""
+    assert 'src="/static/sections/govern.js"' in HTML
+    assert 'data-section="govern"' in HTML
+    assert "function selectGovernTab(root, view)" in JS
+    assert "data-govern-tab" in JS
+
+
 def test_api_accepts_section_call_shape():
     """analyze.js and transform.js call ctx.api(method, path, body)."""
     assert "function readApiCall(first, second, third)" in JS

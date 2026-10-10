@@ -436,14 +436,24 @@ function openView(btn) {
   }
   const root = resetMount();
   try {
-    Promise.resolve(mod.mount(root, makeCtx(view))).catch((err) => {
-      notify("失败：" + (err && err.message ? err.message : err));
-      showMountError(view.label, err);
-    });
+    Promise.resolve()
+      .then(() => mod.mount(root, makeCtx(view)))
+      .then(() => selectGovernTab(root, view))
+      .catch((err) => {
+        notify("失败：" + (err && err.message ? err.message : err));
+        showMountError(view.label, err);
+      });
   } catch (err) {
     notify("失败：" + (err && err.message ? err.message : err));
     showMountError(view.label, err);
   }
+}
+
+function selectGovernTab(root, view) {
+  if (!view || view.section !== "govern" || !view.id) return;
+  const tab = root.querySelector('[data-govern-tab="' + CSS.escape(view.id) + '"]');
+  if (!tab || tab.getAttribute("aria-selected") === "true") return;
+  tab.click();
 }
 
 function exampleHint(id) {
