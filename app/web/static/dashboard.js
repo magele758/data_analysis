@@ -1,372 +1,580 @@
-// Pipeline dashboard. Every stage runs against ONE analytical session; multiple
-// data sources (many DBs / files / trace sets) coexist as distinct datasets in
-// that session and in the Data Catalog. Telemetry collection is NOT here — it is
-// an optional demo under examples/telemetry-collector-demo.
+// Dashboard shell. Section panes live in /static/sections/*.js and register
+// window.DashboardSections.<name>.mount(container, ctx). A missing file must
+// not break navigation.
 
-const SESSION_ID = 'dashboard-' + Math.random().toString(36).slice(2, 8);
-const TRACE_DS = 'demo_traces';
+const SESSION_KEY = "das.session_id";
+const MISSING_SECTION = "这一段还没装上";
 
-const SAMPLE_TRACES = [
-  { event_name:'$pageview', event_type:'pageview', user_id:'u1', session_id:'s1', trace_id:'t1', span_id:'a1', page_path:'/home', timestamp_ms:1 },
-  { event_name:'view_item', event_type:'custom', user_id:'u1', session_id:'s1', trace_id:'t1', span_id:'a2', parent_span_id:'a1', page_path:'/product', timestamp_ms:2, duration_ms:120 },
-  { event_name:'add_to_cart', event_type:'custom', user_id:'u1', session_id:'s1', trace_id:'t1', span_id:'a3', parent_span_id:'a2', page_path:'/cart', timestamp_ms:3, duration_ms:80 },
-  { event_name:'purchase_success', event_type:'custom', user_id:'u1', session_id:'s1', trace_id:'t1', span_id:'a4', parent_span_id:'a3', page_path:'/success', timestamp_ms:4, duration_ms:200 },
-  { event_name:'$pageview', event_type:'pageview', user_id:'u2', session_id:'s2', trace_id:'t2', span_id:'b1', page_path:'/home', timestamp_ms:1 },
-  { event_name:'view_item', event_type:'custom', user_id:'u2', session_id:'s2', trace_id:'t2', span_id:'b2', parent_span_id:'b1', page_path:'/product', timestamp_ms:2, duration_ms:90 },
-  { event_name:'add_to_cart', event_type:'custom', user_id:'u2', session_id:'s2', trace_id:'t2', span_id:'b3', parent_span_id:'b2', page_path:'/cart', timestamp_ms:3, duration_ms:75 },
-  { event_name:'$error', event_type:'error', user_id:'u3', session_id:'s3', trace_id:'t3', span_id:'c1', page_path:'/cart', timestamp_ms:1, properties:{ message:'NullPointer' } },
-];
+const scriptLoads = new Map();
 
-let activeDataset = null;   // drives generic stages (transform/EDA/quality/activate/catalog)
-let traceDataset = null;    // drives trace-only stages (funnel/waterfall)
-let mySources = [];         // datasets ingested in THIS session (multi-source)
-let baselineSchema = null;  // captured schema for drift detection
-
-function setActive(ds, { isTrace = false } = {}) {
-  activeDataset = ds;
-  if (isTrace) traceDataset = ds;
-  const el = document.getElementById('active-ds');
-  if (el) el.textContent = ds || '（无）';
-  renderSources();
+function sessionInput() {
+  return document.getElementById("session-id");
 }
 
-function addSource(name, kind) {
-  if (!mySources.find(s => s.name === name)) mySources.push({ name, kind });
-  renderSources();
+function sessionId() {
+  return sessionInput().value.trim();
 }
 
-function renderSources() {
-  const el = document.getElementById('my-sources');
-  if (!el) return;
-  if (!mySources.length) { el.textContent = '尚未接入任何数据源。'; return; }
-  el.innerHTML = mySources.map(s => {
-    const on = s.name === activeDataset;
-    return `<div class="flex items-center justify-between py-1 border-b border-white/5">
-      <span class="mono ${on ? 'text-indigo-400' : 'text-slate-300'}">${esc(s.name)} <span class="text-slate-600">· ${esc(s.kind)}</span>${on ? ' <span class="text-emerald-500">● 活跃</span>' : ''}</span>
-      <button onclick="setActive('${esc(s.name)}',{isTrace:${s.kind === 'trace'}})" class="btn btn-s">设为活跃</button>
-    </div>`;
-  }).join('');
+function newSessionId() {
+  return "dashboard-" + Math.random().toString(36).slice(2, 8);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('session-badge').textContent = SESSION_ID;
-  document.querySelectorAll('.stage-pill').forEach(p =>
-    p.addEventListener('click', () => showStage(p.dataset.stage)));
-  showStage('ingest');
-  loadExamples();
-});
-
-// ---------- 行业示例 (Examples) ----------
-async function loadExamples() {
-  const list = document.getElementById('examples-list');
-  if (!list) return;
+function persistSession(value) {
   try {
-    const data = await api('GET', '/api/v1/examples');
-    list.innerHTML = (data.examples || []).map(e => `
-      <div class="subcard p-4 space-y-2">
-        <div class="text-xs font-semibold text-slate-200">${esc(e.name)} <span class="text-slate-500">· ${esc(e.domain)}</span></div>
-        <div class="text-[0.7rem] text-slate-500">${esc(e.description)}</div>
-        <button onclick="runExample('${esc(e.id)}', this)" class="btn btn-p w-full">▶ 运行该示例管道</button>
-      </div>`).join('');
-  } catch (e) {
-    list.innerHTML = `<div class="text-rose-500 text-xs">加载示例失败：${esc(e.message)}</div>`;
+    localStorage.setItem(SESSION_KEY, value);
+  } catch (err) {
+    /* private mode */
   }
 }
 
-async function runExample(id, btn) {
-  const status = document.getElementById('examples-status');
-  const out = document.getElementById('example-report');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ 运行中…'; }
-  if (status) status.textContent = `运行 ${id} 管道中…`;
+function restoreSession() {
+  const input = sessionInput();
+  let saved = "";
   try {
-    const r = await api('POST', `/api/v1/examples/${id}/run`, { session_id: SESSION_ID });
-    // The example's dataset now lives in THIS session — make it explorable.
-    addSource(r.dataset_name, id === 'dota2' ? 'trace' : 'db');
-    setActive(r.dataset_name, { isTrace: id === 'dota2' });
-    ['ingest', 'analyze', 'model', 'quality'].forEach(markDone);
-    out.classList.remove('hidden');
-    out.innerHTML = window.marked ? window.marked.parse(r.report_markdown) : ('<pre class="out">' + esc(r.report_markdown) + '</pre>');
-    const ins = (r.insights && r.insights.total_insights) || 0;
-    if (status) status.textContent = `✔ ${r.name} 完成 · 数据集 '${r.dataset_name}' 已载入会话 · ${ins} 条洞察`;
-  } catch (e) {
-    if (status) status.textContent = '✘ ' + e.message;
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '▶ 运行该示例管道'; }
+    saved = localStorage.getItem(SESSION_KEY) || "";
+  } catch (err) {
+    saved = "";
   }
+  if (!saved.trim()) {
+    saved = newSessionId();
+    persistSession(saved);
+  }
+  input.value = saved;
 }
 
-function showStage(stage) {
-  document.querySelectorAll('[data-stage-pane]').forEach(p => p.classList.add('hidden'));
-  const pane = document.getElementById('pane-' + stage);
-  if (pane) pane.classList.remove('hidden');
-  document.querySelectorAll('.stage-pill').forEach(p =>
-    p.classList.toggle('active', p.dataset.stage === stage));
-  if (stage === 'model') { loadCatalog(); loadLineage(); loadMetrics(); }
+function bindSession() {
+  const input = sessionInput();
+  input.addEventListener("input", () => persistSession(input.value.trim()));
+  input.addEventListener("change", () => {
+    let value = input.value.trim();
+    if (!value) {
+      value = newSessionId();
+      input.value = value;
+    }
+    persistSession(value);
+  });
 }
 
-function markDone(stage) {
-  const pill = document.querySelector(`.stage-pill[data-stage="${stage}"]`);
-  if (pill) pill.classList.add('done');
+function apiUrl(path) {
+  if (typeof path !== "string" || !path) throw new Error("缺少 API 路径");
+  if (/^[a-z]+:/i.test(path)) throw new Error("仅允许同源 /api/v1");
+  if (path.startsWith("/api/v1/") || path === "/api/v1") return path;
+  if (path.startsWith("/")) return "/api/v1" + path;
+  return "/api/v1/" + path;
 }
 
-function setOut(id, text, ok = true) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = text;
-  el.classList.toggle('text-emerald-400', ok);
-  el.classList.toggle('text-rose-500', !ok);
+function errorMessage(data, status) {
+  const detail = data && data.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => (item && item.msg) || String(item)).join("；");
+  }
+  if (data && data.message) return String(data.message);
+  return "HTTP " + status;
 }
 
-function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
-function pretty(obj) { return JSON.stringify(obj, null, 2); }
+const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
-async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(path, opts);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || data.message || (`HTTP ${res.status}`));
+function readApiCall(first, second, third) {
+  if (typeof second === "string" && HTTP_METHODS.has(String(first || "").toUpperCase())) {
+    return { method: String(first).toUpperCase(), path: second, body: third };
+  }
+  const opts = second && typeof second === "object" ? second : {};
+  return {
+    method: String(opts.method || "GET").toUpperCase(),
+    path: first,
+    body: opts.body,
+  };
+}
+
+async function api(first, second, third) {
+  const call = readApiCall(first, second, third);
+  const headers = { "Content-Type": "application/json" };
+  const init = { method: call.method, headers };
+  if (call.body != null && call.method !== "GET" && call.method !== "HEAD") {
+    if (typeof FormData !== "undefined" && call.body instanceof FormData) {
+      delete headers["Content-Type"];
+      init.body = call.body;
+    } else {
+      init.body = JSON.stringify(call.body);
+    }
+  }
+  const res = await fetch(apiUrl(call.path), init);
+  const text = await res.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      data = { detail: text };
+    }
+  }
+  if (!res.ok) {
+    const err = new Error(errorMessage(data, res.status));
+    err.detail = data && data.detail != null ? data.detail : err.message;
+    throw err;
+  }
   return data;
 }
 
-function ds() { return activeDataset || TRACE_DS; }
-function traceDs() { return traceDataset || TRACE_DS; }
-async function ensureIngested() { if (!activeDataset) await ingestTraces(); }
+function notify(text) {
+  const el = document.getElementById("notify");
+  const msg = String(text ?? "");
+  el.hidden = false;
+  el.textContent = msg;
+  el.dataset.kind = /失败|错误|异常/.test(msg) ? "error" : "ok";
+}
 
-// ---------- 01 Ingest (multi-source) ----------
-async function connectDb() {
-  const conn_str = document.getElementById('db-conn').value.trim();
-  const query_or_table = document.getElementById('db-query').value.trim();
-  const dataset_name = document.getElementById('db-ds').value.trim() || 'db_source';
-  const limitRaw = document.getElementById('db-limit').value.trim();
-  const mode = (document.getElementById('db-mode') || {}).value || 'materialize';
-  if (!conn_str || !query_or_table) { setOut('out-ingest', '✘ 请填写连接串与表名/查询', false); return; }
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[ch]));
+}
+
+function formatCell(value) {
+  if (value == null) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function buildTable(rows) {
+  const shown = rows.slice(0, 100);
+  const cols = [];
+  shown.forEach((row) => {
+    if (!row || typeof row !== "object") return;
+    Object.keys(row).forEach((key) => {
+      if (!cols.includes(key)) cols.push(key);
+    });
+  });
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  cols.forEach((col) => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  const tbody = document.createElement("tbody");
+  shown.forEach((row) => {
+    const tr = document.createElement("tr");
+    cols.forEach((col) => {
+      const td = document.createElement("td");
+      td.textContent = formatCell(row && row[col]);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.append(thead, tbody);
+  return table;
+}
+
+function tabularRows(payload) {
+  if (Array.isArray(payload)) {
+    return payload.length && payload.every((row) => row && typeof row === "object") ? payload : null;
+  }
+  if (!payload || typeof payload !== "object") return null;
+  const keys = ["data_preview", "data", "records", "rows", "steps", "tables", "metrics", "models"];
+  for (const key of keys) {
+    const value = payload[key];
+    if (Array.isArray(value) && value.length && value.every((row) => row && typeof row === "object" && !Array.isArray(row))) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function scalarRows(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  return Object.keys(payload)
+    .filter((key) => {
+      const value = payload[key];
+      return value == null || ["string", "number", "boolean"].includes(typeof value);
+    })
+    .map((key) => ({ field: key, value: payload[key] }));
+}
+
+function loadScript(src) {
+  if (scriptLoads.has(src)) return scriptLoads.get(src);
+  const pending = new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = src;
+    el.onload = () => resolve();
+    el.onerror = () => reject(new Error("脚本加载失败"));
+    document.head.appendChild(el);
+  });
+  scriptLoads.set(src, pending);
+  return pending;
+}
+
+function isVega(spec) {
+  return spec && typeof spec.$schema === "string" && spec.$schema.indexOf("vega") !== -1;
+}
+
+function isEcharts(spec) {
+  return spec && Array.isArray(spec.series);
+}
+
+async function drawChart(host, spec) {
+  if (isVega(spec)) {
+    await loadScript("https://cdn.jsdelivr.net/npm/vega@5");
+    await loadScript("https://cdn.jsdelivr.net/npm/vega-lite@5");
+    await loadScript("https://cdn.jsdelivr.net/npm/vega-embed@6");
+    if (!window.vegaEmbed) throw new Error("Vega-Lite 未加载");
+    await window.vegaEmbed(host, spec, { actions: false });
+    return;
+  }
+  if (isEcharts(spec)) {
+    await loadScript("https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js");
+    if (!window.echarts) throw new Error("ECharts 未加载");
+    window.echarts.init(host).setOption(spec);
+    return;
+  }
+  host.textContent = "图表未能绘制";
+}
+
+function render(host, payload) {
+  if (!host || payload == null) return;
+  const rows = tabularRows(payload);
+  if (rows) host.appendChild(buildTable(rows));
+  else {
+    const scalars = scalarRows(payload);
+    if (scalars.length) host.appendChild(buildTable(scalars));
+  }
+  if (payload && typeof payload === "object" && payload.chart_spec) {
+    const box = document.createElement("div");
+    box.className = "chart-host";
+    host.appendChild(box);
+    drawChart(box, payload.chart_spec).catch((err) => {
+      box.textContent = "图表未能绘制";
+      notify("失败：" + (err && err.message ? err.message : "图表未能绘制"));
+    });
+  }
+}
+
+function inlineNodes(text) {
+  const span = document.createElement("span");
+  span.innerHTML = escapeHtml(text)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  return span;
+}
+
+function splitMarkdownRow(line) {
+  return line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+}
+
+function markdownTable(lines) {
+  const rows = lines.filter((line) => !splitMarkdownRow(line).every((cell) => /^:?-+:?$/.test(cell)));
+  const records = rows.map((line) => {
+    const cells = splitMarkdownRow(line);
+    const record = {};
+    cells.forEach((cell, index) => {
+      record["c" + index] = cell;
+    });
+    return record;
+  });
+  if (records.length < 2) return buildTable(records);
+  const header = records[0];
+  const body = records.slice(1).map((row) => {
+    const named = {};
+    Object.keys(header).forEach((key) => {
+      named[header[key] || key] = row[key];
+    });
+    return named;
+  });
+  return buildTable(body);
+}
+
+function renderMarkdown(source) {
+  const root = document.createElement("div");
+  root.className = "markdown";
+  const lines = String(source).replace(/\r\n/g, "\n").split("\n");
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+    if (line.startsWith("|")) {
+      const block = [];
+      while (index < lines.length && lines[index].startsWith("|")) {
+        block.push(lines[index]);
+        index += 1;
+      }
+      root.appendChild(markdownTable(block));
+      continue;
+    }
+    if (line.startsWith(">")) {
+      const quote = document.createElement("blockquote");
+      const bits = [];
+      while (index < lines.length && lines[index].startsWith(">")) {
+        bits.push(lines[index].replace(/^>\s?/, ""));
+        index += 1;
+      }
+      quote.appendChild(inlineNodes(bits.join(" ")));
+      root.appendChild(quote);
+      continue;
+    }
+    const heading = /^(#{1,3})\s+(.*)$/.exec(line);
+    if (heading) {
+      const h = document.createElement("h" + heading[1].length);
+      h.appendChild(inlineNodes(heading[2]));
+      root.appendChild(h);
+      index += 1;
+      continue;
+    }
+    if (/^[-*]\s/.test(line)) {
+      const list = document.createElement("ul");
+      while (index < lines.length && /^[-*]\s/.test(lines[index])) {
+        const li = document.createElement("li");
+        li.appendChild(inlineNodes(lines[index].replace(/^[-*]\s/, "")));
+        list.appendChild(li);
+        index += 1;
+      }
+      root.appendChild(list);
+      continue;
+    }
+    const p = document.createElement("p");
+    p.appendChild(inlineNodes(line));
+    root.appendChild(p);
+    index += 1;
+  }
+  return root;
+}
+
+function mountEl() {
+  return document.getElementById("mount");
+}
+
+function setCrumb(text) {
+  document.getElementById("crumb").textContent = text;
+}
+
+function setCurrent(btn) {
+  document.querySelectorAll(".nav-item").forEach((el) => el.removeAttribute("aria-current"));
+  btn.setAttribute("aria-current", "page");
+}
+
+function setHash(id) {
+  const next = "#" + id;
+  if (location.hash === next) return;
+  history.replaceState(null, "", next);
+}
+
+function resetMount() {
+  const root = mountEl();
+  root.replaceChildren();
+  root.className = "";
+  return root;
+}
+
+function showMissing(title) {
+  const root = resetMount();
+  const wrap = document.createElement("div");
+  wrap.className = "missing";
+  const heading = document.createElement("h2");
+  heading.textContent = title;
+  const note = document.createElement("p");
+  note.textContent = MISSING_SECTION;
+  wrap.append(heading, note);
+  root.appendChild(wrap);
+}
+
+function showMountError(title, err) {
+  const root = resetMount();
+  const heading = document.createElement("h2");
+  heading.textContent = title;
+  const note = document.createElement("p");
+  note.className = "hint";
+  note.textContent = err && err.message ? err.message : String(err);
+  root.append(heading, note);
+}
+
+function sectionModule(name) {
+  const bag = window.DashboardSections;
+  if (!bag || !bag[name] || typeof bag[name].mount !== "function") return null;
+  return bag[name];
+}
+
+function makeCtx(view) {
+  return {
+    sessionId,
+    api,
+    notify,
+    render,
+    view,
+  };
+}
+
+function readView(btn) {
+  const groupEl = btn.closest("[data-group]");
+  const labelEl = groupEl && groupEl.querySelector(".group-label");
+  return {
+    id: btn.dataset.view,
+    label: btn.textContent.trim(),
+    group: groupEl ? groupEl.dataset.group : "",
+    groupLabel: labelEl ? labelEl.textContent.trim() : "",
+    section: btn.dataset.section,
+  };
+}
+
+function openView(btn) {
+  const view = readView(btn);
+  setCurrent(btn);
+  setCrumb(view.groupLabel + " / " + view.label);
+  setHash(view.id);
+  const mod = sectionModule(view.section);
+  if (!mod) {
+    showMissing(view.label);
+    return;
+  }
+  const root = resetMount();
   try {
-    const body = { conn_str, query_or_table, dataset_name, session_id: SESSION_ID, mode };
-    if (limitRaw) body.limit = parseInt(limitRaw, 10);
-    const r = await api('POST', '/api/v1/connect', body);
-    addSource(dataset_name, 'db'); setActive(dataset_name); markDone('ingest');
-    setOut('out-ingest', `✔ Path A (DB): ${r.summary_text || '已载入'}`);
-    loadCatalog();
-  } catch (e) { setOut('out-ingest', '✘ 连接失败: ' + e.message, false); }
+    Promise.resolve()
+      .then(() => mod.mount(root, makeCtx(view)))
+      .then(() => {
+        selectGovernTab(root, view);
+        selectIngestTab(root, view);
+      })
+      .catch((err) => {
+        notify("失败：" + (err && err.message ? err.message : err));
+        showMountError(view.label, err);
+      });
+  } catch (err) {
+    notify("失败：" + (err && err.message ? err.message : err));
+    showMountError(view.label, err);
+  }
 }
 
-async function uploadFile(input) {
-  const file = input.files && input.files[0];
-  if (!file) return;
-  const dataset_name = document.getElementById('file-ds').value.trim() || 'file_source';
-  const fd = new FormData();
-  fd.append('file', file); fd.append('dataset_name', dataset_name); fd.append('session_id', SESSION_ID);
+function selectGovernTab(root, view) {
+  if (!view || view.section !== "govern" || !view.id) return;
+  const tab = root.querySelector('[data-govern-tab="' + CSS.escape(view.id) + '"]');
+  if (!tab || tab.getAttribute("aria-selected") === "true") return;
+  tab.click();
+}
+
+const INGEST_TABS = {
+  "import-file": "file",
+  "connect-db": "db",
+  "import-trace": "trace",
+};
+
+function selectIngestTab(root, view) {
+  if (!view || view.section !== "ingest") return;
+  const id = INGEST_TABS[view.id];
+  if (!id) return;
+  const tab = root.querySelector('.sec-ingest-tab[data-tab="' + CSS.escape(id) + '"]');
+  if (!tab || tab.getAttribute("aria-selected") === "true") return;
+  tab.click();
+}
+
+function exampleHint(id) {
+  if (id === "dota2") return "调用 POST /api/v1/examples/dota2/run，把 Dota 2 示例写入当前会话。";
+  return "调用 POST /api/v1/examples/erp/run，把 ERP 示例写入当前会话。";
+}
+
+async function runExample(id, label, button, result) {
+  button.disabled = true;
+  button.textContent = "运行中";
   try {
-    const res = await fetch('/api/v1/import/file', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-    addSource(dataset_name, 'file'); setActive(dataset_name); markDone('ingest');
-    setOut('out-ingest', `✔ Path A (文件): ${data.summary || '已载入'}\n列: ${(data.columns || []).join(', ')}`);
-    loadCatalog();
-  } catch (e) { setOut('out-ingest', '✘ 上传失败: ' + e.message, false); }
-  input.value = '';
+    const data = await api("/examples/" + id + "/run", {
+      method: "POST",
+      body: { session_id: sessionId() },
+    });
+    notify(label + " 已完成");
+    result.replaceChildren();
+    const meta = document.createElement("p");
+    meta.className = "hint";
+    const bits = [];
+    if (data && data.dataset_name) bits.push("数据集 " + data.dataset_name);
+    if (data && data.rows != null) bits.push(String(data.rows) + " 行");
+    meta.textContent = bits.join(" · ");
+    if (meta.textContent) result.appendChild(meta);
+    if (data && data.report_markdown) result.appendChild(renderMarkdown(data.report_markdown));
+    else render(result, data);
+    if (data && data.chart_spec) render(result, { chart_spec: data.chart_spec });
+  } catch (err) {
+    notify("失败：" + (err && err.message ? err.message : err));
+  } finally {
+    button.disabled = false;
+    button.textContent = "运行";
+  }
 }
 
-async function importTraceSource() {
-  const source = document.getElementById('trace-source').value.trim();
-  const dataset_name = document.getElementById('trace-ds').value.trim() || 'traces';
-  if (!source) { setOut('out-ingest', '✘ 请填写 trace 路径，或用“上传 JSON”', false); return; }
-  await doImportTraces({ source, dataset_name });
+function openExample(btn) {
+  const id = btn.dataset.example;
+  const label = btn.textContent.trim();
+  setCurrent(btn);
+  setCrumb("示例 / " + label);
+  setHash("example-" + id);
+  const root = resetMount();
+  const heading = document.createElement("h2");
+  heading.textContent = label;
+  const hint = document.createElement("p");
+  hint.className = "hint";
+  hint.textContent = exampleHint(id);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn";
+  button.textContent = "运行";
+  const result = document.createElement("div");
+  button.addEventListener("click", () => runExample(id, label, button, result));
+  root.append(heading, hint, button, result);
 }
 
-async function importTraceFile(input) {
-  const file = input.files && input.files[0];
-  if (!file) return;
-  const dataset_name = document.getElementById('trace-ds').value.trim() || 'traces';
-  try {
-    const text = await file.text();
-    let obj;
-    try { obj = JSON.parse(text); } catch { obj = text.split('\n').filter(Boolean).map(l => JSON.parse(l)); }
-    const records = Array.isArray(obj) ? obj : (obj.events || null);
-    if (!records) { setOut('out-ingest', '✘ 仅支持 JSON 数组或 {events:[...]}；OTLP 用“按路径导入”', false); input.value=''; return; }
-    await doImportTraces({ records, dataset_name });
-  } catch (e) { setOut('out-ingest', '✘ 解析失败: ' + e.message, false); }
-  input.value = '';
+function findFromHash() {
+  const raw = (location.hash || "").replace(/^#/, "");
+  if (!raw) return null;
+  if (raw.startsWith("example-")) {
+    return document.querySelector('[data-example="' + CSS.escape(raw.slice("example-".length)) + '"]');
+  }
+  return document.querySelector('[data-view="' + CSS.escape(raw) + '"]');
 }
 
-async function doImportTraces(payload) {
-  try {
-    const r = await api('POST', '/api/v1/import/traces', { ...payload, session_id: SESSION_ID });
-    addSource(r.dataset_name, 'trace'); setActive(r.dataset_name, { isTrace: true }); markDone('ingest');
-    setOut('out-ingest', `✔ Path B (trace): 导入 ${r.row_count} 条 span/event → 表 '${r.dataset_name}'`);
-    loadCatalog();
-  } catch (e) { setOut('out-ingest', '✘ trace 导入失败: ' + e.message, false); }
+function enterWorkspace() {
+  const cover = document.getElementById("cover");
+  const app = document.getElementById("app");
+  if (cover) cover.hidden = true;
+  if (app) app.hidden = false;
+  if (document.querySelector('[aria-current="page"]')) return;
+  const fromHash = findFromHash();
+  if (fromHash) fromHash.click();
+  else {
+    const first = document.querySelector("[data-view]");
+    if (first) first.click();
+  }
 }
 
-async function ingestTraces() {
-  const dataset_name = document.getElementById('trace-ds')?.value.trim() || TRACE_DS;
-  await doImportTraces({ records: SAMPLE_TRACES, dataset_name });
+function init() {
+  restoreSession();
+  bindSession();
+  document.querySelectorAll("[data-view]").forEach((btn) => {
+    btn.addEventListener("click", () => openView(btn));
+  });
+  document.querySelectorAll("[data-example]").forEach((btn) => {
+    btn.addEventListener("click", () => openExample(btn));
+  });
+  const enter = document.getElementById("enter");
+  if (enter) enter.addEventListener("click", enterWorkspace);
+  document.querySelectorAll(".cover-stone img").forEach((img) => {
+    const markMissing = () => {
+      img.hidden = true;
+      const figure = img.closest(".cover-figure");
+      if (figure) figure.classList.add("is-missing");
+    };
+    img.addEventListener("error", markMissing);
+    if (img.complete && img.naturalWidth === 0) markMissing();
+  });
 }
 
-// ---------- 03 Data Catalog ----------
-async function loadCatalog() {
-  try {
-    const data = await api('GET', `/api/v1/catalog/tables?session_id=${SESSION_ID}`);
-    const rows = (data.tables || []).map(t =>
-      `<tr><td class="mono text-indigo-400">${esc(t.dataset_name)}</td><td>${t.row_count ?? '?'}</td><td>${t.column_count ?? '?'}</td><td class="text-slate-500">${esc((t.tags||[]).join(', '))}</td><td class="text-slate-500">${esc(t.description || '')}</td></tr>`).join('');
-    const body = document.getElementById('catalog-tbody');
-    if (body) body.innerHTML = rows || '<tr><td colspan="5" class="text-slate-500">目录为空</td></tr>';
-  } catch (e) { const b = document.getElementById('catalog-tbody'); if (b) b.innerHTML = `<tr><td colspan="5" class="text-rose-500">${esc(e.message)}</td></tr>`; }
-}
-
-async function loadLineage() {
-  try {
-    const g = await api('GET', `/api/v1/catalog/lineage?session_id=${SESSION_ID}`);
-    const el = document.getElementById('lineage-view');
-    if (!g.nodes || !g.nodes.length) { el.textContent = '（暂无血缘；执行 DAG 或语义查询后生成）'; return; }
-    const nodes = g.nodes.map(n => `<span class="inline-block px-2 py-0.5 rounded bg-slate-800 text-slate-300 mr-1 mb-1 mono">${esc(n.name)}</span>`).join('');
-    const edges = (g.edges || []).map(e => `<div class="mono text-slate-400">${esc(e.source)} <span class="text-indigo-500">→</span> ${esc(e.target)}</div>`).join('') || '<div class="text-slate-600">（无依赖边）</div>';
-    el.innerHTML = `<div class="mb-2">${nodes}</div>${edges}`;
-  } catch (e) { document.getElementById('lineage-view').textContent = e.message; }
-}
-
-async function loadMetrics() {
-  try {
-    const data = await api('GET', `/api/v1/catalog/metrics?session_id=${SESSION_ID}`);
-    const el = document.getElementById('metrics-view');
-    const items = (data.metrics || []).map(m =>
-      `<div class="mono">${esc(m.name || m.metric_name)} <span class="text-slate-500">= ${esc(m.formula || m.aggregation_type || '')}</span> <span class="text-slate-600">(${esc(m.table_name||'')})</span></div>`).join('');
-    el.innerHTML = items || '<span class="text-slate-600">（暂无指标，注册一个）</span>';
-  } catch (e) { document.getElementById('metrics-view').textContent = e.message; }
-}
-
-async function registerMetric() {
-  const name = document.getElementById('metric-name').value.trim();
-  const formula = document.getElementById('metric-formula').value.trim();
-  if (!name || !formula) { alert('请填写指标名与公式'); return; }
-  try {
-    await api('POST', `/api/v1/catalog/metrics?session_id=${SESSION_ID}`, { name, formula, table_name: ds(), aggregation_type: 'CUSTOM' });
-    markDone('model'); loadMetrics();
-  } catch (e) { document.getElementById('metrics-view').textContent = '注册失败: ' + e.message; }
-}
-
-// ---------- 02 Transform ----------
-async function runTransform() {
-  try {
-    await ensureIngested();
-    const r = await api('POST', '/api/v1/transform/clean', { session_id: SESSION_ID, source_table: ds(), target_table: ds() + '_clean' });
-    markDone('transform');
-    setOut('out-transform', '✔ 清洗完成:\n' + pretty(r));
-  } catch (e) { setOut('out-transform', '清洗: ' + e.message, false); }
-}
-
-async function registerDag() {
-  const name = document.getElementById('dag-name').value.trim();
-  const sql = document.getElementById('dag-sql').value.trim();
-  if (!name || !sql) { setOut('out-dag', '✘ 请填写模型名与 SQL', false); return; }
-  try {
-    await api('POST', `/api/v1/transform/dag/models?session_id=${SESSION_ID}`, { name, sql, materialization: 'table' });
-    setOut('out-dag', `✔ 已注册模型 '${name}'。点“物化执行 DAG”运行。`);
-  } catch (e) { setOut('out-dag', '注册失败: ' + e.message, false); }
-}
-
-async function runDag() {
-  try {
-    await ensureIngested();
-    const r = await api('POST', `/api/v1/transform/dag/run?session_id=${SESSION_ID}`);
-    markDone('transform');
-    setOut('out-dag', '✔ DAG 物化执行:\n' + pretty(r));
-    loadLineage();
-  } catch (e) { setOut('out-dag', 'DAG 执行: ' + e.message, false); }
-}
-
-// ---------- 04 Analyze ----------
-async function runEDA() {
-  try { await ensureIngested();
-    const r = await api('POST', '/api/v1/tools/eda', { session_id: SESSION_ID, dataset_name: ds() });
-    markDone('analyze'); setOut('out-analyze', '✔ EDA 画像:\n' + (r.summary_text || pretty(r.statistics)).slice(0, 900));
-  } catch (e) { setOut('out-analyze', 'EDA: ' + e.message, false); }
-}
-async function runFunnel() {
-  try { await ensureIngested();
-    const r = await api('POST', '/api/v1/analytics/funnel', { session_id: SESSION_ID, dataset_name: traceDs(), steps: ['view_item','add_to_cart','purchase_success'] });
-    markDone('analyze'); setOut('out-analyze', `✔ 漏斗 (trace):\n总转化率 ${(r.overall_conversion_rate*100).toFixed(1)}% · 起始 ${r.initial_users} → 成单 ${r.final_converted_users}\n` + pretty(r.steps));
-  } catch (e) { setOut('out-analyze', '漏斗: ' + e.message, false); }
-}
-async function runWaterfall() {
-  try { await ensureIngested();
-    const r = await api('GET', `/api/v1/analytics/trace/t1?session_id=${SESSION_ID}&dataset_name=${traceDs()}`);
-    markDone('analyze'); setOut('out-analyze', `✔ Trace t1 span 瀑布 (${r.total_spans} spans):\n` + pretty(r.spans));
-  } catch (e) { setOut('out-analyze', '瀑布: ' + e.message, false); }
-}
-async function runInsights() {
-  try { await ensureIngested();
-    setOut('out-analyze', '⏳ Insight Copilot 编排分析中…');
-    const r = await api('POST', '/api/v1/insights/discover', { session_id: SESSION_ID, dataset_name: ds() });
-    markDone('analyze');
-    const nar = r.narrative || {};
-    const lines = [
-      `✔ Insight Copilot（${r.total_insights} 条洞察，图谱 ${r.insight_graph.nodes.length} 节点/${r.insight_graph.edges.length} 关系）`,
-      '', nar.headline || '', ...(nar.sections || []),
-      '', '洞察清单:',
-      ...r.insights.map(i => `  · [${i.type}] ${i.title} (severity ${i.severity})`),
-      '', '建议: ' + (nar.recommendation || '—'),
-    ];
-    setOut('out-analyze', lines.join('\n'));
-  } catch (e) { setOut('out-analyze', 'Insight Copilot: ' + e.message, false); }
-}
-
-// ---------- 05 Quality ----------
-async function runQuality() {
-  try { await ensureIngested();
-    const r = await api('POST', '/api/v1/observability/assert', { session_id: SESSION_ID, table: ds(), rules: [{ type:'row_count', min_rows:1, max_rows:100000000 }] });
-    markDone('quality'); setOut('out-quality', '✔ 质量断言:\n' + pretty(r));
-  } catch (e) { setOut('out-quality', '质量: ' + e.message, false); }
-}
-async function captureBaseline() {
-  try { await ensureIngested();
-    const r = await api('POST', '/api/v1/tools/sql', { session_id: SESSION_ID, sql_query: `SELECT column_name, column_type FROM (DESCRIBE ${ds()})`, limit: 500 });
-    baselineSchema = {};
-    (r.data_preview || []).forEach(row => { baselineSchema[row.column_name] = String(row.column_type).toUpperCase(); });
-    setOut('out-drift', `✔ 已捕获基线 (${Object.keys(baselineSchema).length} 列) for '${ds()}'。改动数据源后点“检测漂移”。`);
-  } catch (e) { setOut('out-drift', '捕获基线失败: ' + e.message, false); }
-}
-async function detectDrift() {
-  if (!baselineSchema) { setOut('out-drift', '✘ 请先捕获基线', false); return; }
-  try {
-    const r = await api('POST', '/api/v1/observability/drift', { session_id: SESSION_ID, table: ds(), baseline_schema: baselineSchema });
-    markDone('quality'); setOut('out-drift', '✔ 漂移检测:\n' + pretty(r));
-  } catch (e) { setOut('out-drift', '漂移检测: ' + e.message, false); }
-}
-
-// ---------- 06 Activate ----------
-async function runActivate() {
-  try { await ensureIngested();
-    const r = await api('POST', '/api/v1/retl/audience', { session_id: SESSION_ID, source_table: ds(), format_type: 'json', limit: 50 });
-    markDone('activate'); setOut('out-activate', '✔ 受众/结果导出:\n' + pretty(r));
-  } catch (e) { setOut('out-activate', '激活: ' + e.message, false); }
-}
-async function runSync() {
-  try { await ensureIngested();
-    const dest_conn_str = document.getElementById('sync-dest').value.trim();
-    const dest_table_name = document.getElementById('sync-table').value.trim() || 'synced_result';
-    const r = await api('POST', '/api/v1/retl/sync', { session_id: SESSION_ID, source_table: ds(), dest_conn_str, dest_table_name, mode: 'replace' });
-    markDone('activate'); setOut('out-sync', '✔ 反向同步:\n' + pretty(r));
-  } catch (e) { setOut('out-sync', '同步: ' + e.message, false); }
-}
-async function runAlert() {
-  const webhook_url = document.getElementById('alert-url').value.trim();
-  const platform = document.getElementById('alert-platform').value;
-  if (!webhook_url) { setOut('out-alert', '✘ 请填写 webhook_url', false); return; }
-  try {
-    const r = await api('POST', '/api/v1/retl/alert', { webhook_url, platform, title: '数据异动告警', message: '来自 MDS 管道的示例告警' });
-    markDone('activate'); setOut('out-alert', '✔ 告警下发:\n' + pretty(r));
-  } catch (e) { setOut('out-alert', '告警: ' + e.message, false); }
-}
-
-// ---------- One-click ----------
-async function runFullPipeline() {
-  await ingestTraces();
-  await runTransform();
-  showStage('model');
-  await loadCatalog(); await loadLineage(); await loadMetrics();
-  await runFunnel();
-  await runQuality();
-  await runActivate();
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
 }

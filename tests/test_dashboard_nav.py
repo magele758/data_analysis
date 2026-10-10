@@ -1,10 +1,8 @@
-"""Pipeline dashboard navigation contract.
+"""Dashboard shell navigation contract.
 
-The dashboard was refactored from an 11-tab web-analytics BI console into a
-data-processing pipeline view: a stage rail (ingest → transform → model →
-analyze → quality → activate) where each stage has one pane. The break points
-are: a JS-referenced DOM id missing from the template, or a stage pill with no
-matching pane. One assertion each.
+The shell is a grouped sidebar over real capabilities, not a six-stage
+pipeline rail. Quality and activate share govern.js. Each item is a button
+the shell mounts without a full page load. One assertion group each.
 """
 import math
 import re
@@ -13,29 +11,165 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HTML = (ROOT / "app/web/templates/dashboard.html").read_text(encoding="utf-8")
 JS = (ROOT / "app/web/static/dashboard.js").read_text(encoding="utf-8")
+CSS = (ROOT / "app/web/static/dashboard.css").read_text(encoding="utf-8")
 
-STAGES = ["ingest", "transform", "model", "analyze", "quality", "activate"]
+GROUPS = [
+    ("数据", "ingest", [
+        ("import-file", "导入文件"),
+        ("connect-db", "连接数据库"),
+        ("import-trace", "导入 Trace"),
+    ]),
+    ("准备", "transform", [
+        ("clean", "清洗"),
+        ("pipeline", "管道"),
+        ("wide", "宽表"),
+    ]),
+    ("模型", "model", [
+        ("objects", "对象与关系"),
+        ("traverse", "遍历与实体图"),
+        ("metrics", "指标与血缘"),
+    ]),
+    ("分析", "analyze", [
+        ("eda", "EDA"),
+        ("olap", "OLAP"),
+        ("driver", "归因"),
+        ("hypothesis", "检验与回归"),
+        ("variance", "方差分解"),
+        ("signals", "异常趋势支配"),
+        ("paths", "漏斗留存路径"),
+        ("forecast", "预测"),
+    ]),
+    ("质量", "govern", [
+        ("assert", "断言"),
+        ("drift", "结构漂移"),
+    ]),
+    ("激活", "govern", [
+        ("sync", "写回"),
+        ("audience", "受众"),
+        ("alert", "告警"),
+    ]),
+]
+
+SECTION_SCRIPTS = [
+    "/static/sections/ingest.js",
+    "/static/sections/transform.js",
+    "/static/sections/model.js",
+    "/static/sections/analyze.js",
+    "/static/sections/govern.js",
+]
+
+
+def _buttons():
+    return re.findall(
+        r'<button\b[^>]*data-section="([^"]+)"[^>]*data-view="([^"]+)"[^>]*>\s*([^<]+?)\s*</button>',
+        HTML,
+    )
+
+
+def test_grouped_nav_matches_capabilities():
+    """Sidebar items are the fixed groups, backed by the section each one mounts."""
+    found = {(section, view): label for section, view, label in _buttons()}
+    ordered = [(section, view, label) for section, view, label in _buttons()]
+    expected = []
+    for group_label, section, items in GROUPS:
+        assert f'class="group-label">{group_label}</div>' in HTML
+        for view, label in items:
+            expected.append((section, view, label))
+            assert found.get((section, view)) == label
+    assert ordered == expected
+
+
+def test_section_scripts_and_missing_copy():
+    """Five section scripts are included; a missing module shows the empty state."""
+    for src in SECTION_SCRIPTS:
+        assert f'src="{src}"' in HTML
+    assert "DashboardSections" in JS
+    assert ".mount" in JS
+    assert "这一段还没装上" in JS
+    assert 'id="mount"' in HTML
+
+
+def test_ingest_sidebar_opens_matching_panel():
+    """数据 items map onto ingest.js tabs file, db, and trace."""
+    assert 'src="/static/sections/ingest.js"' in HTML
+    assert "function selectIngestTab(root, view)" in JS
+    assert '"import-file": "file"' in JS
+    assert '"connect-db": "db"' in JS
+    assert '"import-trace": "trace"' in JS
+
+
+def test_govern_sidebar_opens_matching_tab():
+    """质量 and 激活 share govern.js; the shell selects the sidebar tab after mount."""
+    assert 'src="/static/sections/govern.js"' in HTML
+    assert 'data-section="govern"' in HTML
+    assert "function selectGovernTab(root, view)" in JS
+    assert "data-govern-tab" in JS
+
+
+def test_api_accepts_section_call_shape():
+    """analyze.js and transform.js call ctx.api(method, path, body)."""
+    assert "function readApiCall(first, second, third)" in JS
+    assert 'typeof second === "string"' in JS
+    assert "HTTP_METHODS" in JS
+
+
+def test_session_and_api_contract():
+    """Top bar session id persists, and ctx.api stays on same-origin /api/v1 JSON."""
+    assert 'id="session-id"' in HTML
+    assert "das.session_id" in JS
+    assert "localStorage" in JS
+    assert "function sessionId()" in JS
+    assert "/api/v1" in JS
+    assert "Content-Type" in JS
+    assert "application/json" in JS
+    assert 'data-example="erp"' in HTML
+    assert 'data-example="dota2"' in HTML
+    assert "/examples/" in JS
+    assert "session_id" in JS
+
+
+def test_cover_is_the_first_screen():
+    """The cover is the first view of /dashboard and enters the workspace without a reload."""
+    assert 'id="cover"' in HTML
+    assert 'id="enter"' in HTML
+    assert 'id="app" class="app" hidden' in HTML
+    assert "单机 · 本体 · 证据" in HTML
+    assert ">数据分析</h1>" in HTML
+    assert "把表、关系和证据放在同一处。" in HTML
+    assert "进入工作台" in HTML
+    assert "function enterWorkspace()" in JS
+    assert "location.reload" not in JS
+
+
+def test_shell_layout_and_chart_hook():
+    """Dark shell: shared tokens, 220px sidebar, one primary button, chart_spec hook."""
+    assert 'href="/static/dashboard.css"' in HTML
+    assert "width: 220px" in CSS
+    assert "--bg: #0e0d0b" in CSS
+    assert "--surface: #161410" in CSS
+    assert "--line: rgba(243, 239, 230, 0.12)" in CSS
+    assert "--ink: #f4f0e6" in CSS
+    assert "--muted: #a39b8e" in CSS
+    assert "--gold: #c6a15b" in CSS
+    assert "Cormorant Garamond" in CSS
+    assert "Outfit" in CSS
+    assert "Songti SC" in CSS
+    assert "PingFang SC" in CSS
+    assert "border-radius: 2px" in CSS
+    assert "stage-pill" not in HTML
+    assert "tailwindcss" not in HTML
+    assert "#6366F1" not in HTML + CSS
+    assert "#eceff3" not in CSS
+    assert "chart_spec" in JS
+    assert "vega-lite" in JS
+    assert "echarts" in JS
 
 
 def test_js_referenced_ids_exist_in_html():
     """Every getElementById target must exist in the template."""
-    ids = {m for m in re.findall(r"getElementById\(['\"]([^'\"]+)", JS)}
-    ids.discard("pane-")  # dynamically built as 'pane-' + stage; covered below
+    ids = set(re.findall(r"getElementById\(['\"]([^'\"]+)", JS))
     missing = sorted(i for i in ids if f'id="{i}"' not in HTML)
     assert not missing, f"JS references ids absent from template: {missing}"
-
-
-def test_stage_rail_matches_expected():
-    """The stage rail encodes the pipeline; it must be exactly the declared stages."""
-    rail = set(re.findall(r'data-stage="([a-z]+)"\s+class="stage-pill', HTML))
-    assert rail == set(STAGES), f"stage rail differs from expected: {sorted(rail)}"
-
-
-def test_every_stage_has_a_pane():
-    """Each stage pill must have a matching pane, else it opens to nothing."""
-    panes = set(re.findall(r'id="pane-([a-z]+)"', HTML))
-    for stage in STAGES:
-        assert stage in panes, f"stage '{stage}' has no pane-{stage}"
 
 
 def test_non_finite_dwell_is_json_safe():
