@@ -128,13 +128,38 @@ def test_session_and_api_contract():
     assert "session_id" in JS
 
 
+def test_cover_is_the_first_screen():
+    """The cover is the first view of /dashboard and enters the workspace without a reload."""
+    assert 'id="cover"' in HTML
+    assert 'id="enter"' in HTML
+    assert 'id="app" class="app" hidden' in HTML
+    assert "单机 · 本体 · 证据" in HTML
+    assert ">数据分析</h1>" in HTML
+    assert "把表、关系和证据放在同一处。" in HTML
+    assert "进入工作台" in HTML
+    assert "function enterWorkspace()" in JS
+    assert "location.reload" not in JS
+
+
 def test_shell_layout_and_chart_hook():
-    """Light tool shell: 220px sidebar, one primary button, chart_spec hook."""
+    """Dark shell: shared tokens, 220px sidebar, one primary button, chart_spec hook."""
     assert 'href="/static/dashboard.css"' in HTML
     assert "width: 220px" in CSS
+    assert "--bg: #0e0d0b" in CSS
+    assert "--surface: #161410" in CSS
+    assert "--line: rgba(243, 239, 230, 0.12)" in CSS
+    assert "--ink: #f4f0e6" in CSS
+    assert "--muted: #a39b8e" in CSS
+    assert "--gold: #c6a15b" in CSS
+    assert "Cormorant Garamond" in CSS
+    assert "Outfit" in CSS
+    assert "Songti SC" in CSS
+    assert "PingFang SC" in CSS
+    assert "border-radius: 2px" in CSS
     assert "stage-pill" not in HTML
     assert "tailwindcss" not in HTML
     assert "#6366F1" not in HTML + CSS
+    assert "#eceff3" not in CSS
     assert "chart_spec" in JS
     assert "vega-lite" in JS
     assert "echarts" in JS

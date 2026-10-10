@@ -537,6 +537,20 @@ function findFromHash() {
   return document.querySelector('[data-view="' + CSS.escape(raw) + '"]');
 }
 
+function enterWorkspace() {
+  const cover = document.getElementById("cover");
+  const app = document.getElementById("app");
+  if (cover) cover.hidden = true;
+  if (app) app.hidden = false;
+  if (document.querySelector('[aria-current="page"]')) return;
+  const fromHash = findFromHash();
+  if (fromHash) fromHash.click();
+  else {
+    const first = document.querySelector("[data-view]");
+    if (first) first.click();
+  }
+}
+
 function init() {
   restoreSession();
   bindSession();
@@ -546,9 +560,8 @@ function init() {
   document.querySelectorAll("[data-example]").forEach((btn) => {
     btn.addEventListener("click", () => openExample(btn));
   });
-  const fromHash = findFromHash();
-  if (fromHash) fromHash.click();
-  else document.querySelector("[data-view]").click();
+  const enter = document.getElementById("enter");
+  if (enter) enter.addEventListener("click", enterWorkspace);
 }
 
 if (document.readyState === "loading") {
