@@ -199,17 +199,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center 18%;
-  filter: brightness(2.15) contrast(1.12);
-  mix-blend-mode: multiply;
-  -webkit-mask-image:
-    linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%),
-    linear-gradient(to right, transparent 0%, #000 5%, #000 95%, transparent 100%);
-  -webkit-mask-composite: source-in;
-  mask-image:
-    linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%),
-    linear-gradient(to right, transparent 0%, #000 5%, #000 95%, transparent 100%);
-  mask-composite: intersect;
+  object-position: center center;
+  filter: grayscale(1) contrast(1.05);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 82%, transparent 100%);
 }
 
 .cover-figure.is-missing .cover-stone::before {
