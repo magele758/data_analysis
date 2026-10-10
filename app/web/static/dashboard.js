@@ -562,6 +562,15 @@ function init() {
   });
   const enter = document.getElementById("enter");
   if (enter) enter.addEventListener("click", enterWorkspace);
+  document.querySelectorAll(".cover-stone img").forEach((img) => {
+    const markMissing = () => {
+      img.hidden = true;
+      const figure = img.closest(".cover-figure");
+      if (figure) figure.classList.add("is-missing");
+    };
+    img.addEventListener("error", markMissing);
+    if (img.complete && img.naturalWidth === 0) markMissing();
+  });
 }
 
 if (document.readyState === "loading") {

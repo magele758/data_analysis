@@ -8,11 +8,44 @@
 </head>
 <body>
   <section id="cover" class="cover">
-    <p class="cover-kicker">单机 · 本体 · 证据</p>
-    <h1>数据分析</h1>
-    <hr class="cover-rule">
-    <p class="cover-sentence">把表、关系和证据放在同一处。</p>
-    <button type="button" id="enter" class="btn">进入工作台</button>
+    <svg class="cover-meander" viewBox="0 0 1400 14" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <pattern id="cover-meander-unit" width="28" height="14" patternUnits="userSpaceOnUse">
+          <path d="M0 12H8V2H20V12H16V6H12V12H28" fill="none" stroke="#c6a15b" stroke-width="1"/>
+        </pattern>
+      </defs>
+      <rect width="1400" height="14" fill="url(#cover-meander-unit)"/>
+    </svg>
+    <div class="cover-stage">
+      <div class="cover-copy">
+        <p class="cover-kicker">单机 · 本体 · 证据</p>
+        <h1>数据分析</h1>
+        <hr class="cover-rule">
+        <p class="cover-sentence">把表、关系和证据放在同一处。</p>
+        <button type="button" id="enter" class="btn">进入工作台</button>
+      </div>
+      <div class="cover-triptych" aria-hidden="true">
+        <figure class="cover-figure">
+          <div class="cover-stone">
+            <img src="/static/cover/athena.jpg" alt="">
+          </div>
+          <figcaption>雅典娜 · 智与技艺</figcaption>
+        </figure>
+        <figure class="cover-figure">
+          <div class="cover-stone">
+            <img src="/static/cover/apollo.jpg" alt="">
+          </div>
+          <figcaption>阿波罗 · 度量与光</figcaption>
+        </figure>
+        <figure class="cover-figure">
+          <div class="cover-stone">
+            <img src="/static/cover/hermes.jpg" alt="">
+          </div>
+          <figcaption>赫尔墨斯 · 边界与传递</figcaption>
+        </figure>
+      </div>
+    </div>
+    <p class="cover-source">石像来自公共领域古代雕塑</p>
   </section>
   <div id="app" class="app" hidden>
     <aside class="sidebar">
