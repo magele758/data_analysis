@@ -117,9 +117,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 0.86fr) minmax(460px, 1.14fr);
+  grid-template-columns: minmax(300px, 0.72fr) minmax(520px, 1.28fr);
   align-items: end;
-  gap: 48px;
+  gap: 36px;
 }
 
 .cover-copy {
@@ -171,11 +171,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .cover-triptych {
   display: flex;
   align-items: flex-end;
-  justify-content: flex-end;
-  gap: 10px;
+  justify-content: stretch;
+  gap: 8px;
   min-width: 0;
-  height: 100%;
-  padding-bottom: 4vh;
+  height: auto;
+  padding-bottom: 2vh;
 }
 
 .cover-figure {
@@ -189,7 +189,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .cover-stone {
   width: 100%;
-  height: min(62vh, 620px);
+  aspect-ratio: 3 / 4;
+  height: auto;
   position: relative;
 }
 
@@ -197,11 +198,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  object-position: center bottom;
+  object-fit: cover;
+  object-position: center 18%;
+  filter: brightness(2.15) contrast(1.12);
   mix-blend-mode: multiply;
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 64%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0%, #000 64%, transparent 100%);
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%),
+    linear-gradient(to right, transparent 0%, #000 5%, #000 95%, transparent 100%);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(to bottom, #000 0%, #000 70%, transparent 100%),
+    linear-gradient(to right, transparent 0%, #000 5%, #000 95%, transparent 100%);
+  mask-composite: intersect;
 }
 
 .cover-figure.is-missing .cover-stone::before {
