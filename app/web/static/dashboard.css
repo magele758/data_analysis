@@ -321,6 +321,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--bg);
 }
 
+.content:has(.sec-govern-root) {
+  padding: 16px 18px 24px;
+}
+
 #mount {
   min-height: calc(100vh - 120px);
   background: var(--bg);
@@ -390,10 +394,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
   font-size: 12px;
 }
 
-/* Unskinned sections still paint white cards. Keep the workspace dark
-   until those files adopt the same tokens. */
+/* Unskinned sections still paint white cards. Keep those dark.
+   govern.js already carries its own skin, so leave it alone. */
 #mount.sec-analyze-root,
-#mount [class*="sec-"] {
+#mount [class*="sec-"]:not([class*="sec-govern"]) {
   background-color: transparent;
   color: var(--ink);
   border-color: var(--line);
@@ -403,16 +407,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #mount .sec-ingest-root,
 #mount .sec-transform-root,
 #mount .sec-model-root,
-#mount .sec-govern-root,
 #mount.sec-analyze-root {
   font-family: var(--sans);
   border: 0;
   border-radius: 0;
 }
 
-#mount input:not([type="checkbox"]):not([type="file"]),
-#mount select,
-#mount textarea {
+#mount input:not([class*="sec-govern"]):not([type="checkbox"]):not([type="file"]),
+#mount select:not([class*="sec-govern"]),
+#mount textarea:not([class*="sec-govern"]) {
   background: transparent;
   color: var(--ink);
   border: 0;
@@ -424,11 +427,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #mount input::placeholder,
 #mount textarea::placeholder { color: var(--muted); }
 
-#mount button[type="submit"],
+#mount button[type="submit"]:not([class*="sec-govern"]),
 #mount .sec-ingest-submit,
 #mount .sec-model-submit,
 #mount .sec-transform-btn,
-#mount .sec-govern-btn-primary,
 #mount .sec-analyze-run {
   background: var(--gold);
   color: var(--bg);
@@ -436,25 +438,24 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-radius: 2px;
 }
 
-#mount [class*="hint"],
-#mount [class*="muted"],
-#mount [class*="empty"],
-#mount [class*="note"],
-#mount [class*="kicker"] {
+#mount [class*="hint"]:not([class*="sec-govern"]),
+#mount [class*="muted"]:not([class*="sec-govern"]),
+#mount [class*="empty"]:not([class*="sec-govern"]),
+#mount [class*="note"]:not([class*="sec-govern"]),
+#mount [class*="kicker"]:not([class*="sec-govern"]) {
   color: var(--muted);
 }
 
-#mount [class*="error"],
-#mount [class*="fail"] {
+#mount [class*="error"]:not([class*="sec-govern"]),
+#mount [class*="fail"]:not([class*="sec-govern"]) {
   color: #c47a6a;
 }
 
-#mount [aria-selected="true"],
+#mount [aria-selected="true"]:not([class*="sec-govern"]),
 #mount .sec-ingest-tab-active,
 #mount .sec-transform-on,
 #mount .sec-model-tab-active,
-#mount .sec-analyze-tab-active,
-#mount .sec-govern-tab-active {
+#mount .sec-analyze-tab-active {
   color: var(--gold);
   background: transparent;
   border-color: transparent;
