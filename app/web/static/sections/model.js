@@ -1,4 +1,4 @@
-/* 看板「模型」段：对象/关系/动作、遍历与实体图、指标与血缘。只调用已有 REST。 */
+/* 看板「模型」段。ctx.api(path, { method, body })，失败信息在 error.detail 或 message。 */
 (function () {
   const OUTCOMES = { SUCCESS: '成功', FAILED: '失败', SIMULATED: '已模拟' };
 
@@ -79,21 +79,11 @@
     return true;
   }
 
-  function invokeApi(ctx, method, path, body) {
-    const api = ctx && ctx.api;
-    if (typeof api === 'function') return api(method, path, body);
-    const verb = String(method || '').toLowerCase();
-    if (api && typeof api[verb] === 'function') {
-      return verb === 'get' ? api.get(path) : api[verb](path, body);
-    }
-    const error = new Error('ctx.api 不可用');
-    error.detail = 'ctx.api 不可用';
-    throw error;
-  }
-
   async function callApi(ctx, method, path, body) {
+    const api = ctx && ctx.api;
+    if (typeof api !== 'function') return { ok: false, detail: 'ctx.api 不可用' };
     try {
-      const data = await invokeApi(ctx, method, path, body);
+      const data = await api(path, { method: method, body: body });
       if (data && typeof data === 'object' && data.ok === false && (data.detail != null || data.status === 'error')) {
         return { ok: false, detail: formatDetail(data.detail != null ? data.detail : (data.message || '请求失败')) };
       }
@@ -105,10 +95,11 @@
   }
 
   function notify(ctx, message, tone) {
-    if (ctx && typeof ctx.notify === 'function') {
-      const text = String(message || '');
-      ctx.notify(text.length > 500 ? text.slice(0, 500) : text, tone);
-    }
+    if (!ctx || typeof ctx.notify !== 'function') return;
+    let text = String(message || '');
+    if (tone === 'err' && !/失败|错误|异常/.test(text)) text = '失败：' + text;
+    if (text.length > 500) text = text.slice(0, 500);
+    ctx.notify(text);
   }
 
   function sessionId(ctx) {
@@ -1214,6 +1205,8 @@
     root.querySelectorAll('.sec-model-tab').forEach(function (button) {
       button.addEventListener('click', function () { activate(root, button.getAttribute('data-tab')); });
     });
+    const viewId = ctx && ctx.view && ctx.view.id;
+    if (viewId === 'objects' || viewId === 'traverse' || viewId === 'metrics') activate(root, viewId);
   }
 
   window.DashboardSections = window.DashboardSections || {};
