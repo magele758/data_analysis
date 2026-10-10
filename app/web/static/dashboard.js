@@ -425,7 +425,9 @@ function readView(btn) {
 }
 
 function openView(btn) {
+  setNavOpen(false);
   const view = readView(btn);
+  setPrinciple(view.section);
   setCurrent(btn);
   setCrumb(view.groupLabel + " / " + view.label);
   setHash(view.id);
@@ -508,6 +510,8 @@ async function runExample(id, label, button, result) {
 }
 
 function openExample(btn) {
+  setNavOpen(false);
+  setPrinciple("analyze");
   const id = btn.dataset.example;
   const label = btn.textContent.trim();
   setCurrent(btn);
@@ -537,11 +541,56 @@ function findFromHash() {
   return document.querySelector('[data-view="' + CSS.escape(raw) + '"]');
 }
 
-function enterWorkspace() {
+function setPrinciple(section) {
+  const theme = section === "analyze" ? "wisdom" :
+    (section === "model" || section === "transform") ? "order" : "connection";
+  document.querySelectorAll("[data-principle]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.principle === theme);
+  });
+}
+
+let ritualTimers = [];
+let ritualActive = false;
+
+function finishEntryRitual() {
+  ritualTimers.forEach(clearTimeout);
+  ritualTimers = [];
+  ritualActive = false;
+  const ritual = document.getElementById("entry-ritual");
+  ritual.hidden = true;
+  ritual.classList.remove("is-playing");
+  document.getElementById("cover").inert = false;
+  document.getElementById("app").inert = false;
+  document.getElementById("enter").disabled = false;
+  enterWorkspace();
+}
+
+function startEntryRitual() {
+  if (ritualActive) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    enterWorkspace();
+    return;
+  }
+  ritualActive = true;
+  document.getElementById("enter").disabled = true;
+  document.getElementById("cover").inert = true;
+  document.getElementById("app").inert = true;
+  const ritual = document.getElementById("entry-ritual");
+  ritual.hidden = false;
+  ritual.classList.add("is-playing");
+  document.getElementById("skip-ritual").focus({ preventScroll: true });
+  // Reveal the destination beneath the veil before its final fade.
+  ritualTimers.push(setTimeout(() => enterWorkspace(false), 1800));
+  // A wall-clock fallback also works when CSS animations are unavailable.
+  ritualTimers.push(setTimeout(finishEntryRitual, 2300));
+}
+
+function enterWorkspace(focusContent = true) {
   const cover = document.getElementById("cover");
   const app = document.getElementById("app");
   if (cover) cover.hidden = true;
   if (app) app.hidden = false;
+  if (focusContent) document.getElementById("workspace-content").focus({ preventScroll: true });
   if (document.querySelector('[aria-current="page"]')) return;
   const fromHash = findFromHash();
   if (fromHash) fromHash.click();
@@ -551,9 +600,55 @@ function enterWorkspace() {
   }
 }
 
+function setNavOpen(open) {
+  const app = document.getElementById("app");
+  app.classList.toggle("nav-open", open);
+  document.getElementById("nav-toggle").setAttribute("aria-expanded", String(open));
+  document.getElementById("nav-toggle").setAttribute("aria-label", open ? "关闭导航" : "打开导航");
+  document.getElementById("nav-scrim").hidden = !open;
+  document.getElementById("workspace-nav").inert = window.innerWidth <= 760 && !open;
+  if (open) document.getElementById("return-cover").focus();
+}
+
+function returnToCover() {
+  setNavOpen(false);
+  document.getElementById("app").hidden = true;
+  document.getElementById("cover").hidden = false;
+  window.scrollTo(0, 0);
+  document.getElementById("enter").focus({ preventScroll: true });
+}
+
 function init() {
   restoreSession();
   bindSession();
+  document.querySelectorAll("[data-target-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = document.querySelector('[data-view="' + CSS.escape(button.dataset.targetView) + '"]');
+      if (target) target.click();
+    });
+  });
+  document.getElementById("return-cover").addEventListener("click", returnToCover);
+  document.getElementById("nav-toggle").addEventListener("click", () => {
+    setNavOpen(!document.getElementById("app").classList.contains("nav-open"));
+  });
+  document.getElementById("nav-scrim").addEventListener("click", () => setNavOpen(false));
+  document.addEventListener("keydown", (event) => {
+    if (ritualActive && event.key === "Escape") {
+      finishEntryRitual();
+      return;
+    }
+    if (ritualActive && event.key === "Tab") {
+      event.preventDefault();
+      document.getElementById("skip-ritual").focus();
+      return;
+    }
+    if (event.key === "Escape" && document.getElementById("app").classList.contains("nav-open")) {
+      setNavOpen(false);
+      document.getElementById("nav-toggle").focus();
+    }
+  });
+  window.addEventListener("resize", () => setNavOpen(false));
+  setNavOpen(false);
   document.querySelectorAll("[data-view]").forEach((btn) => {
     btn.addEventListener("click", () => openView(btn));
   });
@@ -561,7 +656,8 @@ function init() {
     btn.addEventListener("click", () => openExample(btn));
   });
   const enter = document.getElementById("enter");
-  if (enter) enter.addEventListener("click", enterWorkspace);
+  if (enter) enter.addEventListener("click", startEntryRitual);
+  document.getElementById("skip-ritual").addEventListener("click", finishEntryRitual);
   document.querySelectorAll(".cover-stone img").forEach((img) => {
     const markMissing = () => {
       img.hidden = true;

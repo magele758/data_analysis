@@ -133,11 +133,11 @@ def test_cover_is_the_first_screen():
     assert 'id="cover"' in HTML
     assert 'id="enter"' in HTML
     assert 'id="app" class="app" hidden' in HTML
-    assert "单机 · 本体 · 证据" in HTML
+    assert "WISDOM · ORDER · CONNECTION" in HTML
     assert ">数据分析</h1>" in HTML
-    assert "把表、关系和证据放在同一处。" in HTML
-    assert "进入工作台" in HTML
-    assert "function enterWorkspace()" in JS
+    assert "从一张表出发，连接证据与行动。" in HTML
+    assert "开启探索" in HTML
+    assert "function enterWorkspace(" in JS
     assert "location.reload" not in JS
 
 

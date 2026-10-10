@@ -5,51 +5,64 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>数据分析</title>
   <link rel="stylesheet" href="/static/dashboard.css">
+  <link rel="stylesheet" href="/static/divine-cover.css">
+  <link rel="stylesheet" href="/static/divine-workspace.css">
+  <link rel="stylesheet" href="/static/divine-motion.css">
+  <link rel="stylesheet" href="/static/divine-geometry.css">
+  <link rel="stylesheet" href="/static/divine-principles.css">
+  <link rel="stylesheet" href="/static/divine-editorial.css">
+  <link rel="preload" href="/static/cover/creation-touch.webp" as="image">
 </head>
 <body>
-  <section id="cover" class="cover">
-    <svg class="cover-meander" viewBox="0 0 1400 14" preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <pattern id="cover-meander-unit" width="28" height="14" patternUnits="userSpaceOnUse">
-          <path d="M0 12H8V2H20V12H16V6H12V12H28" fill="none" stroke="#c6a15b" stroke-width="1"/>
-        </pattern>
-      </defs>
-      <rect width="1400" height="14" fill="url(#cover-meander-unit)"/>
-    </svg>
-    <div class="cover-stage">
-      <div class="cover-copy">
-        <p class="cover-kicker">单机 · 本体 · 证据</p>
-        <h1>数据分析</h1>
-        <hr class="cover-rule">
-        <p class="cover-sentence">把表、关系和证据放在同一处。</p>
-        <button type="button" id="enter" class="btn">进入工作台</button>
+  <section id="cover" class="cover divine-cover" aria-labelledby="cover-title">
+    <div class="divine-atmosphere" aria-hidden="true"><i></i><i></i><i></i></div>
+    <header class="dc-header">
+      <a class="dc-wordmark" href="#cover" aria-label="数据分析首页"><span class="dc-seal" aria-hidden="true">✧</span> DATA AGENT</a>
+      <span class="dc-edition">THE ART OF UNDERSTANDING <i></i> 数据洞察工作台</span>
+    </header>
+    <div class="dc-stage">
+      <div class="dc-copy">
+        <p class="dc-eyebrow"><span></span> WISDOM · ORDER · CONNECTION</p>
+        <h1 id="cover-title">数据分析</h1>
+        <p class="dc-divine-line">让数据，<br>显现<span>真知。</span></p>
+        <p class="dc-latin">From complexity, clarity.</p>
+        <p class="dc-description">以智慧理解关系，以秩序度量变化。<br>从一张表出发，连接证据与行动。</p>
+        <button type="button" id="enter" class="btn dc-enter"><span>开启探索</span><span aria-hidden="true">↗</span></button>
+        <p class="dc-entry-note">导入数据 · 构建本体 · 洞察归因</p>
+
       </div>
-      <div class="cover-triptych" aria-hidden="true">
-        <figure class="cover-figure">
-          <div class="cover-stone">
-            <img src="/static/cover/athena.jpg" alt="">
-          </div>
-          <figcaption>雅典娜 · 智与技艺</figcaption>
-        </figure>
-        <figure class="cover-figure">
-          <div class="cover-stone">
-            <img src="/static/cover/apollo.jpg" alt="">
-          </div>
-          <figcaption>阿波罗 · 度量与光</figcaption>
-        </figure>
-        <figure class="cover-figure">
-          <div class="cover-stone">
-            <img src="/static/cover/hermes.jpg" alt="">
-          </div>
-          <figcaption>赫尔墨斯 · 边界与传递</figcaption>
-        </figure>
+      <div class="dc-art" aria-label="古希腊三神雕塑：雅典娜代表智慧，阿波罗代表秩序，赫尔墨斯代表连接">
+        <svg class="dc-orbit" viewBox="0 0 700 700" aria-hidden="true"><circle cx="350" cy="350" r="305"/><circle cx="350" cy="350" r="256"/><path d="M350 20V680M20 350H680M134 134L566 566M134 566L566 134"/><circle cx="350" cy="45" r="5"/><circle cx="655" cy="350" r="5"/><path d="M350 20L362 45L350 70L338 45Z"/></svg>
+        <span class="dc-art-index" aria-hidden="true">I / ATHENA</span>
+        <figure class="dc-athena"><img src="/static/cover/athena.jpg" alt="戴盔的雅典娜大理石胸像" fetchpriority="high"><figcaption><span>雅典娜</span> ATHENA <i>智慧与技艺</i></figcaption></figure>
+        <figure class="dc-companion dc-apollo"><div><img src="/static/cover/apollo.jpg" alt="阿波罗大理石头像" loading="eager"></div><figcaption><span>☉</span> 阿波罗 <i>秩序</i></figcaption></figure>
+        <figure class="dc-companion dc-hermes"><div><img src="/static/cover/hermes.jpg" alt="赫尔墨斯大理石头像" loading="eager"></div><figcaption><span>☿</span> 赫尔墨斯 <i>连接</i></figcaption></figure>
+        <span class="dc-art-coordinate" aria-hidden="true">THE PANTHEON OF DATA / 01—03</span>
       </div>
     </div>
-    <p class="cover-source">石像来自公共领域古代雕塑</p>
+        <div class="cover-principles">
+          <div><span>01 / ATHENA</span><h2>智慧</h2><p>证据 · 推演 · 洞察</p></div>
+          <div><span>02 / APOLLO</span><h2>秩序</h2><p>尺度 · 结构 · 关系</p></div>
+          <div><span>03 / HERMES</span><h2>连接</h2><p>数据 · 知识 · 行动</p></div>
+        </div>
+    <footer class="dc-footer"><span class="dc-manifesto">万千数据，自有秩序。<em>REVEAL THE INVISIBLE.</em></span><span class="dc-provenance">古典雕塑 · 公共领域影像 <span aria-hidden="true">✦</span></span></footer>
   </section>
+  <div id="entry-ritual" class="entry-ritual" role="dialog" aria-modal="true" aria-labelledby="ritual-title" hidden>
+    <div class="ritual-art" aria-hidden="true">
+      <div class="ritual-hand ritual-human"></div>
+      <div class="ritual-hand ritual-divine"></div>
+      <div class="ritual-spark"></div>
+      <div class="ritual-ring"></div>
+    </div>
+    <div class="ritual-caption"><p>THE FIRST CONNECTION</p><h2 id="ritual-title">于连接处，真知诞生。</h2></div>
+    <button type="button" id="skip-ritual" class="ritual-skip">跳过动画 <span aria-hidden="true">↗</span></button>
+  </div>
   <div id="app" class="app" hidden>
-    <aside class="sidebar">
-      <div class="brand">数据分析</div>
+    <aside id="workspace-nav" class="sidebar">
+      <button type="button" id="return-cover" class="brand brand-home" aria-label="返回封面">
+        <svg class="brand-mark" viewBox="0 0 40 40" fill="none" aria-hidden="true"><circle cx="20" cy="20" r="18" stroke="currentColor"/><path d="M9 15 20 8l11 7H9Zm3 3v12m8-12v12m8-12v12M9 32h22" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span class="brand-name">数据分析<small>OLYMPUS / DATA INTELLIGENCE</small></span>
+      </button>
       <nav class="nav" aria-label="功能">
         <section class="nav-group" data-group="ingest">
           <div class="group-label">数据</div>
@@ -97,16 +110,26 @@
           <button type="button" class="nav-item" data-example="dota2">Dota 2 一键跑通</button>
         </section>
       </nav>
+      <div class="sidebar-foot"><span>智慧 · 秩序 · 洞察</span><small>FROM DATA TO UNDERSTANDING</small></div>
     </aside>
+    <button type="button" id="nav-scrim" class="nav-scrim" aria-label="关闭导航" tabindex="-1" hidden></button>
     <div class="workspace">
+      <div class="workspace-aura" aria-hidden="true"><i></i><i></i></div>
       <header class="topbar">
+        <button type="button" id="nav-toggle" class="nav-toggle" aria-label="打开导航" aria-controls="workspace-nav" aria-expanded="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         <div id="crumb" class="crumb">数据 / 导入文件</div>
+        <span class="workspace-status">ANALYSIS SANCTUARY</span>
         <label class="session-field" for="session-id">会话
           <input id="session-id" name="session_id" type="text" spellcheck="false" autocomplete="off">
         </label>
       </header>
-      <div id="notify" class="notify" hidden></div>
-      <main class="content">
+      <nav class="principle-nav" aria-label="主题入口">
+        <button type="button" data-principle="wisdom" data-target-view="eda"><span class="principle-number">01</span><span><strong>智慧</strong><small>发现证据 · 探索分析</small></span><span class="principle-glyph" aria-hidden="true">α</span></button>
+        <button type="button" data-principle="order" data-target-view="objects"><span class="principle-number">02</span><span><strong>秩序</strong><small>构建模型 · 定义关系</small></span><span class="principle-glyph" aria-hidden="true">φ</span></button>
+        <button type="button" data-principle="connection" data-target-view="connect-db"><span class="principle-number">03</span><span><strong>连接</strong><small>接入数据 · 驱动行动</small></span><span class="principle-glyph" aria-hidden="true">λ</span></button>
+      </nav>
+      <div id="notify" class="notify" role="status" aria-live="polite" hidden></div>
+      <main class="content" id="workspace-content" tabindex="-1">
         <div id="mount"></div>
       </main>
     </div>
