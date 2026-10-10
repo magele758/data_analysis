@@ -23,40 +23,58 @@
 
   var STYLE_ID = "sec-ingest-style";
 
+  var SERIF = '"Cormorant Garamond","Noto Serif SC","Songti SC",serif';
+  var SANS = '"Outfit","PingFang SC","Noto Sans SC",sans-serif';
+  var LINE = "rgba(243,239,230,0.12)";
+
   function injectStyle() {
     if (document.getElementById(STYLE_ID)) return;
     var style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = [
-      ".sec-ingest-root{background:#fff;color:#1c1f24;font-family:inherit;font-size:13px;line-height:1.45;}",
-      ".sec-ingest-root *{box-sizing:border-box;}",
-      ".sec-ingest-tabs{display:flex;gap:4px;border-bottom:1px solid #e4e7ec;margin:0 0 12px;}",
-      ".sec-ingest-tab{appearance:none;background:transparent;border:0;border-bottom:2px solid transparent;margin:0 0 -1px;padding:6px 10px;color:#667085;cursor:pointer;font:inherit;}",
-      ".sec-ingest-tab-active{color:#1c1f24;border-bottom-color:#1c1f24;font-weight:600;}",
-      ".sec-ingest-panel-hint{margin:0 0 10px;color:#667085;font-size:12px;}",
-      ".sec-ingest-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:stretch;}",
-      ".sec-ingest-form,.sec-ingest-result{border:1px solid #e4e7ec;background:#fff;padding:12px;}",
-      ".sec-ingest-field{margin:0 0 8px;}",
-      ".sec-ingest-label{display:block;margin:0 0 2px;color:#3d4450;}",
-      ".sec-ingest-input,.sec-ingest-select{width:100%;border:1px solid #d0d5dd;background:#fff;color:#1c1f24;padding:5px 8px;border-radius:0;font:inherit;}",
-      ".sec-ingest-filepick{display:flex;align-items:center;gap:8px;min-width:0;}",
-      ".sec-ingest-filepick-btn{appearance:none;background:#fff;color:#1c1f24;border:1px solid #d0d5dd;padding:4px 8px;cursor:pointer;font:inherit;}",
-      ".sec-ingest-filepick-name{color:#667085;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
-      ".sec-ingest-file-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}",
-      ".sec-ingest-mono,.sec-ingest-out{font-family:ui-monospace,\"WenQuanYi Micro Hei Mono\",monospace;}",
-      ".sec-ingest-hint{margin:4px 0 0;color:#667085;font-size:12px;}",
-      ".sec-ingest-actions{display:flex;align-items:center;gap:16px;margin-top:4px;}",
-      ".sec-ingest-submit{appearance:none;background:#1c1f24;color:#fff;border:0;padding:6px 14px;cursor:pointer;font:inherit;}",
-      ".sec-ingest-submit:hover{background:#2c3138;}",
-      ".sec-ingest-submit:disabled{opacity:.45;cursor:default;}",
-      ".sec-ingest-textbtn{appearance:none;background:transparent;border:0;padding:6px 0;color:#3d4a5c;text-decoration:underline;cursor:pointer;font:inherit;}",
-      ".sec-ingest-textbtn:disabled{opacity:.45;cursor:default;}",
-      ".sec-ingest-result-title{margin:0 0 8px;color:#667085;font-size:12px;}",
-      ".sec-ingest-out{margin:0;min-height:12rem;white-space:pre-wrap;word-break:break-word;color:#667085;font-size:12px;}",
-      ".sec-ingest-out-ok{color:#1c1f24;}",
-      ".sec-ingest-out-error{color:#b42318;}",
-      ".sec-ingest-tab:focus-visible,.sec-ingest-submit:focus-visible,.sec-ingest-textbtn:focus-visible,.sec-ingest-input:focus-visible,.sec-ingest-select:focus-visible,.sec-ingest-filepick-btn:focus-visible{outline:2px solid #1c1f24;outline-offset:1px;}",
-      "@media (max-width:760px){.sec-ingest-layout{grid-template-columns:minmax(0,1fr);}}"
+      "#mount .sec-ingest-root{background:transparent;color:#f4f0e6;font-family:" + SANS + ";font-size:15px;font-weight:400;line-height:1.5;border:0;border-radius:0;padding:4px 0 8px;}",
+      "#mount .sec-ingest-root *{box-sizing:border-box;}",
+      "#mount .sec-ingest-root [hidden]{display:none !important;}",
+      "#mount .sec-ingest-tabs{display:flex;gap:36px;margin:0;background:transparent;border:0;border-bottom:1px solid " + LINE + ";}",
+      "#mount .sec-ingest-root button.sec-ingest-tab{appearance:none;background:transparent;border:0;border-bottom:1px solid transparent;border-radius:0;margin:0 0 -1px;padding:0 0 14px;color:#a39b8e;cursor:pointer;font-family:" + SANS + ";font-size:13px;font-weight:400;letter-spacing:0.18em;}",
+      "#mount .sec-ingest-root button.sec-ingest-tab-active{color:#c6a15b;border-bottom-color:#c6a15b;font-weight:500;background:transparent;}",
+      "#mount .sec-ingest-panel-hint{margin:40px 0 52px;max-width:18em;color:#f4f0e6;font-family:" + SERIF + ";font-size:32px;font-weight:500;line-height:1.3;letter-spacing:0.01em;}",
+      "#mount .sec-ingest-layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(260px,0.8fr);gap:80px;align-items:start;}",
+      "#mount .sec-ingest-form{background:transparent;border:0;border-radius:0;padding:0;box-shadow:none;}",
+      "#mount .sec-ingest-result{background:#161410;color:#f4f0e6;border:0;border-radius:0;box-shadow:none;padding:36px 32px 40px;}",
+      "#mount .sec-ingest-field{margin:0 0 30px;}",
+      "#mount .sec-ingest-label{display:block;margin:0 0 2px;color:#a39b8e;font-family:" + SANS + ";font-size:11px;font-weight:400;letter-spacing:0.22em;}",
+      "#mount .sec-ingest-root input.sec-ingest-input,#mount .sec-ingest-root select.sec-ingest-select{width:100%;margin:0;background-color:transparent;color:#f4f0e6;border:0;border-bottom:1px solid " + LINE + ";border-radius:0;box-shadow:none;padding:8px 0 10px;font-family:" + SANS + ";font-size:16px;font-weight:300;letter-spacing:0.02em;}",
+      "#mount .sec-ingest-root select.sec-ingest-select{appearance:none;padding-right:22px;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5 L6 8 L10 4.5' fill='none' stroke='%23a39b8e' stroke-width='1'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right center;background-size:12px 12px;}",
+      "#mount .sec-ingest-root select.sec-ingest-select option{background:#161410;color:#f4f0e6;}",
+      "#mount .sec-ingest-root input.sec-ingest-input::placeholder{color:#a39b8e;opacity:1;font-weight:300;}",
+      "#mount .sec-ingest-root input.sec-ingest-input:focus,#mount .sec-ingest-root select.sec-ingest-select:focus{outline:none;border-bottom-color:rgba(244,240,230,0.72);}",
+      "#mount .sec-ingest-root input.sec-ingest-input:-webkit-autofill{ -webkit-text-fill-color:#f4f0e6;caret-color:#f4f0e6;box-shadow:0 0 0 1000px #0e0d0b inset;}",
+      "#mount .sec-ingest-filepick{display:flex;align-items:baseline;gap:22px;min-width:0;border-bottom:1px solid " + LINE + ";padding:10px 0;background:transparent;}",
+      "#mount .sec-ingest-root button.sec-ingest-filepick-btn{appearance:none;background:transparent;color:#f4f0e6;border:0;border-radius:0;padding:0;cursor:pointer;font-family:" + SANS + ";font-size:14px;font-weight:400;letter-spacing:0.16em;}",
+      "#mount .sec-ingest-filepick-name{color:#a39b8e;letter-spacing:0.04em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+      "#mount .sec-ingest-file-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}",
+      "#mount .sec-ingest-mono{font-family:" + SANS + ";font-weight:300;}",
+      "#mount .sec-ingest-hint{margin:8px 0 0;color:#a39b8e;font-size:12px;font-weight:400;letter-spacing:0.04em;line-height:1.55;}",
+      "#mount .sec-ingest-actions{display:flex;align-items:center;gap:28px;margin-top:8px;background:transparent;border:0;}",
+      "#mount .sec-ingest-root button.sec-ingest-submit{appearance:none;background:#c6a15b;color:#0e0d0b;border:0;border-radius:0;padding:12px 22px;cursor:pointer;font-family:" + SANS + ";font-size:13px;font-weight:500;letter-spacing:0.2em;}",
+      "#mount .sec-ingest-root button.sec-ingest-submit:hover{filter:brightness(1.08);}",
+      "#mount .sec-ingest-root button.sec-ingest-submit:disabled{opacity:.4;cursor:default;filter:none;}",
+      "#mount .sec-ingest-root button.sec-ingest-textbtn{appearance:none;background:transparent;border:0;border-radius:0;padding:12px 0;color:#a39b8e;text-decoration:none;cursor:pointer;font-family:" + SANS + ";font-size:13px;font-weight:400;letter-spacing:0.14em;}",
+      "#mount .sec-ingest-root button.sec-ingest-textbtn:hover{color:#f4f0e6;}",
+      "#mount .sec-ingest-root button.sec-ingest-textbtn:disabled{opacity:.4;cursor:default;}",
+      "#mount .sec-ingest-result-title{margin:0 0 28px;color:#f4f0e6;font-family:" + SERIF + ";font-size:40px;font-weight:500;line-height:1;letter-spacing:0.02em;}",
+      "#mount .sec-ingest-lead{margin:0 0 12px;color:#f4f0e6;font-family:" + SERIF + ";font-size:26px;font-weight:500;line-height:1.35;}",
+      "#mount .sec-ingest-out{margin:0;min-height:0;white-space:pre-wrap;word-break:break-word;background:transparent;color:#a39b8e;font-family:" + SANS + ";font-size:14px;font-weight:400;letter-spacing:0.08em;line-height:1.6;}",
+      "#mount .sec-ingest-out-ok{color:#f4f0e6;}",
+      "#mount .sec-ingest-out-error{color:#c47a6a;}",
+      "#mount .sec-ingest-cols,#mount .sec-ingest-summary{margin:18px 0 0;color:#a39b8e;font-size:13px;font-weight:400;letter-spacing:0.08em;line-height:1.6;}",
+      "#mount .sec-ingest-root table.sec-ingest-table{width:100%;border-collapse:collapse;margin:8px 0 0;background:transparent;font-family:" + SANS + ";font-size:15px;font-weight:400;letter-spacing:0.14em;color:#f4f0e6;}",
+      "#mount .sec-ingest-root table.sec-ingest-table th,#mount .sec-ingest-root table.sec-ingest-table td{border:0;border-bottom:1px solid " + LINE + ";background:transparent;padding:16px 0;text-align:left;vertical-align:baseline;font-weight:400;color:#f4f0e6;letter-spacing:0.14em;}",
+      "#mount .sec-ingest-root table.sec-ingest-table th{color:#a39b8e;font-size:12px;font-weight:400;letter-spacing:0.2em;width:46%;}",
+      "#mount .sec-ingest-root table.sec-ingest-table td.sec-ingest-num{text-align:right;font-variant-numeric:tabular-nums lining-nums;font-feature-settings:\"tnum\" 1,\"lnum\" 1;letter-spacing:0.12em;}",
+      "#mount .sec-ingest-root button.sec-ingest-tab:focus-visible,#mount .sec-ingest-root button.sec-ingest-submit:focus-visible,#mount .sec-ingest-root button.sec-ingest-textbtn:focus-visible,#mount .sec-ingest-root button.sec-ingest-filepick-btn:focus-visible{outline:1px solid rgba(244,240,230,0.55);outline-offset:3px;}",
+      "@media (max-width:760px){#mount .sec-ingest-layout{grid-template-columns:minmax(0,1fr);gap:40px;}#mount .sec-ingest-panel-hint{font-size:26px;margin:28px 0 36px;}#mount .sec-ingest-result{padding:28px 22px 32px;}#mount .sec-ingest-result-title{font-size:32px;}}"
     ].join("");
     (document.head || document.documentElement).appendChild(style);
   }
@@ -103,7 +121,16 @@
     return formatDetail(err) || "请求失败";
   }
 
+  function clearRich(box) {
+    if (!box) return;
+    var nodes = box.querySelectorAll(".sec-ingest-lead,.sec-ingest-table,.sec-ingest-cols,.sec-ingest-summary");
+    for (var i = 0; i < nodes.length; i += 1) nodes[i].remove();
+  }
+
   function show(out, text, state) {
+    var box = out.parentNode;
+    if (box && box.classList && box.classList.contains("sec-ingest-result")) clearRich(box);
+    out.hidden = false;
     out.textContent = text;
     out.classList.remove("sec-ingest-out-ok", "sec-ingest-out-error");
     if (state === "ok") out.classList.add("sec-ingest-out-ok");
@@ -149,26 +176,13 @@
     return Array.isArray(value) ? value : null;
   }
 
-  function successText(info) {
-    var name = info.name || "";
-    var sid = info.sessionId ? String(info.sessionId) : "";
-    var head = "数据集「" + name + "」已进入当前会话" + (sid ? " " + sid : "") + "。";
-    var bits = [];
-    if (info.rows != null && info.rows !== "") bits.push(info.rows + " 行");
-    if (info.cols != null && info.cols !== "") bits.push(info.cols + " 列");
-    if (info.memory != null && info.memory !== "") bits.push("内存 " + info.memory + " 字节");
-    var cols = asList(info.columns);
-    var colLine = cols && cols.length ? "列：" + cols.join("、") : "";
-    return [head, bits.join("，"), colLine, info.summary || ""].filter(Boolean).join("\n");
-  }
-
-  function describe(data, fallback) {
+  function datasetInfo(data, fallback) {
     var meta = data && data.metadata ? data.metadata : {};
     var columns = asList(data && data.columns) || asList(meta.columns);
     var cols = data && data.column_count != null
       ? data.column_count
       : (columns ? columns.length : null);
-    return successText({
+    return {
       name: (data && data.dataset_name) || fallback.name,
       sessionId: (data && data.session_id) || fallback.sessionId,
       rows: data && data.row_count != null ? data.row_count : meta.row_count,
@@ -176,7 +190,55 @@
       columns: columns,
       memory: data && data.memory_bytes != null ? data.memory_bytes : meta.memory_bytes,
       summary: (data && (data.summary || data.summary_text)) || ""
-    });
+    };
+  }
+
+  function addMetric(tbody, label, value) {
+    if (value == null || value === "") return false;
+    var tr = el("tr");
+    var th = el("th");
+    th.scope = "row";
+    th.textContent = label;
+    var td = el("td", "sec-ingest-num");
+    td.textContent = String(value);
+    tr.appendChild(th);
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return true;
+  }
+
+  function presentOk(out, data, fallback) {
+    var info = datasetInfo(data, fallback);
+    var box = out.parentNode;
+    clearRich(box);
+    out.hidden = true;
+    out.textContent = "";
+    out.classList.remove("sec-ingest-out-ok", "sec-ingest-out-error");
+    var lead = el("p", "sec-ingest-lead");
+    var sid = info.sessionId ? String(info.sessionId) : "";
+    lead.textContent = "数据集「" + (info.name || "") + "」已进入当前会话" + (sid ? " " + sid : "") + "。";
+    box.appendChild(lead);
+    var tbody = el("tbody");
+    var any = false;
+    if (addMetric(tbody, "行", info.rows)) any = true;
+    if (addMetric(tbody, "列", info.cols)) any = true;
+    if (addMetric(tbody, "内存（字节）", info.memory)) any = true;
+    if (any) {
+      var table = el("table", "sec-ingest-table");
+      table.appendChild(tbody);
+      box.appendChild(table);
+    }
+    var cols = asList(info.columns);
+    if (cols && cols.length) {
+      var colLine = el("p", "sec-ingest-cols");
+      colLine.textContent = "列：" + cols.join("、");
+      box.appendChild(colLine);
+    }
+    if (info.summary) {
+      var summary = el("p", "sec-ingest-summary");
+      summary.textContent = String(info.summary);
+      box.appendChild(summary);
+    }
   }
 
   function setBusy(form, busy) {
@@ -362,7 +424,7 @@
       try {
         var data = await postFile(fd);
         var name = data.dataset_name || dataset;
-        show(out, describe(data, { name: name, sessionId: sid }), "ok");
+        presentOk(out, data, { name: name, sessionId: sid });
         safeNotify(ctx, "数据集「" + name + "」已进入当前会话");
       } catch (err) {
         show(out, messageOf(err), "error");
@@ -414,7 +476,7 @@
       setBusy(form, true);
       try {
         var data = await postJson(ctx, "/api/v1/connect", body);
-        show(out, describe(data, { name: dataset, sessionId: sid }), "ok");
+        presentOk(out, data, { name: dataset, sessionId: sid });
         safeNotify(ctx, "数据集「" + dataset + "」已进入当前会话");
       } catch (err) {
         show(out, messageOf(err), "error");
@@ -474,7 +536,7 @@
       if (!records && fmt) body.format = fmt;
       var data = await postJson(ctx, "/api/v1/import/traces", body);
       var name = data.dataset_name || dataset;
-      show(out, describe(data, { name: name, sessionId: sid }), "ok");
+      presentOk(out, data, { name: name, sessionId: sid });
       safeNotify(ctx, "数据集「" + name + "」已进入当前会话");
     } catch (err) {
       show(out, err && err.client ? err.message : messageOf(err), "error");
