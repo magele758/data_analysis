@@ -89,6 +89,13 @@ def test_section_scripts_and_missing_copy():
     assert 'id="mount"' in HTML
 
 
+def test_api_accepts_section_call_shape():
+    """analyze.js and transform.js call ctx.api(method, path, body)."""
+    assert "function readApiCall(first, second, third)" in JS
+    assert 'typeof second === "string"' in JS
+    assert "HTTP_METHODS" in JS
+
+
 def test_session_and_api_contract():
     """Top bar session id persists, and ctx.api stays on same-origin /api/v1 JSON."""
     assert 'id="session-id"' in HTML

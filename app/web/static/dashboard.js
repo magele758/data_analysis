@@ -73,20 +73,33 @@ function errorMessage(data, status) {
   return "HTTP " + status;
 }
 
-async function api(path, options) {
-  const opts = options || {};
-  const method = String(opts.method || "GET").toUpperCase();
+const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+
+function readApiCall(first, second, third) {
+  if (typeof second === "string" && HTTP_METHODS.has(String(first || "").toUpperCase())) {
+    return { method: String(first).toUpperCase(), path: second, body: third };
+  }
+  const opts = second && typeof second === "object" ? second : {};
+  return {
+    method: String(opts.method || "GET").toUpperCase(),
+    path: first,
+    body: opts.body,
+  };
+}
+
+async function api(first, second, third) {
+  const call = readApiCall(first, second, third);
   const headers = { "Content-Type": "application/json" };
-  const init = { method, headers };
-  if (opts.body != null && method !== "GET" && method !== "HEAD") {
-    if (typeof FormData !== "undefined" && opts.body instanceof FormData) {
+  const init = { method: call.method, headers };
+  if (call.body != null && call.method !== "GET" && call.method !== "HEAD") {
+    if (typeof FormData !== "undefined" && call.body instanceof FormData) {
       delete headers["Content-Type"];
-      init.body = opts.body;
+      init.body = call.body;
     } else {
-      init.body = JSON.stringify(opts.body);
+      init.body = JSON.stringify(call.body);
     }
   }
-  const res = await fetch(apiUrl(path), init);
+  const res = await fetch(apiUrl(call.path), init);
   const text = await res.text();
   let data = null;
   if (text) {
@@ -96,7 +109,11 @@ async function api(path, options) {
       data = { detail: text };
     }
   }
-  if (!res.ok) throw new Error(errorMessage(data, res.status));
+  if (!res.ok) {
+    const err = new Error(errorMessage(data, res.status));
+    err.detail = data && data.detail != null ? data.detail : err.message;
+    throw err;
+  }
   return data;
 }
 
@@ -350,9 +367,15 @@ function setHash(id) {
   history.replaceState(null, "", next);
 }
 
-function showMissing(title) {
+function resetMount() {
   const root = mountEl();
   root.replaceChildren();
+  root.className = "";
+  return root;
+}
+
+function showMissing(title) {
+  const root = resetMount();
   const wrap = document.createElement("div");
   wrap.className = "missing";
   const heading = document.createElement("h2");
@@ -364,8 +387,7 @@ function showMissing(title) {
 }
 
 function showMountError(title, err) {
-  const root = mountEl();
-  root.replaceChildren();
+  const root = resetMount();
   const heading = document.createElement("h2");
   heading.textContent = title;
   const note = document.createElement("p");
@@ -412,8 +434,7 @@ function openView(btn) {
     showMissing(view.label);
     return;
   }
-  const root = mountEl();
-  root.replaceChildren();
+  const root = resetMount();
   try {
     Promise.resolve(mod.mount(root, makeCtx(view))).catch((err) => {
       notify("失败：" + (err && err.message ? err.message : err));
@@ -464,8 +485,7 @@ function openExample(btn) {
   setCurrent(btn);
   setCrumb("示例 / " + label);
   setHash("example-" + id);
-  const root = mountEl();
-  root.replaceChildren();
+  const root = resetMount();
   const heading = document.createElement("h2");
   heading.textContent = label;
   const hint = document.createElement("p");
