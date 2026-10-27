@@ -5,7 +5,7 @@ identifiers, bind/escape literals, and use the existing read-only SQL operator.
 """
 import json
 from app.cluster.session_manager import SessionManager
-from app.engine.sql_guard import safe_table_ref
+
 from app.operators.sandbox import run_duckdb_sql
 from app.schemas.requests import BusinessReportRequest
 from app.nlg.narrative_builder import NarrativeBuilder
@@ -25,7 +25,9 @@ def _query(session_id, sql, limit=2500):
 
 
 def _schema(session_id, table):
-    safe = safe_table_ref(table)
+    if not isinstance(table, str) or not table.strip():
+        raise ValueError('数据表不存在或会话已失效，请重新导入')
+    safe = quote(table)
     try:
         schema = _query(session_id, f'DESCRIBE {safe}')
     except Exception as exc:

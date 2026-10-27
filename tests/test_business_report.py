@@ -20,6 +20,21 @@ def sample():
     yield s
     SessionManager().drop_session(s.session_id)
 
+def test_non_identifier_table_names_are_described():
+    s=SessionManager().get_or_create_session()
+    try:
+        con=s.get_duckdb_conn()
+        con.execute('CREATE TABLE "erp-sales" (d DATE, v DOUBLE)')
+        con.execute("INSERT INTO \"erp-sales\" VALUES (DATE '2024-01-15', 1)")
+        con.execute('CREATE TABLE "销售明细" (d DATE, v DOUBLE)')
+        con.execute("INSERT INTO \"销售明细\" VALUES (DATE '2024-02-15', 2)")
+        hyphen=discover_report(s.session_id, 'erp-sales', 'month')
+        chinese=discover_report(s.session_id, '销售明细', 'month')
+        assert {c['column_name'] for c in hyphen['columns']}=={'d','v'}
+        assert {c['column_name'] for c in chinese['columns']}=={'d','v'}
+    finally:
+        SessionManager().drop_session(s.session_id)
+
 def request(s,**kw):
     body=dict(session_id=s.session_id,dataset_name='custom_sales',metric='利润',time_column='日期',dimensions=['区域'],
       base_start='2022-01-01',base_end='2022-02-01',current_start='2023-01-01',current_end='2023-02-01',
