@@ -693,5 +693,72 @@ def import_excel_or_csv(
         "summary": f"Successfully loaded {os.path.basename(file_path)} with {meta.row_count:,} rows and {meta.column_count} columns into session '{sess.session_id}'."
     }, ensure_ascii=False)
 
+
+@mcp.tool(name='discover_business_report', description='Inspect a session dataset and suggest field mappings and latest comparison windows. Suggestions are candidates, not business semantics. Reuse session_id from import/connect. No external writes.')
+def discover_business_report(session_id: str, dataset_name: str, grain: str = 'month') -> str:
+    from app.operators.business_report import discover_report
+    return json.dumps(discover_report(session_id,dataset_name,grain),ensure_ascii=False,default=str)
+
+@mcp.tool(name='generate_business_report', description='Generate a general evidence report for an uploaded/session dataset: SUM metric changes, selected time grain, up to two separate dimension contributions, Z-score anomalies, checks and next steps. Pass config matching BusinessReportRequest: metric, time_column, dimensions, grain, base_start/base_end/current_start/current_end (ISO dates, end-exclusive); optional mapping product/quantity/price/discount/sales/cost/order and discount_scale 1 or 100 enables validated profit midpoint decomposition. Optional filter_dimension/filter_value enables iterative drilldown. Reports are accounting evidence, not causal proof; missing capabilities are explicit; no writes.')
+def generate_business_report_tool(session_id: str, dataset_name: str, config: Dict[str, Any]) -> str:
+    from app.schemas.requests import BusinessReportRequest
+    from app.operators.business_report import generate_business_report
+    req=BusinessReportRequest(**{**config,'session_id':session_id,'dataset_name':dataset_name})
+    return json.dumps(generate_business_report(req),ensure_ascii=False,default=str)
+
+
+
+from app.schemas.requests import MetricCompareRequest, DecompositionRequest, SensitivityRequest
+
+@mcp.tool(name='compare_metric', description='Compare a typed metric (sum, ratio of sums, distinct_count, closing_balance) across explicit end-exclusive windows and calendar buckets. Strict mode requires caller completeness watermark; aware timestamps require offsets and IANA timezone. Returns v2 evidence identical to REST. No writes or Agent loop.')
+def compare_metric_tool(request: MetricCompareRequest) -> dict:
+    from app.operators.analytical_tools import compare_metric
+    return compare_metric(request)
+
+@mcp.tool(name='decompose_change', description='Independent change decomposition: additive dimension (sum only), numerator/denominator ratio midpoint, or validated hierarchical profit midpoint with field mapping. Returns full reconciliation and Top-K omitted contribution, v2 evidence. Contribution is not causality. Uses the same metric/time contract as compare_metric.')
+def decompose_change_tool(request: DecompositionRequest) -> dict:
+    from app.operators.analytical_tools import decompose_change
+    return decompose_change(request)
+
+@mcp.tool(name='analyze_sensitivity', description='Independent read-only anomaly sensitivity: baseline-fitted Z-score/IQR/MAD, optional group cohorts, row or entity exclusion, original versus reviewed typed metric comparisons. Zero dispersion/missing reference groups are unscored and retained; no source rows are deleted. Returns candidate truncation, population counts and v2 evidence.')
+def analyze_sensitivity_tool(request: SensitivityRequest) -> dict:
+    from app.operators.analytical_tools import analyze_sensitivity
+    return analyze_sensitivity(request)
+
+from app.schemas.requests import OrderInvestigationRequest
+
+@mcp.tool(name='investigate_orders', description='Read-only order investigation with shared metric/time contracts and evidence v2. Requires SUM profit, complete order/product/quantity/price/discount/sales/cost mapping and anomaly_column. Reproduces MAD/IQR/Z-score candidates; classifies order-periods by amount/ledger mismatch, baseline product discount outlier, insufficient evidence, or large/other orders passing checks. Returns additive category contributions, overlap flags and drilldown requests. order_ids filters detail only, preserving references. Passing checks is not proof of normal business or causal impact.')
+def investigate_orders_tool(request: OrderInvestigationRequest) -> dict:
+    from app.operators.order_investigation import investigate_orders
+    return investigate_orders(request)
+
+from app.schemas.requests import OrderReconciliationRequest
+
+@mcp.tool(name='reconcile_order_amounts', description='Read-only forensic amount checks and exact-order exclusion profit bridges. Requires SUM profit and full order/product/quantity/price/discount/sales/cost mapping. Empty order_ids selects all amount/ledger mismatches without Top-K bias; explicit IDs select those orders. Optional line_id detects repeated IDs; adjustments are signed line-level tax/freight columns, never inferred tax rates. Returns duplicate features, observed/candidate multipliers, alternative discount formulas, original/excluding-selected midpoint bridges and effect differences with v2 evidence. Hypotheses are not verified errors; source data unchanged.')
+def reconcile_order_amounts_tool(request: OrderReconciliationRequest) -> dict:
+    from app.operators.order_reconciliation import reconcile_order_amounts
+    return reconcile_order_amounts(request)
+
+from app.schemas.requests import DiscountDriversRequest
+
+@mcp.tool(name='analyze_discount_drivers', description='Read-only discount driver decomposition after whole-order accounting-mismatch exclusion or explicit excluded IDs. SUM profit and complete mapping required. Splits the shared midpoint profit-bridge discount effect into within-SKU member rate deepening versus list-amount sales mix, across product plus up to four dimensions. Each view independently reconciles to the same effect; never add views. New/disappearing member rates are carried from the observed period as an allocation convention. focus_dimension/member drill evidence without refitting coefficients. Returns exclusion counts, omitted contribution, stable-context order evidence and v2 evidence, not causal proof.')
+def analyze_discount_drivers_tool(request: DiscountDriversRequest) -> dict:
+    from app.operators.discount_drivers import analyze_discount_drivers
+    return analyze_discount_drivers(request)
+
+from app.schemas.requests import DiscountOrderAuditRequest
+
+@mcp.tool(name='audit_discount_orders', description='Read-only prioritized discount order audit. Requires SUM profit, complete mapping, customer_column and channel_column; optional product_ids and filters target the review. Excludes accounting-mismatch whole orders by default. Baseline hierarchy: product/customer/channel, product/channel, product; min_reference_orders counts distinct IDs. Returns current-volume discount burden, reference coverage, selected-product versus all-product scoped order profit, configurable P0/P1/P2/P3 checks, and stable focus_order_id/focus_customer/focus_channel drilldowns. Positive burden is not period profit attribution or recoverable loss. v2 evidence, no Agent or writes.')
+def audit_discount_orders_tool(request: DiscountOrderAuditRequest) -> dict:
+    from app.operators.discount_order_audit import audit_discount_orders
+    return audit_discount_orders(request)
+
+from app.schemas.requests import DiscountScenarioRequest
+
+@mcp.tool(name='simulate_discount_scenarios', description='Read-only discount caps and volume-loss stress. Shared metric/time/mapping and hierarchical baseline audit contracts. discount_caps/volume_reductions are fractions; zero volume loss always included. variable_cost_share defines how much mapped cost falls with volume; other cost stays fixed. Returns full-population cap grid, per-product grid, detail-only order_ids with target/scoped-order break-even rates and baseline restore uplift, coverage, rounding residual, SQL evidence v2 and audit drilldowns. cost_share_cases (default 0/0.5/1) returns total and per-product preserve-profit/nonloss feasible boundaries and raw zero-profit roots. robustness_volume_drop compares all configured cost cases and individual products; robust means no loss and no deterioration under those assumptions, not demand evidence. No estimated elasticity, guaranteed recovery or writes. Missing baseline yields null restore result; incompatible accounting rejected.')
+def simulate_discount_scenarios_tool(request: DiscountScenarioRequest) -> dict:
+    from app.operators.discount_scenarios import simulate_discount_scenarios
+    return simulate_discount_scenarios(request)
+
 if __name__ == "__main__":
     mcp.run()
