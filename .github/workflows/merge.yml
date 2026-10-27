@@ -1,0 +1,31 @@
+# Deep-module merge gate. Required status check: contracts.
+# Ontology, operators, SQL guard, session fetch, auth, and ingest stay here.
+# Composed examples and the cross-module MDS loop are mark `full` and run later.
+name: Merge
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install pinned DuckDB
+        run: |
+          pip install -e ".[dev]" 'duckdb==1.5.5'
+          python -c "import duckdb; assert duckdb.__version__ == '1.5.5'"
+
+      - name: Deep module contracts
+        run: pytest tests/ -m "not full" -q --tb=short
+        env:
+          DATA_AGENT_API_KEYS: test-key-12345

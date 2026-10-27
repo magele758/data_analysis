@@ -5,6 +5,10 @@ analysis, and assert the report is produced with the expected sections — so th
 examples stay runnable as the service evolves.
 """
 
+import pytest
+
+pytestmark = pytest.mark.full
+
 import importlib.util
 import os
 import sys

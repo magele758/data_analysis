@@ -1,0 +1,27 @@
+# Shallow gate. No scientific stack. Not a required merge check.
+name: Fast commit
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: fast-commit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Compile, script syntax, nav contract
+        run: |
+          python -m compileall -q app tests
+          find app/web/static -name '*.js' -print0 | xargs -0 -n1 node --check
+          pip install pytest
+          pytest -q --tb=line tests/test_dashboard_nav.py

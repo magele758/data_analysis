@@ -37,6 +37,11 @@
 >    - 若调整 Vega-Lite/ECharts 图表 Spec 格式或 NLG 叙述字段，必须同步更新 `app/nlg/narrative_builder.py` 与 `tests/` 测试用例。
 > 4. **提交前自检流水线**：
 >    - 每次提交前必须在虚拟环境中执行 `.venv/bin/pytest tests/ -v`，确保所有端到端测试 100% 通过。
+>    - CI 分三档：
+>      - `fast-commit.yml` 的 `commit`：浅模块。编译、前端脚本语法、导航契约。不装科学计算栈，不挡合并。
+>      - `merge.yml` 的 `contracts`：深模块接口。钉死 DuckDB 1.5.5，`pytest -m "not full"`。这是合并必须通过的检查。
+>      - `functional.yml`：全量套件、DuckDB 1.5.5/2.0.0 矩阵、镜像 `/health`。不发布镜像，发布仍走 `release-image.yml`。不挡 PR。
+>    - 本地对应 `scripts/ci_gates.sh fast|merge|full`。默认依赖是 `duckdb>=1.5.5,<2`。
 
 ---
 

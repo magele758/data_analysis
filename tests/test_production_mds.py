@@ -1,4 +1,6 @@
 import pytest
+
+pytestmark = pytest.mark.full
 import duckdb
 import os
 from app.catalog.metadata_db import MetadataDB

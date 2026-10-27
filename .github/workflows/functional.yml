@@ -1,0 +1,100 @@
+# Full functional gate. Not required on pull requests.
+# Publish stays in release-image.yml. This workflow builds amd64 and checks /health.
+name: Functional
+
+on:
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: functional-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Full suite on DuckDB 1.5.5
+        run: |
+          pip install -e ".[dev]" 'duckdb==1.5.5'
+          python -c "import duckdb; assert duckdb.__version__ == '1.5.5'"
+          pytest tests/ -q --tb=short
+        env:
+          DATA_AGENT_API_KEYS: test-key-12345
+
+  duckdb-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        duckdb: ["1.5.5", "2.0.0"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Interface slice on DuckDB ${{ matrix.duckdb }}
+        run: |
+          pip install -e ".[dev]" "duckdb==${{ matrix.duckdb }}"
+          python -c "import duckdb; assert duckdb.__version__ == '${{ matrix.duckdb }}'"
+          pytest -q --tb=short \
+            tests/test_session_result.py \
+            tests/test_sql_guard.py \
+            tests/test_duckdb_scanner.py \
+            tests/test_ingest_slice.py \
+            tests/test_connectors.py \
+            tests/test_excel_and_csv_import.py \
+            tests/test_analytical_contracts.py \
+            tests/test_business_report.py \
+            tests/test_examples.py \
+            tests/test_examples_web.py
+        env:
+          DATA_AGENT_API_KEYS: test-key-12345
+
+  image-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          platforms: linux/amd64
+          tags: data-agent:smoke
+          cache-from: type=gha,scope=smoke
+          cache-to: type=gha,mode=max,scope=smoke
+
+      - name: /health answers
+        run: |
+          docker run -d --name data-agent-smoke -p 8000:8000 -e DATA_AGENT_API_KEYS=test-key-12345 data-agent:smoke
+          for _ in $(seq 1 30); do
+            if python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).status==200 else 1)"; then
+              docker rm -f data-agent-smoke
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs data-agent-smoke
+          docker rm -f data-agent-smoke
+          exit 1

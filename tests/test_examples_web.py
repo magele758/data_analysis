@@ -1,5 +1,9 @@
 """Tests for the built-in runnable examples (in-app module + REST endpoints)."""
 
+import pytest
+
+pytestmark = pytest.mark.full
+
 from fastapi.testclient import TestClient
 from app.config import settings
 

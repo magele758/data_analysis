@@ -1,4 +1,6 @@
 import pytest
+
+pytestmark = pytest.mark.full
 import duckdb
 from fastapi.testclient import TestClient
 
