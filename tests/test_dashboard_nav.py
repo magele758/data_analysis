@@ -26,6 +26,7 @@ GROUPS = [
     ]),
     ("模型", "model", [
         ("objects", "对象与关系"),
+        ("playground", "本体图"),
         ("traverse", "遍历与实体图"),
         ("metrics", "指标与血缘"),
     ]),
@@ -85,6 +86,7 @@ def test_section_scripts_and_missing_copy():
     """All section scripts are included; a missing module shows the empty state."""
     for src in SECTION_SCRIPTS:
         assert re.search(r'src="' + re.escape(src) + r'(?:\?[^"]*)?"', HTML)
+    assert 'src="/static/ontology-playground.js"' in HTML
     assert "DashboardSections" in JS
     assert ".mount" in JS
     assert "这一段还没装上" in JS
