@@ -145,3 +145,29 @@ class NarrativeBuilder:
         if vif_warns:
             parts.append(f"⚠️ 计量预警：变量 {', '.join(vif_warns)} 的 VIF 因子超过 10，存在严重多重共线性，建议进行变量剔除或岭回归。")
         return " ".join(parts)
+
+    @classmethod
+    def generate_business_report_narrative(cls, statistics: Dict[str, Any], metric: str) -> str:
+        """Evidence-backed report summary; does not assert a causal explanation."""
+        rate = statistics.get('change_pct')
+        rate_text = f"{rate:+.2f}%" if rate is not None else '基期为零，变化率不定义'
+        return (f"{metric} 从 {statistics['base_value']:,.2f} 变为 {statistics['current_value']:,.2f}，"
+                f"变化 {statistics['delta']:+,.2f}（{rate_text}）。"
+                '以下贡献用于定位变化来源，不能单独证明因果。')
+
+    @classmethod
+    def generate_tool_evidence_narrative(cls, operator: str, result: Dict[str, Any]) -> str:
+        comparison = result.get('comparison', result.get('original', {}))
+        delta = comparison.get('delta')
+        change = f"{delta:+,.6g}" if delta is not None else '未定义（请检查分母或有效样本）'
+        if operator == 'simulate_discount_scenarios':
+            return f"折扣情景：覆盖 {result['scenario_selection']['current_orders']} 笔目标订单；固定销量、假设销量下降与多成本案例的维持毛利/保本边界分别返回。稳健性仅针对配置压力及商品检查。改善以原公式毛利为基准；需求弹性未经估计，不能视作收益承诺。"
+        if operator == 'audit_discount_orders':
+            return f"折扣订单核查：{result['audit_summary']['current_orders']} 笔当期订单，P1优先核查 {result['audit_summary']['p1_orders']} 笔；参考级别和目标商品/整单毛利分别返回。金额为当期业务量下的基准对照，不是同比贡献或保证可追回损失。"
+        if operator == 'analyze_discount_drivers':
+            return f"折扣深查：排除 {result['selection']['excluded_orders']} 笔订单后，利润变化 {change}。各维度分别拆解同一折扣贡献，不可跨视图相加；折扣加深与结构项是会计分摊，不是因果证明。"
+        if operator == 'reconcile_order_amounts':
+            return f"金额深查：选中 {result['selection']['selected_orders']} 笔订单，原始利润变化 {change}。重复、倍率和税费只作为核查假设；排除前后分解不是已纠正的真实利润。"
+        if operator == 'investigate_orders':
+            return f"订单核查：利润变化 {change}；分类贡献已对账，金额与折扣标记可重叠。检查通过仅表示规则未命中，不能证明订单正常或构成因果结论。"
+        return f"{operator}：所选口径的变化为 {change}。计算证据、适用条件和截断信息见 evidence；不构成因果证明。"

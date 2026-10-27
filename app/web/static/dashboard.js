@@ -220,6 +220,11 @@ function isEcharts(spec) {
 }
 
 async function drawChart(host, spec) {
+  const charts = window.DashboardSections?.analyze;
+  if (charts?.drawChart) {
+    host.classList.add("sec-analyze-chart");
+    return charts.drawChart(host, spec);
+  }
   if (isVega(spec)) {
     await loadScript("https://cdn.jsdelivr.net/npm/vega@5");
     await loadScript("https://cdn.jsdelivr.net/npm/vega-lite@5");
@@ -369,6 +374,7 @@ function setHash(id) {
 
 function resetMount() {
   const root = mountEl();
+  window.DashboardSections?.analyze?.unmount?.(root);
   root.replaceChildren();
   root.className = "";
   return root;
@@ -424,9 +430,18 @@ function readView(btn) {
   };
 }
 
+const PAGE_HEADINGS = {"report":["从证据，走向判断。","选择你的数据、时间与业务维度，生成可核查的分析报告。"],"import-file":["从一份数据开始。","把文件带入分析会话，保留字段、类型与来源。"],"connect-db":["连接业务发生的地方。","建立数据连接，把所需表载入当前分析会话。"],"import-trace":["让每一次调用可被理解。","导入遥测数据，统一 span 与 event，再进行路径和性能分析。"],"clean":["让数据回到清晰。","去重、填充与极值处理，让每个转换都有明确的输入和输出。"],"pipeline":["把转换编织成路径。","以 SQL DAG 组织模型依赖，让数据按顺序流向下一步。"],"wide":["把分散的记录连接起来。","围绕分析主体关联业务表，形成可复用的销售宽表。"],"objects":["万象相连，自有秩序。","让数据表成为业务对象，让键关系成为可探索的路径。"],"traverse":["沿着关系，追问下去。","从客户走向订单与商品，逐跳查看实体路径。"],"metrics":["让每个指标有来处。","从口径到物理表，沿血缘查看依赖与影响范围。"],"eda":["先看清数据，再提出问题。","从完整性、字段类型与分布开始，建立数据画像。"],"olap":["在不同维度，看见同一业务。","以区域与品类组织指标，查看销售和利润的差异。"],"driver":["变化，必有其贡献。","沿区域与品类拆解利润变化，区分整体波动与局部贡献。"],"hypothesis":["让判断，经得起检验。","把观察变成假设，用统计量与边界约束结论。"],"variance":["分散之中，找到结构。","按业务维度拆解波动，区分组间与组内差异。"],"signals":["在噪声中，辨认真正的信号。","从异常、趋势与集中度中发现值得继续追问的变化。"],"paths":["看见行为的下一步。","把事件组织为漏斗、留存与路径，理解行为如何发生。"],"forecast":["面向未来，保留不确定性。","根据时间序列生成预测，明确历史范围与预测区间。"],"assert":["可信，从核对开始。","以清晰的断言检查数据，再决定它能否进入下一步。"],"drift":["感知结构中的变化。","对照基线识别字段新增、缺失与类型变化。"],"sync":["让分析抵达业务系统。","配置目标与同步方式，执行前清晰呈现数据范围。"],"audience":["让分群成为可行动的名单。","把分析得到的客户分群转成业务可使用的受众。"],"alert":["把重要的变化送达。","从数据质量与指标异动生成告警，并保留发送结果。"],"example-erp":["从订单，走到洞察。","项目内置合成 ERP 数据示例：接入、探索、质量、分群、归因。"],"example-dota2":["从比赛，走到战术。","基于项目已有 OpenDota 比赛数据，查看战队与选手的分析路径。"]};
+function paintPageHeading(id, label, section) {
+  const copy = PAGE_HEADINGS[id] || [label, "连接数据，构建关系，让每次洞察都有据可循。"];
+  document.getElementById("page-title").textContent = copy[0];
+  document.getElementById("page-description").textContent = copy[1];
+  document.getElementById("page-sculpture").src = "/static/cover/" + (section === "analyze" ? "athena" : section === "govern" ? "hermes" : "apollo") + ".jpg";
+}
+
 function openView(btn) {
   setNavOpen(false);
   const view = readView(btn);
+  paintPageHeading(view.id, view.label, view.section);
   setPrinciple(view.section);
   setCurrent(btn);
   setCrumb(view.groupLabel + " / " + view.label);
@@ -443,6 +458,7 @@ function openView(btn) {
       .then(() => {
         selectGovernTab(root, view);
         selectIngestTab(root, view);
+        selectWorkspaceTab(root, view);
       })
       .catch((err) => {
         notify("失败：" + (err && err.message ? err.message : err));
@@ -476,6 +492,22 @@ function selectIngestTab(root, view) {
   tab.click();
 }
 
+// Sidebar groups may map onto a more specific tool tab in a section.
+const ANALYZE_TABS = {
+  eda: "eda", olap: "olap", driver: "driver", hypothesis: "test",
+  variance: "variance", signals: "outliers", paths: "funnel", forecast: "forecast"
+};
+function selectWorkspaceTab(root, view) {
+  let selector;
+  if (view.section === "transform" || view.section === "model") {
+    selector = '[data-tab="' + CSS.escape(view.id) + '"]';
+  } else if (view.section === "analyze") {
+    selector = '[data-sec-analyze-tab="' + CSS.escape(ANALYZE_TABS[view.id] || view.id) + '"]';
+  }
+  const tab = selector && root.querySelector(selector);
+  if (tab && tab.getAttribute("aria-selected") !== "true") tab.click();
+}
+
 function exampleHint(id) {
   if (id === "dota2") return "调用 POST /api/v1/examples/dota2/run，把 Dota 2 示例写入当前会话。";
   return "调用 POST /api/v1/examples/erp/run，把 ERP 示例写入当前会话。";
@@ -498,7 +530,19 @@ async function runExample(id, label, button, result) {
     if (data && data.rows != null) bits.push(String(data.rows) + " 行");
     meta.textContent = bits.join(" · ");
     if (meta.textContent) result.appendChild(meta);
-    if (data && data.report_markdown) result.appendChild(renderMarkdown(data.report_markdown));
+    if (data && data.report_markdown) {
+      if (id === "erp") {
+        const full = document.createElement("details");
+        full.className = "erp-full-report";
+        const summary = document.createElement("summary");
+        summary.textContent = "展开完整分析报告（原始叙述与明细）";
+        full.append(summary, renderMarkdown(data.report_markdown));
+        result.appendChild(full);
+        if (window.ERPReport) await window.ERPReport.render(result, data, {api});
+        else full.open = true;
+        if (window.ERPProfitReport) await window.ERPProfitReport.render(result, data, {api});
+      } else result.appendChild(renderMarkdown(data.report_markdown));
+    }
     else render(result, data);
     if (data && data.chart_spec) render(result, { chart_spec: data.chart_spec });
   } catch (err) {
@@ -510,6 +554,7 @@ async function runExample(id, label, button, result) {
 }
 
 function openExample(btn) {
+  paintPageHeading("example-" + btn.dataset.example, btn.textContent.trim(), "analyze");
   setNavOpen(false);
   setPrinciple("analyze");
   const id = btn.dataset.example;
@@ -522,14 +567,24 @@ function openExample(btn) {
   heading.textContent = label;
   const hint = document.createElement("p");
   hint.className = "hint";
-  hint.textContent = exampleHint(id);
+  hint.textContent = id === "erp"
+    ? "用可复现的合成 ERP 数据，走完从订单到收款的分析流程。数据与报告写入当前会话，可继续下钻。"
+    : "从仓库内置的 OpenDota 比赛快照出发，观察战队战绩、选手表现与英雄偏好。具体来源与时间以生成报告为准。";
   const button = document.createElement("button");
   button.type = "button";
   button.className = "btn";
   button.textContent = "运行";
   const result = document.createElement("div");
   button.addEventListener("click", () => runExample(id, label, button, result));
-  root.append(heading, hint, button, result);
+  const intro = document.createElement("section");
+  intro.className = "example-intro";
+  const topics = document.createElement("ul");
+  topics.className = "example-topics";
+  const labels = id === "erp" ? ["销售与利润", "数据质量", "客户分群", "变化归因"] : ["战队战绩", "选手表现", "打法聚类", "战术指导"];
+  labels.forEach(label => { const item = document.createElement("li"); item.textContent = label; topics.appendChild(item); });
+  intro.append(heading, hint, topics, button);
+  result.className = "example-output";
+  root.append(intro, result);
 }
 
 function findFromHash() {
@@ -614,6 +669,7 @@ function returnToCover() {
   setNavOpen(false);
   document.getElementById("app").hidden = true;
   document.getElementById("cover").hidden = false;
+  history.replaceState(null, "", location.pathname);
   window.scrollTo(0, 0);
   document.getElementById("enter").focus({ preventScroll: true });
 }
@@ -655,6 +711,14 @@ function init() {
   document.querySelectorAll("[data-example]").forEach((btn) => {
     btn.addEventListener("click", () => openExample(btn));
   });
+  window.addEventListener("hashchange", () => {
+    const target = findFromHash();
+    if (target) {
+      enterWorkspace(false);
+      if (target.getAttribute("aria-current") !== "page") target.click();
+    }
+  });
+  if (findFromHash()) enterWorkspace(false);
   const enter = document.getElementById("enter");
   if (enter) enter.addEventListener("click", startEntryRitual);
   document.getElementById("skip-ritual").addEventListener("click", finishEntryRitual);

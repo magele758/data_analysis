@@ -234,3 +234,243 @@ class TraceImportRequest(BaseModel):
     dataset_name: str = "traces"
     session_id: Optional[str] = None
     format: Optional[str] = None
+
+# Reusable evidence report: names are verified against the session table schema.
+from datetime import date
+from typing import Literal
+from pydantic import model_validator
+
+class ReportFieldMapping(BaseModel):
+    product: Optional[str] = None
+    quantity: Optional[str] = None
+    price: Optional[str] = None
+    discount: Optional[str] = None
+    sales: Optional[str] = None
+    cost: Optional[str] = None
+    order: Optional[str] = None
+    discount_scale: Literal[1, 100] = 1
+
+class BusinessReportRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    metric: str
+    time_column: str
+    dimensions: List[str] = Field(default_factory=list, max_length=2)
+    grain: Literal['day', 'week', 'month', 'quarter', 'year'] = 'month'
+    base_start: date
+    base_end: date
+    current_start: date
+    current_end: date
+    mapping: ReportFieldMapping = Field(default_factory=ReportFieldMapping)
+    filters: Dict[str, str] = Field(default_factory=dict, max_length=8)
+    filter_dimension: Optional[str] = None
+    filter_value: Optional[str] = None
+
+    @model_validator(mode='after')
+    def validate_periods(self):
+        if not self.base_start < self.base_end <= self.current_start < self.current_end:
+            raise ValueError('日期必须满足 基期开始 < 基期结束 ≤ 当期开始 < 当期结束；结束日期不包含在内')
+        if (self.current_end-self.base_start).days > 3653:
+            raise ValueError('单次报告时间跨度不能超过十年，请缩小窗口')
+        if self.grain == 'day' and (self.current_end-self.base_start).days > 2000:
+            raise ValueError('日粒度最多2000天，请改用周/月或缩小窗口')
+        if bool(self.filter_dimension) != (self.filter_value is not None):
+            raise ValueError('下钻字段和值必须同时提供')
+        return self
+
+class ReportDiscoverRequest(BaseModel):
+    session_id: str
+    dataset_name: str
+    grain: Literal['day', 'week', 'month', 'quarter', 'year'] = 'month'
+
+# Typed contracts for external analytical clients. Legacy endpoints remain compatible.
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from pydantic import ConfigDict
+
+class MetricContract(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    kind: Literal['sum', 'ratio', 'distinct_count', 'closing_balance']
+    column: Optional[str] = None
+    numerator: Optional[str] = None
+    denominator: Optional[str] = None
+    entity_keys: List[str] = Field(default_factory=list, max_length=5)
+    unit: str = 'source_unit'
+
+    @model_validator(mode='after')
+    def check_kind(self):
+        if self.kind == 'ratio':
+            if not self.numerator or not self.denominator or self.column or self.entity_keys:
+                raise ValueError('ratio requires numerator/denominator only; aggregate sums before dividing')
+        elif not self.column or self.numerator or self.denominator:
+            raise ValueError('metric requires column; numerator/denominator are only for ratio')
+        if self.kind == 'closing_balance' and not self.entity_keys:
+            raise ValueError('closing_balance requires entity_keys to select each entity latest observation')
+        if self.kind != 'closing_balance' and self.entity_keys:
+            raise ValueError('entity_keys only apply to closing_balance')
+        return self
+
+class TimeContract(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    column: str
+    input_mode: Literal['date', 'aware_timestamp'] = 'date'
+    timezone: str = 'UTC'
+    grain: Literal['day','week','month','quarter','year'] = 'month'
+    base_start: date
+    base_end: date
+    current_start: date
+    current_end: date
+    completeness: Literal['strict','warn'] = 'strict'
+    complete_until: Optional[date] = None
+    require_aligned: bool = True
+    require_equal_buckets: bool = True
+
+    @model_validator(mode='after')
+    def check_time(self):
+        try:
+            ZoneInfo(self.timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError('timezone must be an IANA timezone')
+        if not self.base_start < self.base_end <= self.current_start < self.current_end:
+            raise ValueError('Require base_start < base_end <= current_start < current_end (end-exclusive)')
+        if (self.current_end-self.base_start).days>3653:
+            raise ValueError('Maximum comparison span is ten years')
+        if self.grain=='day' and (self.current_end-self.base_start).days>2000:
+            raise ValueError('Daily comparison is limited to 2000 days')
+        if self.completeness=='strict' and (self.complete_until is None or self.complete_until<self.current_end):
+            raise ValueError('Strict completeness requires an explicit complete_until watermark >= current_end; max observed date is not proof of completeness')
+        return self
+
+class MetricCompareRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    session_id: str
+    dataset_name: str
+    metric: MetricContract
+    time: TimeContract
+    filters: Dict[str,str] = Field(default_factory=dict,max_length=8)
+    invalid_rows: Literal['reject','exclude'] = 'reject'
+
+class DecompositionRequest(MetricCompareRequest):
+    mode: Literal['dimension','ratio','profit'] = 'dimension'
+    dimension: Optional[str] = None
+    mapping: ReportFieldMapping = Field(default_factory=ReportFieldMapping)
+    top_k: int = Field(50,ge=1,le=500)
+
+    @model_validator(mode='after')
+    def compatible_method(self):
+        if self.mode=='dimension' and (self.metric.kind!='sum' or not self.dimension):
+            raise ValueError('Dimension additive contributions require sum and dimension; distinct counts, ratios and balances cannot be summed across groups')
+        if self.mode=='ratio' and self.metric.kind!='ratio':
+            raise ValueError('Ratio decomposition requires ratio metric')
+        if self.mode=='profit':
+            if self.metric.kind!='sum' or any(not getattr(self.mapping,k) for k in ['product','quantity','price','discount','sales','cost']):
+                raise ValueError('Profit decomposition requires sum metric and complete product/quantity/price/discount/sales/cost mapping')
+        return self
+
+class SensitivityRequest(MetricCompareRequest):
+    method: Literal['zscore','iqr','mad'] = 'mad'
+    threshold: Optional[float] = Field(None,gt=0,allow_inf_nan=False)
+    anomaly_column: str
+    reference: Literal['base','pooled'] = 'base'
+    group_by: Optional[str] = None
+    removal: Literal['row','entity'] = 'row'
+    entity_column: Optional[str] = None
+    limit: int = Field(20,ge=1,le=500)
+
+    @model_validator(mode='after')
+    def entity_required(self):
+        if self.removal=='entity' and not self.entity_column:
+            raise ValueError('Entity sensitivity requires entity_column')
+        return self
+
+class OrderInvestigationRequest(SensitivityRequest):
+    mapping: ReportFieldMapping
+    amount_tolerance: float = Field(0.01, ge=0, allow_inf_nan=False)
+    discount_threshold: Optional[float] = Field(None, ge=0, le=1, allow_inf_nan=False)
+    min_reference_rows: int = Field(5, ge=2)
+    order_ids: List[str] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode='after')
+    def order_mapping(self):
+        if self.metric.kind != 'sum' or any(not getattr(self.mapping,k) for k in ['product','quantity','price','discount','sales','cost','order']):
+            raise ValueError('Order investigation requires SUM profit and complete order/product/quantity/price/discount/sales/cost mapping')
+        return self
+
+class OrderReconciliationRequest(MetricCompareRequest):
+    mapping: ReportFieldMapping
+    order_ids: List[str] = Field(default_factory=list, max_length=100)
+    line_id: Optional[str] = None
+    adjustments: List[str] = Field(default_factory=list, max_length=8)
+    amount_tolerance: float = Field(0.01, ge=0, allow_inf_nan=False)
+    multipliers: List[float] = Field(default_factory=lambda:[0.01,0.1,10,100,1000], max_length=20)
+    limit: int = Field(100, ge=1, le=500)
+
+    @model_validator(mode='after')
+    def validate_reconciliation(self):
+        import math
+        if self.metric.kind!='sum' or any(not getattr(self.mapping,k) for k in ['order','product','quantity','price','discount','sales','cost']):
+            raise ValueError('Requires SUM profit and complete order/product/quantity/price/discount/sales/cost mapping')
+        if any(not math.isfinite(v) or v<=0 or v==1 for v in self.multipliers):
+            raise ValueError('Candidate multipliers must be finite positive values other than 1')
+        if len(set(self.adjustments))!=len(self.adjustments):
+            raise ValueError('Adjustment columns must not repeat')
+        return self
+
+class DiscountDriversRequest(MetricCompareRequest):
+    mapping: ReportFieldMapping
+    dimensions: List[str] = Field(default_factory=list, max_length=4)
+    exclude_order_ids: List[str] = Field(default_factory=list, max_length=100)
+    exclude_amount_mismatches: bool = True
+    amount_tolerance: float = Field(0.01, ge=0, allow_inf_nan=False)
+    top_k: int = Field(10, ge=1, le=100)
+    focus_dimension: Optional[str] = None
+    focus_member: Optional[str] = None
+
+    @model_validator(mode='after')
+    def validate_discount_drivers(self):
+        if self.metric.kind!='sum' or any(not getattr(self.mapping,k) for k in ['order','product','quantity','price','discount','sales','cost']):
+            raise ValueError('Discount drivers require SUM profit and complete order/product/quantity/price/discount/sales/cost mapping')
+        if len(set(self.dimensions))!=len(self.dimensions):
+            raise ValueError('dimensions must be unique')
+        if bool(self.focus_dimension)!=(self.focus_member is not None):
+            raise ValueError('focus_dimension and focus_member must be supplied together')
+        if self.focus_dimension and self.focus_dimension not in [self.mapping.product,*self.dimensions]:
+            raise ValueError('Focus dimension must be product or a requested dimension')
+        return self
+
+class DiscountOrderAuditRequest(MetricCompareRequest):
+    mapping: ReportFieldMapping
+    customer_column: str
+    channel_column: str
+    product_ids: List[str] = Field(default_factory=list, max_length=100)
+    exclude_order_ids: List[str] = Field(default_factory=list, max_length=100)
+    exclude_amount_mismatches: bool = True
+    amount_tolerance: float = Field(0.01, ge=0, allow_inf_nan=False)
+    min_reference_orders: int = Field(3, ge=1)
+    materiality: float = Field(500, ge=0, allow_inf_nan=False)
+    top_k: int = Field(20, ge=1, le=100)
+    focus_order_id: Optional[str] = None
+    focus_customer: Optional[str] = None
+    focus_channel: Optional[str] = None
+
+    @model_validator(mode='after')
+    def validate_discount_order_audit(self):
+        if self.metric.kind!='sum' or any(not getattr(self.mapping,k) for k in ['order','product','quantity','price','discount','sales','cost']):
+            raise ValueError('Requires SUM profit and complete order/product/quantity/price/discount/sales/cost mapping')
+        return self
+
+
+class DiscountScenarioRequest(DiscountOrderAuditRequest):
+    discount_caps: List[float] = Field(default_factory=lambda:[.1,.2,.3,.35], min_length=1, max_length=12)
+    volume_reductions: List[float] = Field(default_factory=lambda:[0,.05,.1,.2], min_length=1, max_length=12)
+    cost_share_cases: List[float] = Field(default_factory=lambda:[0,.5,1], min_length=1, max_length=5)
+    robustness_volume_drop: float = Field(.2, ge=0, le=1, allow_inf_nan=False)
+    variable_cost_share: float = Field(1, ge=0, le=1, allow_inf_nan=False)
+    order_ids: List[str] = Field(default_factory=list, max_length=100, description='Detail only; never limits scenario population')
+
+    @model_validator(mode='after')
+    def validate_scenario_rates(self):
+        import math
+        for values in (self.discount_caps,self.volume_reductions,self.cost_share_cases):
+            if any(not math.isfinite(x) or x<0 or x>1 for x in values):
+                raise ValueError('Scenario rates must be finite fractions between 0 and 1')
+        return self

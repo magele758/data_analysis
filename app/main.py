@@ -854,3 +854,113 @@ def api_import_traces(req: TraceImportRequest):
         "columns": meta.column_names,
         "summary": f"Imported {meta.row_count:,} trace spans/events into session '{sess.session_id}' (table '{req.dataset_name}'). Ready for the full MDS pipeline."
     }
+
+# Reusable business report APIs share the same engine as MCP.
+from app.schemas.requests import BusinessReportRequest, ReportDiscoverRequest
+from app.schemas.responses import BusinessReportResponse
+from app.operators.business_report import discover_report, generate_business_report
+
+@app.post('/api/v1/reports/discover')
+def api_report_discover(req: ReportDiscoverRequest):
+    try:
+        return discover_report(req.session_id, req.dataset_name, req.grain)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+@app.post('/api/v1/reports/generate', response_model=BusinessReportResponse)
+def api_report_generate(req: BusinessReportRequest):
+    try:
+        return generate_business_report(req)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+@app.get('/api/v1/reports/datasets')
+def api_report_datasets(session_id: str):
+    from app.operators.sandbox import run_duckdb_sql
+    try:
+        rows=run_duckdb_sql(session_id, "SELECT table_name FROM information_schema.tables WHERE table_schema='main' ORDER BY table_name", 500)['data']
+        return {'datasets':[r['table_name'] for r in rows]}
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+# Independent tools for external Agent composition; no orchestration loop here.
+from app.schemas.requests import MetricCompareRequest, DecompositionRequest, SensitivityRequest
+from app.schemas.responses import AnalyticalToolResponse
+from app.operators.analytical_tools import compare_metric, decompose_change, analyze_sensitivity
+
+@app.post('/api/v1/tools/compare_metric', response_model=AnalyticalToolResponse)
+def api_compare_metric(req: MetricCompareRequest):
+    try:
+        return compare_metric(req)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+@app.post('/api/v1/tools/decompose_change', response_model=AnalyticalToolResponse)
+def api_decompose_change(req: DecompositionRequest):
+    try:
+        return decompose_change(req)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+@app.post('/api/v1/tools/analyze_sensitivity', response_model=AnalyticalToolResponse)
+def api_analyze_sensitivity(req: SensitivityRequest):
+    try:
+        return analyze_sensitivity(req)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+from app.schemas.requests import OrderInvestigationRequest
+from app.operators.order_investigation import investigate_orders
+
+from app.schemas.responses import OrderInvestigationResponse
+
+@app.post('/api/v1/tools/investigate_orders', response_model=OrderInvestigationResponse)
+def api_investigate_orders(req: OrderInvestigationRequest):
+    try:
+        return investigate_orders(req)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+from app.schemas.requests import OrderReconciliationRequest
+from app.schemas.responses import OrderReconciliationResponse
+from app.operators.order_reconciliation import reconcile_order_amounts
+
+@app.post('/api/v1/tools/reconcile_order_amounts', response_model=OrderReconciliationResponse)
+def api_reconcile_order_amounts(req: OrderReconciliationRequest):
+    try:
+        return reconcile_order_amounts(req)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+from app.schemas.requests import DiscountDriversRequest
+from app.schemas.responses import DiscountDriversResponse
+from app.operators.discount_drivers import analyze_discount_drivers
+
+@app.post('/api/v1/tools/analyze_discount_drivers', response_model=DiscountDriversResponse)
+def api_analyze_discount_drivers(req: DiscountDriversRequest):
+    try:
+        return analyze_discount_drivers(req)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+from app.schemas.requests import DiscountOrderAuditRequest
+from app.schemas.responses import DiscountOrderAuditResponse
+from app.operators.discount_order_audit import audit_discount_orders
+
+@app.post('/api/v1/tools/audit_discount_orders', response_model=DiscountOrderAuditResponse)
+def api_audit_discount_orders(req: DiscountOrderAuditRequest):
+    try:
+        return audit_discount_orders(req)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+from app.schemas.requests import DiscountScenarioRequest
+from app.schemas.responses import DiscountScenarioResponse
+from app.operators.discount_scenarios import simulate_discount_scenarios
+
+@app.post('/api/v1/tools/simulate_discount_scenarios', response_model=DiscountScenarioResponse)
+def api_simulate_discount_scenarios(req: DiscountScenarioRequest):
+    try:
+        return simulate_discount_scenarios(req)
+    except ValueError as exc:
+        raise _client_error(exc) from exc

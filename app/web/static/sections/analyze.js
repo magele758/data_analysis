@@ -237,12 +237,12 @@
     }
   ];
 
-  var INK = '#0e0d0b';
-  var LIFT = '#161410';
+  var INK = '#0a100f';
+  var LIFT = '#111916';
   var LINE = 'rgba(243,239,230,0.12)';
-  var IVORY = '#f4f0e6';
-  var MUTED = '#a39b8e';
-  var GOLD = '#c6a15b';
+  var IVORY = '#e5dfd1';
+  var MUTED = '#aaa99e';
+  var GOLD = '#c3aa77';
   var FONT_UI = '"Outfit","Noto Sans SC","PingFang SC","WenQuanYi Micro Hei",sans-serif';
   var FONT_TITLE = '"Cormorant Garamond","Noto Serif SC","Songti SC",serif';
 
@@ -466,6 +466,8 @@
       node._secAnalyzeChart.dispose();
     }
     if (node._secAnalyzeResize) node._secAnalyzeResize.disconnect();
+    if (node._secAnalyzeVega) node._secAnalyzeVega.finalize();
+    node._secAnalyzeVega = null;
     node._secAnalyzeChart = null;
     node._secAnalyzeResize = null;
     node.textContent = '';
@@ -491,7 +493,8 @@
   function mappedColor(value, key) {
     var v = String(value).trim().toLowerCase();
     if (key === 'background' || key === 'backgroundColor') return INK;
-    if (v === '#d62728' || v === '#ff0000' || v === 'red' || v === 'firebrick' || v === '#e45756') return MUTED;
+    if (v === '#d62728' || v === '#ff0000' || v === 'red' || v === 'firebrick' || v === '#e45756') return GOLD;
+    if (['green', '#2ca02c', '#00ff00', '#54a24b', '#59a14f'].includes(v)) return '#8aa99a';
     if (v === '#fff' || v === '#ffffff' || v === 'white') return IVORY;
     return GOLD;
   }
@@ -524,9 +527,10 @@
     if (node.encoding && node.encoding.color && typeof node.encoding.color === 'object' && node.encoding.color.field) {
       var color = node.encoding.color;
       var scale = color.scale && typeof color.scale === 'object' ? color.scale : {};
+      if (scale.range || scale.domain) return;
       scale.range = color.type === 'quantitative'
         ? ['#2a261f', GOLD]
-        : [GOLD, IVORY, '#8d7340', '#d8c7a1', '#5c5346'];
+        : [GOLD, '#8aa99a', IVORY, '#af8f83', '#8798a3'];
       delete scale.scheme;
       color.scale = scale;
     }
@@ -551,7 +555,7 @@
       tickColor: LINE,
       labelFont: 'Outfit',
       titleFont: 'Outfit',
-      labelFontSize: 11,
+      labelFontSize: 13,
       titleFontSize: 12
     });
     config.legend = Object.assign({}, config.legend, {
@@ -569,7 +573,7 @@
       anchor: 'start'
     });
     config.range = {
-      category: [GOLD, IVORY, '#8d7340', '#d8c7a1', '#5c5346'],
+      category: [GOLD, '#8aa99a', IVORY, '#af8f83', '#8798a3'],
       heatmap: ['#2a261f', GOLD],
       ramp: ['#2a261f', GOLD],
       diverging: [MUTED, INK, GOLD]
@@ -612,7 +616,7 @@
 
   function themeEcharts(spec) {
     var view = paintSpecColors(cloneSpec(spec), '');
-    var palette = [GOLD, '#e6d3a8', '#8d7340', IVORY, '#5c5346', '#b08948'];
+    var palette = [GOLD, '#8aa99a', '#af8f83', IVORY, '#8798a3', '#a49e7c'];
     view.backgroundColor = INK;
     view.textStyle = Object.assign({}, view.textStyle, { color: IVORY, fontFamily: 'Outfit, "Noto Sans SC", sans-serif' });
     view.color = palette;
@@ -670,14 +674,19 @@
     }
     if (kind === 'vega') {
       return fontsReady().then(ensureVega).then(function () {
+        if (!node.isConnected) return;
         return window.vegaEmbed(node, themeVega(spec), {
           actions: false,
           renderer: 'svg',
           config: { background: INK, font: 'Outfit' }
+        }).then(function (result) {
+          if (node.isConnected) node._secAnalyzeVega = result.view;
+          else result.view.finalize();
         });
       });
     }
     return fontsReady().then(ensureEcharts).then(function () {
+      if (!node.isConnected) return;
       var chart = window.echarts.init(node, null, { renderer: 'canvas' });
       chart.setOption(themeEcharts(spec));
       node._secAnalyzeChart = chart;
@@ -818,22 +827,40 @@
     return copy;
   }
 
+  function disposeCharts(container) {
+    container.querySelectorAll('.sec-analyze-chart').forEach(clearChartNode);
+  }
+
   function paintResult(resultEl, data) {
+    disposeCharts(resultEl);
     resultEl.textContent = '';
     if (!data || typeof data !== 'object') {
       resultEl.appendChild(el('p', 'sec-analyze-empty', '没有可展示的统计量。'));
       return;
     }
+    // Display only server-returned statistics; formatting does not recompute analysis.
+    var metrics = data.statistics || {};
+    var facts = [['base_total', '基期总量'], ['current_total', '当期总量'], ['diff_total', '变化金额'], ['growth_rate_pct', '变化率']];
+    var band = el('div', 'result-metrics');
+    facts.forEach(function (pair) {
+      var value = metrics[pair[0]];
+      if (typeof value !== 'number' || !Number.isFinite(value)) return;
+      var cell = el('div', 'result-metric');
+      cell.appendChild(el('span', '', pair[1]));
+      cell.appendChild(el('strong', '', value.toLocaleString('zh-CN', {maximumFractionDigits: 2}) + (pair[0] === 'growth_rate_pct' ? '%' : '')));
+      band.appendChild(cell);
+    });
+    if (band.childNodes.length) resultEl.appendChild(band);
     if (data.summary_text) {
-      var summary = el('section', 'sec-analyze-block');
-      summary.appendChild(el('h4', 'sec-analyze-block-title', '摘要'));
+      var summary = el('section', 'sec-analyze-block result-conclusion');
+      summary.appendChild(el('h4', 'sec-analyze-block-title', '分析结论'));
       summary.appendChild(el('p', 'sec-analyze-summary', String(data.summary_text)));
       resultEl.appendChild(summary);
     }
     var spec = data.chart_spec;
     if (spec && typeof spec === 'object') {
       var chartBlock = el('section', 'sec-analyze-block');
-      chartBlock.appendChild(el('h4', 'sec-analyze-block-title', '图表'));
+      chartBlock.appendChild(el('h4', 'sec-analyze-block-title', '变化与结构'));
       var chartNode = el('div', 'sec-analyze-chart');
       chartBlock.appendChild(chartNode);
       var chartError = el('p', 'sec-analyze-empty');
@@ -850,8 +877,13 @@
         if (key === 'evidence' || key === 'chart_spec') return;
         rest[key] = data.statistics[key];
       });
-      if (evidence && typeof evidence === 'object') appendBlock(resultEl, evidence, '证据', 0);
       if (Object.keys(rest).length) appendBlock(resultEl, rest, '统计量', 0);
+      if (evidence && typeof evidence === 'object') {
+        var evidencePanel = el('details', 'result-evidence');
+        evidencePanel.appendChild(el('summary', '', '展开证据与计算方法'));
+        appendBlock(evidencePanel, evidence, '证据', 0);
+        resultEl.appendChild(evidencePanel);
+      }
     } else {
       var raw = statsSource(data) || {};
       if (Object.keys(raw).length) appendBlock(resultEl, raw, '统计量', 0);
@@ -863,6 +895,10 @@
     if (!resultEl.childNodes.length) {
       resultEl.appendChild(el('p', 'sec-analyze-empty', '没有可展示的统计量。'));
     }
+    var source = el('details', 'result-source');
+    source.appendChild(el('summary', '', '查看完整响应与依据'));
+    source.appendChild(el('pre', 'sec-analyze-pre', JSON.stringify(data, null, 2)));
+    resultEl.appendChild(source);
   }
 
   function showError(resultEl, label, detail) {
@@ -1038,6 +1074,7 @@
     }
 
     function paintIdle() {
+      disposeCharts(resultBody);
       resultBody.textContent = '';
       var idle = el('div', 'sec-analyze-idle');
       idle.appendChild(el('p', 'sec-analyze-empty', '运行后显示统计量与图表。'));
@@ -1125,19 +1162,21 @@
         button.disabled = true;
         button.textContent = '运行中';
       }
+      disposeCharts(resultBody);
       resultBody.textContent = '';
       resultBody.appendChild(el('p', 'sec-analyze-empty', '计算中'));
       callApi(ctx, request.method, request.path, request.body).then(function (data) {
-        if (token !== runToken) return;
+        if (token !== runToken || !resultBody.isConnected) return;
         paintResult(resultBody, data);
         notify(ctx, tab.label + ' 已完成');
+        if (window.innerWidth <= 760) result.scrollIntoView({behavior: 'auto', block: 'start'});
       }).catch(function (err) {
-        if (token !== runToken) return;
+        if (token !== runToken || !resultBody.isConnected) return;
         var detail = failureDetail(err);
         showError(resultBody, '详情', detail);
         notify(ctx, formatDetail(detail));
       }).then(function () {
-        if (token !== runToken) return;
+        if (token !== runToken || !resultBody.isConnected) return;
         if (button) {
           button.disabled = false;
           button.textContent = '运行';
@@ -1150,5 +1189,5 @@
   }
 
   window.DashboardSections = window.DashboardSections || {};
-  window.DashboardSections.analyze = { mount: mount };
+  window.DashboardSections.analyze = { mount: mount, unmount: disposeCharts, drawChart: renderChart };
 })();
