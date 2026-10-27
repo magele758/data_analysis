@@ -1,5 +1,6 @@
 import pytest
 import pyarrow as pa
+from app.engine.arrow_utils import ArrowUtils
 import duckdb
 from app.cluster.session_manager import SessionManager
 from app.operators.eda import run_eda_profile
@@ -21,7 +22,7 @@ def test_eda_profiling_and_nlg():
         CASE WHEN range % 20 = 0 THEN NULL ELSE (range * 0.05)::DOUBLE END AS discount
     FROM range(1000);
     """)
-    arrow_tbl = con.execute("SELECT * FROM sales_data").arrow()
+    arrow_tbl = ArrowUtils.fetch_table(con.execute("SELECT * FROM sales_data"))
     sess.register_dataset("sales_data", arrow_tbl)
 
     res = run_eda_profile("test_eda_sess", "sales_data")
