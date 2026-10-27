@@ -52,7 +52,8 @@ jobs:
 
       - name: Interface slice on DuckDB ${{ matrix.duckdb }}
         run: |
-          pip install -e ".[dev]" "duckdb==${{ matrix.duckdb }}"
+          pip install -e ".[dev]"
+          pip install --upgrade --force-reinstall --no-deps "duckdb==${{ matrix.duckdb }}"
           python -c "import duckdb; assert duckdb.__version__ == '${{ matrix.duckdb }}'"
           pytest -q --tb=short \
             tests/test_session_result.py \
