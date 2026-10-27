@@ -72,12 +72,7 @@ def run_duckdb_sql(session_id: str, sql_query: str, limit: int = 100, governed: 
         except duckdb.Error:
             pass
         try:
-            pending = con.execute(clean_sql).arrow()
-            # Materialize before the next statement. A later SET invalidates the reader.
-            if isinstance(pending, pa.RecordBatchReader):
-                arrow_res = pending.read_all()
-            else:
-                arrow_res = pending
+            arrow_res = ArrowUtils.fetch_table(con.execute(clean_sql))
         finally:
             try:
                 con.execute("SET enable_external_access=true")

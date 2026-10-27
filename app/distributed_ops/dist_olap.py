@@ -2,6 +2,7 @@ from typing import List, Dict, Any, Optional
 import duckdb
 import pyarrow as pa
 
+from app.engine.arrow_utils import ArrowUtils
 from app.engine.sql_guard import safe_ident, safe_table_ref, safe_predicate
 
 _ALLOWED_AGG = {"SUM", "AVG", "COUNT", "MIN", "MAX"}
@@ -56,10 +57,7 @@ class DistributedOLAP:
             sql += " LIMIT ?"
             params.append(int(limit))
 
-        res = con.execute(sql, params).arrow()
-        if isinstance(res, pa.RecordBatchReader):
-            res = res.read_all()
-        return res
+        return ArrowUtils.fetch_table(con.execute(sql, params))
 
     @classmethod
     def pivot_table(
@@ -100,7 +98,4 @@ class DistributedOLAP:
             sql += f" WHERE {safe_predicate(filters)}"
         sql += f" GROUP BY {row_clause} ORDER BY 1"
 
-        res = con.execute(sql, params).arrow()
-        if isinstance(res, pa.RecordBatchReader):
-            res = res.read_all()
-        return res
+        return ArrowUtils.fetch_table(con.execute(sql, params))

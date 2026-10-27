@@ -22,6 +22,22 @@ class ArrowUtils:
         return records
 
     @staticmethod
+    def fetch_table(result) -> pa.Table:
+        """Materialize a DuckDB execute() result.
+
+        1.x exposed result.arrow(), sometimes as a reader. 2.0 removed arrow()
+        and kept to_arrow_table(). Consume the result either way so the
+        connection is not left with an unfinished query.
+        """
+        fetch = getattr(result, "to_arrow_table", None) or getattr(result, "arrow", None)
+        if fetch is None:
+            raise AttributeError("DuckDB result has neither to_arrow_table nor arrow")
+        table = fetch()
+        if isinstance(table, pa.RecordBatchReader):
+            table = table.read_all()
+        return table
+
+    @staticmethod
     def table_to_compact_preview(table: Any, limit: int = 20) -> List[Dict[str, Any]]:
         if isinstance(table, pa.RecordBatchReader):
             table = table.read_all()

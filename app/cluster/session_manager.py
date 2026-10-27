@@ -7,6 +7,7 @@ import threading
 from typing import Dict, Optional, Any, List
 import duckdb
 import pyarrow as pa
+from app.engine.arrow_utils import ArrowUtils
 from app.config import settings
 
 _DATASET_NAME_RE = re.compile(r"[\x00-\x1f;\"]")
@@ -23,6 +24,45 @@ class DatasetMeta:
         self.memory_bytes = arrow_table.nbytes
         self.loaded_at = time.time()
         self.source_info = source_info or {}
+
+def _release_pending(con) -> None:
+    """DuckDB 2 leaves a result open after fetchone(); register() then fails."""
+    try:
+        con.fetchall()
+    except Exception:
+        return
+
+
+class _SessionConn:
+    """Session connection that finishes a result before the next register/query."""
+
+    def __init__(self, con):
+        self._con = con
+
+    def execute(self, *args, **kwargs):
+        _release_pending(self._con)
+        self._con.execute(*args, **kwargs)
+        return self
+
+    def fetchone(self):
+        row = self._con.fetchone()
+        _release_pending(self._con)
+        return row
+
+    def fetchall(self):
+        return self._con.fetchall()
+
+    def register(self, *args, **kwargs):
+        _release_pending(self._con)
+        return self._con.register(*args, **kwargs)
+
+    def unregister(self, *args, **kwargs):
+        _release_pending(self._con)
+        return self._con.unregister(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._con, name)
+
 
 class SessionContext:
     """Isolated in-memory session holding DuckDB connection and loaded Arrow tables."""
@@ -76,6 +116,7 @@ class SessionContext:
                     "Sessions are process-local; extra workers do not share this budget."
                 )
             # Register arrow table directly as zero-copy in-memory view
+            _release_pending(self._con)
             self._con.register(name, table)
             meta = DatasetMeta(name, table, _redact_source(source_info))
             try:
@@ -112,14 +153,15 @@ class SessionContext:
                 if limit and not re.search(r"\bLIMIT\b", clean_sql, re.IGNORECASE):
                     clean_sql += f" LIMIT {limit}"
             res = self._con.execute(clean_sql)
-            tbl = res.arrow()
-            if isinstance(tbl, pa.RecordBatchReader):
-                tbl = tbl.read_all()
-            return tbl
+            return ArrowUtils.fetch_table(res)
 
     def get_duckdb_conn(self) -> duckdb.DuckDBPyConnection:
         self.touch()
-        return self._con
+        proxy = getattr(self, "_proxy", None)
+        if proxy is None or proxy._con is not self._con:
+            proxy = _SessionConn(self._con)
+            self._proxy = proxy
+        return proxy
 
     def close(self):
         with self._lock:

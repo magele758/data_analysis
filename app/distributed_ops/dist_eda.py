@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 import duckdb
 
+from app.engine.arrow_utils import ArrowUtils
 from app.engine.evidence import Stopwatch, evidence
 from app.engine.schema_infer import SchemaInferencer, SemanticType
 from app.engine.sql_guard import safe_ident, safe_table_ref
@@ -36,7 +37,7 @@ class DistributedEDA:
         report_name = table_name
         table_ref = safe_table_ref(table_name)
         sample_sql = f"SELECT * FROM {table_ref} LIMIT {_SAMPLE_ROWS}"
-        sample = con.execute(sample_sql).arrow()
+        sample = ArrowUtils.fetch_table(con.execute(sample_sql))
         schema_map = SchemaInferencer.infer_table_schema(sample)
 
         count_sql = f"SELECT COUNT(*) FROM {table_ref}"

@@ -5,6 +5,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.csv as pcsv
 import duckdb
+from app.engine.arrow_utils import ArrowUtils
 from app.connectors.base import BaseConnector, TableSchema, ColumnInfo, is_select, safe_select
 from app.connectors.excel_reader import FastExcelReader
 from app.engine.sql_guard import safe_columns, safe_ident, safe_predicate, safe_table_ref
@@ -210,11 +211,9 @@ class LocalFileConnector(BaseConnector):
                 sql += " LIMIT ?"
                 params.append(int(limit))
             try:
-                arrow_table = con.execute(sql, params).arrow()
+                arrow_table = ArrowUtils.fetch_table(con.execute(sql, params))
             except duckdb.Error as exc:
                 raise ValueError(f"Failed to read local file {path}: {exc}") from exc
-            if isinstance(arrow_table, pa.RecordBatchReader):
-                arrow_table = arrow_table.read_all()
             if ext == ".csv":
                 _csv_reject_error(con, path)
             return arrow_table
@@ -252,11 +251,9 @@ class LocalFileConnector(BaseConnector):
                 sql += " LIMIT ?"
                 params.append(int(limit))
             try:
-                filtered = con.execute(sql, params).arrow()
+                filtered = ArrowUtils.fetch_table(con.execute(sql, params))
             except duckdb.Error as exc:
                 raise ValueError(f"Failed to filter Excel sheet {sheet or path}: {exc}") from exc
-            if isinstance(filtered, pa.RecordBatchReader):
-                filtered = filtered.read_all()
             return filtered
         finally:
             con.close()

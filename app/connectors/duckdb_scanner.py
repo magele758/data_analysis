@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlparse
 
 import duckdb
 import pyarrow as pa
+from app.engine.arrow_utils import ArrowUtils
 
 _ALIAS_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _DSN_PLAIN = re.compile(r"[A-Za-z0-9_.~/-]+")
@@ -123,9 +124,6 @@ def fetch_via_scanner(db_type: str, conn_str: str, pushdown_sql: str, alias: str
                 pass
         con.execute(attach_clause(t, conn_str, alias))
         con.execute(f"USE {alias}")
-        result = con.execute(pushdown_sql).arrow()
-        if isinstance(result, pa.RecordBatchReader):
-            result = result.read_all()
-        return result
+        return ArrowUtils.fetch_table(con.execute(pushdown_sql))
     finally:
         con.close()

@@ -686,6 +686,7 @@
       + '<div class="sec-model-session">会话 <code class="sec-model-sid">—</code></div></div>'
       + '<div class="sec-model-tabs" role="tablist">'
       + '<button type="button" class="sec-model-tab sec-model-tab-active" data-tab="objects" role="tab" aria-selected="true">对象与关系</button>'
+      + '<button type="button" class="sec-model-tab" data-tab="playground" role="tab" aria-selected="false">本体图</button>'
       + '<button type="button" class="sec-model-tab" data-tab="traverse" role="tab" aria-selected="false">遍历</button>'
       + '<button type="button" class="sec-model-tab" data-tab="metrics" role="tab" aria-selected="false">指标与血缘</button>'
       + '</div>'
@@ -748,6 +749,7 @@
       + field('audit_limit', '条数', '50', 'list-audit')
       + '<button type="submit" class="sec-model-submit">刷新对象</button>'
       + '</form><div class="sec-model-result" data-result="objects"><div class="sec-model-empty">结果会显示在这里</div></div></div></section>'
+      + '<section class="sec-model-pane" data-pane="playground" hidden></section>'
       + '<section class="sec-model-pane" data-pane="traverse" hidden>'
       + '<div class="sec-model-split"><form class="sec-model-form" data-form="traverse">'
       + '<p class="sec-model-hint">下钻会提交关系路径和最大跳数。路径留空时按单个关系名走一跳，填写时第一项须与关系名相同。</p>'
@@ -1198,6 +1200,13 @@
     root.querySelectorAll('.sec-model-pane').forEach(function (pane) {
       pane.hidden = pane.getAttribute('data-pane') !== tab;
     });
+    if (tab === 'playground' && window.OntologyPlayground) {
+      const host = root.querySelector('[data-pane="playground"]');
+      if (host && !host.dataset.ready) {
+        host.dataset.ready = '1';
+        window.OntologyPlayground.mount(host, ctx);
+      }
+    }
   }
 
   function ensureFonts() {
@@ -1261,7 +1270,7 @@
       button.addEventListener('click', function () { activate(root, button.getAttribute('data-tab')); });
     });
     const viewId = ctx && ctx.view && ctx.view.id;
-    if (viewId === 'objects' || viewId === 'traverse' || viewId === 'metrics') activate(root, viewId);
+    if (viewId === 'objects' || viewId === 'playground' || viewId === 'traverse' || viewId === 'metrics') activate(root, viewId);
   }
 
   window.DashboardSections = window.DashboardSections || {};
