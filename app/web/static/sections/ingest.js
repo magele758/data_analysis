@@ -218,6 +218,13 @@
     var sid = info.sessionId ? String(info.sessionId) : "";
     lead.textContent = "数据集「" + (info.name || "") + "」已进入当前会话" + (sid ? " " + sid : "") + "。";
     box.appendChild(lead);
+    var reportLink = el("a", "sec-ingest-report-link");
+    reportLink.href = "#report";
+    reportLink.textContent = "用这份数据生成分析报告 →";
+    reportLink.addEventListener("click", function () {
+      try { sessionStorage.setItem("das.report.dataset", info.name || ""); sessionStorage.setItem("das.report.auto", "1"); } catch (_) {}
+    });
+    box.appendChild(reportLink);
     var tbody = el("tbody");
     var any = false;
     if (addMetric(tbody, "行", info.rows)) any = true;

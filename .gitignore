@@ -17,3 +17,6 @@ build/
 *.egg-info/
 data/
 *.duckdb
+
+# Local browser design audit artifacts
+.taste-skill/

@@ -29,6 +29,7 @@ GROUPS = [
         ("traverse", "遍历与实体图"),
         ("metrics", "指标与血缘"),
     ]),
+    ("分析", "report", [("report", "智能分析报告")]),
     ("分析", "analyze", [
         ("eda", "EDA"),
         ("olap", "OLAP"),
@@ -56,6 +57,7 @@ SECTION_SCRIPTS = [
     "/static/sections/model.js",
     "/static/sections/analyze.js",
     "/static/sections/govern.js",
+    "/static/sections/report.js",
 ]
 
 
@@ -80,9 +82,9 @@ def test_grouped_nav_matches_capabilities():
 
 
 def test_section_scripts_and_missing_copy():
-    """Five section scripts are included; a missing module shows the empty state."""
+    """All section scripts are included; a missing module shows the empty state."""
     for src in SECTION_SCRIPTS:
-        assert f'src="{src}"' in HTML
+        assert re.search(r'src="' + re.escape(src) + r'(?:\?[^"]*)?"', HTML)
     assert "DashboardSections" in JS
     assert ".mount" in JS
     assert "这一段还没装上" in JS
@@ -91,7 +93,7 @@ def test_section_scripts_and_missing_copy():
 
 def test_ingest_sidebar_opens_matching_panel():
     """数据 items map onto ingest.js tabs file, db, and trace."""
-    assert 'src="/static/sections/ingest.js"' in HTML
+    assert re.search(r'src="/static/sections/ingest\.js(?:\?[^"]*)?"', HTML)
     assert "function selectIngestTab(root, view)" in JS
     assert '"import-file": "file"' in JS
     assert '"connect-db": "db"' in JS
@@ -133,10 +135,10 @@ def test_cover_is_the_first_screen():
     assert 'id="cover"' in HTML
     assert 'id="enter"' in HTML
     assert 'id="app" class="app" hidden' in HTML
-    assert "WISDOM · ORDER · CONNECTION" in HTML
-    assert ">数据分析</h1>" in HTML
-    assert "从一张表出发，连接证据与行动。" in HTML
-    assert "开启探索" in HTML
+    assert "智慧 · 秩序 · 连接" in HTML
+    assert "万象之中，<br>自有秩序。" in HTML
+    assert "连接数据，构建关系，循证而行。" in HTML
+    assert "开启数据探索" in HTML
     assert "function enterWorkspace(" in JS
     assert "location.reload" not in JS
 

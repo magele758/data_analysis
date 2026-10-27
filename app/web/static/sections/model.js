@@ -288,6 +288,7 @@
   }
 
   function graphMarkup(graph, title, currentId) {
+    if (window.RelationshipView) return window.RelationshipView.markup(graph, title, currentId);
     const sourceNodes = (graph && graph.nodes) || [];
     const edges = ((graph && graph.edges) || []).map(function (edge) {
       return {
@@ -689,6 +690,7 @@
       + '<button type="button" class="sec-model-tab" data-tab="metrics" role="tab" aria-selected="false">指标与血缘</button>'
       + '</div>'
       + '<section class="sec-model-pane" data-pane="objects">'
+      + '<button type="button" class="sec-model-ghost" data-action="object-graph">加载业务关系图 ↗</button><div class="sec-model-object-graph"></div>'
       + '<div class="sec-model-split"><form class="sec-model-form" data-form="objects">'
       + selectBox('op', '操作', objectOps, '', 'list-objects')
       + '<div class="sec-model-grid" data-ops="register-object">'
@@ -1214,6 +1216,13 @@
     const root = container.querySelector('.sec-model-root');
     paintSession(root, ctx || {});
     const objectForm = root.querySelector('[data-form="objects"]');
+    root.querySelector('[data-action="object-graph"]').addEventListener('click', function (event) {
+      const button = event.currentTarget;
+      withBusy(button, async function () {
+        const res = await callApi(ctx, 'GET', '/api/v1/ontology/entity_graph');
+        finish(ctx, root.querySelector('.sec-model-object-graph'), res, function (data) { return graphMarkup(data, '业务对象星图', ''); }, '已加载业务关系图');
+      });
+    });
     const traverseForm = root.querySelector('[data-form="traverse"]');
     const metricForm = root.querySelector('[data-form="metrics"]');
     syncObjectForm(objectForm);
