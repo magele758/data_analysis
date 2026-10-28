@@ -23,6 +23,9 @@ class TableAsset(BaseModel):
     row_count: int = 0
     column_count: int = 0
     columns: List[ColumnMeta] = Field(default_factory=list)
+    endorsement_status: str = "draft" # endorsed, draft, deprecated, warning
+    endorsement_note: str = ""
+    endorsed_by: Optional[str] = None
     created_at: str = Field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     updated_at: str = Field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
 
@@ -60,7 +63,7 @@ class MetaRegistry:
                 return TableAsset(**data) if data else None
             return self._assets.get(dataset_name)
 
-    def list_tables(self, tag: Optional[str] = None, keyword: Optional[str] = None) -> List[TableAsset]:
+    def list_tables(self, tag: Optional[str] = None, keyword: Optional[str] = None, endorsement_status: Optional[str] = None) -> List[TableAsset]:
         with self._lock:
             if self.persistent:
                 assets = [TableAsset(**d) for d in self.db.list_table_assets()]
@@ -68,6 +71,8 @@ class MetaRegistry:
                 assets = list(self._assets.values())
             if tag:
                 assets = [a for a in assets if tag in a.tags]
+            if endorsement_status:
+                assets = [a for a in assets if (a.endorsement_status or "draft").lower() == endorsement_status.lower()]
             if keyword:
                 kw = keyword.lower()
                 assets = [
@@ -77,6 +82,25 @@ class MetaRegistry:
                     or kw in (a.display_name or "").lower()
                 ]
             return assets
+
+    def endorse_table(
+        self,
+        dataset_name: str,
+        status: str = "endorsed",
+        endorsement_note: str = "",
+        endorsed_by: Optional[str] = None,
+    ) -> TableAsset:
+        status_norm = (status or "endorsed").strip().lower()
+        if status_norm not in ("endorsed", "draft", "deprecated", "warning"):
+            raise ValueError(f"Invalid endorsement_status {status!r}; expected endorsed, draft, deprecated, or warning")
+        with self._lock:
+            existing = self.get_table(dataset_name)
+            if existing is None:
+                existing = TableAsset(dataset_name=dataset_name, display_name=dataset_name)
+            existing.endorsement_status = status_norm
+            existing.endorsement_note = endorsement_note or ""
+            existing.endorsed_by = endorsed_by
+            return self.register_table(existing)
 
     def delete_table(self, dataset_name: str) -> bool:
         with self._lock:

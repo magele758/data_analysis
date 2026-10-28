@@ -38,6 +38,27 @@ class Context:
         for n in m.entity_keys:valid+=f' AND {quote(n)} IS NOT NULL'
         self.b=f"__da_date>=DATE '{t.base_start}' AND __da_date<DATE '{t.base_end}'"
         self.c=f"__da_date>=DATE '{t.current_start}' AND __da_date<DATE '{t.current_end}'"
+        try:
+            from app.catalog.meta_registry import get_meta_registry
+            from app.catalog.context_studio import get_context_studio
+            asset = get_meta_registry(req.session_id).get_table(req.dataset_name)
+            st = (asset.endorsement_status if asset else 'draft').lower()
+            note = (asset.endorsement_note if asset else '') or ''
+            endorsed_req = getattr(req, 'endorsed_only', None)
+            enforce = get_context_studio(req.session_id).get_workspace_rules().endorsed_only_default if endorsed_req is None else bool(endorsed_req)
+            if st == 'deprecated':
+                if enforce:
+                    raise ValueError(f"Endorsed mode blocked deprecated dataset '{req.dataset_name}'" + (f": {note}" if note else ""))
+                self.warnings.append(f"Dataset '{req.dataset_name}' is marked DEPRECATED" + (f": {note}" if note else "."))
+            elif st != 'endorsed':
+                if enforce:
+                    raise ValueError(f"Endorsed mode requires 'endorsed' dataset; '{req.dataset_name}' has status '{st}'")
+                if asset is not None and st == 'warning':
+                    self.warnings.append(f"Dataset '{req.dataset_name}' has warning status" + (f": {note}" if note else "."))
+        except ValueError:
+            raise
+        except Exception:
+            pass
         self.cte=f"""WITH raw AS (SELECT *,ROW_NUMBER() OVER() AS __da_id,{date_expr} AS __da_date,{instant} AS __da_at FROM {self.table}{where}),
           checked AS (SELECT *,({valid}) AS __da_valid FROM raw),
           data AS (SELECT *,CASE WHEN {self.b} THEN 'base' ELSE 'current' END AS __da_period FROM checked

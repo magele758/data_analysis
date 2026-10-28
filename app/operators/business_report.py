@@ -21,7 +21,7 @@ def literal(value):
 
 
 def _query(session_id, sql, limit=2500):
-    return run_duckdb_sql(session_id, sql, limit=limit)['data']
+    return run_duckdb_sql(session_id, sql, limit=limit, governed=True, endorsed_only=False, record_trail=False)['data']
 
 
 def _schema(session_id, table):

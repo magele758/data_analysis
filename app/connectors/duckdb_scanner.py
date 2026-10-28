@@ -26,11 +26,13 @@ _EXTENSION = {
     "postgres": "postgres", "postgresql": "postgres",
     "mysql": "mysql",
     "sqlite": "sqlite", "sqlite3": "sqlite",
+    "duckdb": "duckdb", "md": "motherduck", "motherduck": "motherduck",
 }
 _ATTACH_TYPE = {
     "postgres": "POSTGRES", "postgresql": "POSTGRES",
     "mysql": "MYSQL",
     "sqlite": "SQLITE", "sqlite3": "SQLITE",
+    "duckdb": "DUCKDB", "md": "MOTHERDUCK", "motherduck": "MOTHERDUCK",
 }
 
 
@@ -64,12 +66,17 @@ def _sqlite_path(conn_str: str) -> str:
     return conn_str.replace("sqlite:///", "").replace("sqlite://", "").replace("file://", "")
 
 
+def _duckdb_path(conn_str: str) -> str:
+    return conn_str.replace("duckdb:///", "").replace("duckdb://", "").replace("file://", "")
+
+
 def attach_target(db_type: str, conn_str: str) -> str:
     """Return the connection payload DuckDB's ATTACH expects for this source.
 
     - Postgres: a libpq conninfo / postgresql:// URI is accepted as-is.
     - MySQL: converted to a key=value DSN.
     - SQLite: the file path.
+    - DuckDB / MotherDuck: local .duckdb/.db path or md:database_name.
     """
     t = db_type.lower()
     if t in ("postgres", "postgresql"):
@@ -78,6 +85,14 @@ def attach_target(db_type: str, conn_str: str) -> str:
         return _mysql_dsn(conn_str)
     if t in ("sqlite", "sqlite3"):
         return _sqlite_path(conn_str)
+    if t == "duckdb":
+        return _duckdb_path(conn_str)
+    if t in ("md", "motherduck"):
+        if conn_str.startswith("motherduck://"):
+            return "md:" + conn_str[len("motherduck://"):]
+        if conn_str.startswith("md://"):
+            return "md:" + conn_str[len("md://"):]
+        return conn_str
     raise ValueError(f"Unsupported scanner source type: {db_type}")
 
 
@@ -89,11 +104,16 @@ def attach_clause(db_type: str, conn_str: str, alias: str = "src", read_only: bo
     if not _ALIAS_RE.fullmatch(alias):
         raise ValueError(f"Invalid ATTACH alias {alias!r}")
     target = attach_target(t, conn_str).replace("'", "''")
-    opts = [f"TYPE {_ATTACH_TYPE[t]}"]
-    # SQLite ATTACH does not accept READ_ONLY as an option here; keep it for RDBMS.
-    if read_only and t != "sqlite" and t != "sqlite3":
+    if t in ("md", "motherduck"):
+        return f"ATTACH '{target}' AS {alias}"
+    opts = []
+    if t != "duckdb":
+        opts.append(f"TYPE {_ATTACH_TYPE[t]}")
+    # SQLite ATTACH does not accept READ_ONLY as an option here; keep it for RDBMS/DuckDB.
+    if read_only and t not in ("sqlite", "sqlite3"):
         opts.append("READ_ONLY")
-    return f"ATTACH '{target}' AS {alias} ({', '.join(opts)})"
+    opt_str = f" ({', '.join(opts)})" if opts else ""
+    return f"ATTACH '{target}' AS {alias}{opt_str}"
 
 
 def fetch_via_scanner(db_type: str, conn_str: str, pushdown_sql: str, alias: str = "src") -> pa.Table:
@@ -115,8 +135,8 @@ def fetch_via_scanner(db_type: str, conn_str: str, pushdown_sql: str, alias: str
             con.execute("SET autoload_known_extensions=true")
         except duckdb.Error:
             pass
-        # sqlite is bundled; postgres/mysql may need an explicit install/load.
-        if ext != "sqlite":
+        # sqlite and duckdb are bundled; postgres/mysql/motherduck may need an explicit install/load.
+        if ext not in ("sqlite", "duckdb"):
             try:
                 con.execute(f"INSTALL {ext}")
                 con.execute(f"LOAD {ext}")

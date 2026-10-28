@@ -34,11 +34,35 @@ def run_olap_query(
         limit=limit
     )
 
-    return {
+    out = {
         "total_records": len(arrow_res),
         "schema": arrow_res.column_names,
         "records": ArrowUtils.table_to_compact_preview(arrow_res, limit=limit)
     }
+    try:
+        from app.copilot.analysis_trail import get_trail_ledger
+        get_trail_ledger(session_id).record_step(
+            operator="memory_olap_aggregation",
+            method="rollup" if rollup else ("cube" if cube else "group_by"),
+            dataset_name=dataset_name,
+            parameters={
+                "session_id": session_id,
+                "dataset_name": dataset_name,
+                "dimensions": dimensions,
+                "metrics": metrics,
+                "agg_funcs": agg_funcs,
+                "filters": filters,
+                "rollup": rollup,
+                "cube": cube,
+                "order_by": order_by,
+                "limit": limit,
+            },
+            summary=f"OLAP aggregation on '{dataset_name}' ({len(arrow_res)} rows)",
+            rows_used=len(arrow_res),
+        )
+    except Exception:
+        pass
+    return out
 
 def run_pivot_table(
     session_id: str,
@@ -66,8 +90,30 @@ def run_pivot_table(
         filters=filters
     )
 
-    return {
+    out = {
         "total_records": len(arrow_res),
         "schema": arrow_res.column_names,
         "records": ArrowUtils.table_to_compact_preview(arrow_res, limit=limit)
     }
+    try:
+        from app.copilot.analysis_trail import get_trail_ledger
+        get_trail_ledger(session_id).record_step(
+            operator="pivot_table",
+            method=agg_func,
+            dataset_name=dataset_name,
+            parameters={
+                "session_id": session_id,
+                "dataset_name": dataset_name,
+                "rows": rows,
+                "columns": columns,
+                "values": values,
+                "agg_func": agg_func,
+                "filters": filters,
+                "limit": limit,
+            },
+            summary=f"Pivot table on '{dataset_name}' ({len(arrow_res)} rows)",
+            rows_used=len(arrow_res),
+        )
+    except Exception:
+        pass
+    return out

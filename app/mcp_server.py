@@ -261,9 +261,12 @@ def memory_olap_aggregation(
     )
     return json.dumps({"status": "success", "result": res}, ensure_ascii=False)
 
-@mcp.tool(name="duckdb_sql_sandbox", description="Execute read-only SQL directly against DuckDB in-memory session.")
-def duckdb_sql_sandbox(session_id: str, sql_query: str, limit: int = 100) -> str:
-    res = run_duckdb_sql(session_id, sql_query, limit)
+@mcp.tool(name="duckdb_sql_sandbox", description="Execute read-only SQL directly against DuckDB in-memory session. Optional endorsed_only enforces Context Studio endorsement guardrails on referenced session tables.")
+def duckdb_sql_sandbox(session_id: str, sql_query: str, limit: int = 100, endorsed_only: Optional[bool] = None) -> str:
+    try:
+        res = run_duckdb_sql(session_id, sql_query, limit, endorsed_only=endorsed_only)
+    except (ValueError, PermissionError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "result": res}, ensure_ascii=False)
 
 @mcp.tool(name="correlation_analysis", description="Compute a Pearson/Spearman correlation matrix and surface strongly-correlated column pairs. When DATA_AGENT_RAY_ENABLED is set, a large Pearson scan merges hash partitions and records the backend in evidence caveats.")
@@ -370,20 +373,41 @@ def inspect_trace_and_replay(session_id: str, dataset_name: str, trace_id: Optio
 
 # ---------------- Modern Data Stack (MDS) Tools ----------------
 
-@mcp.tool(name="query_semantic_metric", description="Query standardized business metrics from Semantic Metric Store with auto-compiled SQL.")
+@mcp.tool(name="query_semantic_metric", description="Query standardized business metrics from Semantic Metric Store with auto-compiled SQL. Optional endorsed_only restricts queries to endorsed metrics/models.")
 def query_semantic_metric(
     session_id: str,
     metric_names: List[str],
     dimensions: Optional[List[str]] = None,
     filters: Optional[str] = None,
     order_by: Optional[str] = None,
-    limit: int = 100
+    limit: int = 100,
+    endorsed_only: Optional[bool] = None,
 ) -> str:
+    from app.catalog.context_studio import get_context_studio
     store = get_semantic_store(session_id)
-    sql = store.compile_governed(metric_names, dimensions, filters, order_by=order_by, limit=limit)
-    res = run_duckdb_sql(session_id, sql, limit=limit, governed=True)
+    studio = get_context_studio(session_id)
+    enforce_endorsed = (
+        studio.get_workspace_rules().endorsed_only_default
+        if endorsed_only is None
+        else bool(endorsed_only)
+    )
+    try:
+        warnings = store.check_endorsement_warnings(metric_names, endorsed_only=enforce_endorsed)
+        sql = store.compile_governed(metric_names, dimensions, filters, order_by=order_by, limit=limit)
+        res = run_duckdb_sql(session_id, sql, limit=limit, governed=True, endorsed_only=enforce_endorsed)
+    except (ValueError, PermissionError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     versions = {name: store.metric_version(name) for name in metric_names}
-    return json.dumps({"status": "success", "compiled_sql": sql, "result": res, "governed": True, "metric_versions": versions}, ensure_ascii=False)
+    payload: Dict[str, Any] = {
+        "status": "success",
+        "compiled_sql": sql,
+        "result": res,
+        "governed": True,
+        "metric_versions": versions,
+    }
+    if warnings or res.get("endorsement_warnings"):
+        payload["endorsement_warnings"] = warnings + (res.get("endorsement_warnings") or [])
+    return json.dumps(payload, ensure_ascii=False)
 
 @mcp.tool(name="register_semantic_metric", description="Register a metric formula on a session table. On the single-table compile path, a non-empty dimension list is a whitelist; an empty list does not restrict the caller. A registered semantic model uses the governed join path.")
 def register_semantic_metric(
@@ -397,6 +421,8 @@ def register_semantic_metric(
     description: str = "",
     numerator_metric: Optional[str] = None,
     denominator_metric: Optional[str] = None,
+    endorsement_status: str = "draft",
+    endorsement_note: str = "",
 ) -> str:
     metric = MetricDefinition(
         name=name,
@@ -408,6 +434,8 @@ def register_semantic_metric(
         dimensions=dimensions or [],
         numerator_metric=numerator_metric,
         denominator_metric=denominator_metric,
+        endorsement_status=endorsement_status,
+        endorsement_note=endorsement_note,
     )
     get_semantic_store(session_id).register_metric(metric)
     return json.dumps({"status": "success", "metric": metric.model_dump()}, ensure_ascii=False)
@@ -759,6 +787,160 @@ from app.schemas.requests import DiscountScenarioRequest
 def simulate_discount_scenarios_tool(request: DiscountScenarioRequest) -> dict:
     from app.operators.discount_scenarios import simulate_discount_scenarios
     return simulate_discount_scenarios(request)
+
+# ---------------- Hex-Style Context Studio, dbt YAML, Trail Playbooks & Health Tools ----------------
+from app.catalog.context_studio import get_context_studio, ContextGuide
+from app.copilot.analysis_trail import get_trail_ledger, AnalysisTrailLedger
+from app.observability.context_health import ContextHealthAuditor
+
+@mcp.tool(name="set_workspace_context_rules", description="Configure Hex Context Studio Layer 1 workspace rules: global/session system instructions, naming conventions, and endorsed_only_default guardrail.")
+def set_workspace_context_rules(
+    session_id: str = "_global",
+    system_rules: str = "",
+    endorsed_only_default: bool = False,
+    naming_conventions: Optional[Dict[str, str]] = None,
+) -> str:
+    studio = get_context_studio(session_id)
+    rule = studio.set_workspace_rules(
+        system_rules=system_rules,
+        endorsed_only_default=endorsed_only_default,
+        naming_conventions=naming_conventions,
+    )
+    return json.dumps({"status": "success", "rule": rule.model_dump()}, ensure_ascii=False)
+
+@mcp.tool(name="register_context_guide", description="Register a Hex Context Studio Layer 2 Markdown business guide/SOP bound to workspace, table, metric, or model.")
+def register_context_guide(
+    name: str,
+    title: str,
+    content: str,
+    session_id: str = "_global",
+    scope: str = "workspace",
+    target_names: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
+    endorsement_status: str = "endorsed",
+) -> str:
+    studio = get_context_studio(session_id)
+    guide = ContextGuide(
+        name=name,
+        title=title,
+        content=content,
+        scope=scope,  # type: ignore[arg-type]
+        target_names=target_names or [],
+        tags=tags or [],
+        endorsement_status=endorsement_status,  # type: ignore[arg-type]
+    )
+    saved = studio.register_guide(guide)
+    return json.dumps({"status": "success", "guide": saved.model_dump()}, ensure_ascii=False)
+
+@mcp.tool(name="endorse_context_asset", description="Set Hex Context Studio Layer 4 trust tier ('endorsed', 'draft', 'deprecated', 'warning') on a table, metric, model, or guide.")
+def endorse_context_asset(
+    asset_type: str,
+    name: str,
+    status: str = "endorsed",
+    endorsement_note: str = "",
+    endorsed_by: Optional[str] = None,
+    session_id: str = "_global",
+) -> str:
+    studio = get_context_studio(session_id)
+    try:
+        res = studio.endorse_asset(
+            asset_type=asset_type,  # type: ignore[arg-type]
+            name=name,
+            status=status,  # type: ignore[arg-type]
+            endorsement_note=endorsement_note,
+            endorsed_by=endorsed_by,
+        )
+    except ValueError as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
+    return json.dumps({"status": "success", **res}, ensure_ascii=False)
+
+@mcp.tool(name="resolve_session_context", description="Traverse the 4-layer Context Studio hierarchy (1. Workspace Context -> 2. Business Guides -> 3. Semantic Models/Metrics -> 4. Endorsements & proactive warnings) for a session.")
+def resolve_session_context(
+    session_id: str = "_global",
+    dataset_name: Optional[str] = None,
+    metric_names: Optional[List[str]] = None,
+    endorsed_only: Optional[bool] = None,
+) -> str:
+    studio = get_context_studio(session_id)
+    res = studio.resolve_hierarchy(
+        dataset_name=dataset_name,
+        metric_names=metric_names,
+        endorsed_only=endorsed_only,
+    )
+    return json.dumps({"status": "success", **res}, ensure_ascii=False)
+
+@mcp.tool(name="import_dbt_semantic_yaml", description="Import dbt Semantic Layer (MetricFlow) / OSI YAML definitions (semantic_models, measures, simple/ratio/derived/cumulative metrics) into the session SemanticMetricStore.")
+def import_dbt_semantic_yaml(
+    yaml_content: str,
+    session_id: str = "_global",
+    default_endorsement_status: str = "endorsed",
+) -> str:
+    store = get_semantic_store(session_id)
+    try:
+        res = store.import_dbt_semantic_yaml(
+            yaml_content=yaml_content,
+            default_endorsement_status=default_endorsement_status,
+        )
+    except ValueError as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
+    return json.dumps({"status": "success", **res}, ensure_ascii=False)
+
+@mcp.tool(name="export_dbt_semantic_yaml", description="Export registered SemanticModels and MetricDefinitions from SemanticMetricStore as dbt MetricFlow YAML.")
+def export_dbt_semantic_yaml(session_id: str = "_global") -> str:
+    store = get_semantic_store(session_id)
+    yaml_str = store.export_dbt_semantic_yaml()
+    return json.dumps({"status": "success", "session_id": session_id, "yaml_content": yaml_str}, ensure_ascii=False)
+
+@mcp.tool(name="list_analysis_trail", description="List the ordered AnalysisStep ledger recorded in a session (Hex Threads-style inspectable trail).")
+def list_analysis_trail(session_id: str, limit: int = 100) -> str:
+    ledger = get_trail_ledger(session_id)
+    steps = [s.model_dump() for s in ledger.list_steps(limit=limit)]
+    return json.dumps({"status": "success", "session_id": session_id, "step_count": len(steps), "steps": steps}, ensure_ascii=False)
+
+@mcp.tool(name="export_analysis_playbook", description="Promote a session's recorded analysis trail (or selected step_ids) into a reusable, parameterizable AnalysisPlaybook.")
+def export_analysis_playbook(
+    session_id: str,
+    title: str,
+    description: str = "",
+    step_ids: Optional[List[str]] = None,
+    parameters: Optional[Dict[str, Any]] = None,
+    playbook_id: Optional[str] = None,
+    endorsement_status: str = "endorsed",
+) -> str:
+    ledger = get_trail_ledger(session_id)
+    try:
+        pb = ledger.export_playbook(
+            title=title,
+            description=description,
+            step_ids=step_ids,
+            parameters=parameters,
+            playbook_id=playbook_id,
+            endorsement_status=endorsement_status,
+        )
+    except ValueError as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
+    return json.dumps({"status": "success", "playbook": pb.model_dump()}, ensure_ascii=False)
+
+@mcp.tool(name="replay_analysis_playbook", description="Replay a saved AnalysisPlaybook deterministically with optional parameter_overrides (e.g. new base/current dates, dataset_name, or filters).")
+def replay_analysis_playbook(
+    playbook_id: str,
+    target_session_id: Optional[str] = None,
+    parameter_overrides: Optional[Dict[str, Any]] = None,
+) -> str:
+    try:
+        res = AnalysisTrailLedger.replay_playbook(
+            playbook_id=playbook_id,
+            target_session_id=target_session_id,
+            parameter_overrides=parameter_overrides,
+        )
+    except ValueError as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
+    return json.dumps(res, ensure_ascii=False, default=str)
+
+@mcp.tool(name="audit_agent_context_health", description="Run Hex Context Studio-style proactive observability audit over a session: computes context_health_score, ungoverned SQL ratio, unendorsed table queries, frequent caveats, and governance recommendations.")
+def audit_agent_context_health(session_id: str = "_global") -> str:
+    res = ContextHealthAuditor.audit_session_health(session_id)
+    return json.dumps({"status": "success", **res}, ensure_ascii=False)
 
 if __name__ == "__main__":
     mcp.run()

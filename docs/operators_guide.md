@@ -182,3 +182,26 @@ REST 路径及 MCP 工具名不变，保留 variable_cost_share 单情景字段�
 - robustness 根据配置压力v，检查全部成本案例以及每个商品。passes_all_cases 要求毛利和较B改善均非负（浮点容差1e-8）；total_only 表示仅组合通过；profit_erodes 表示组合仍盈利但改善被吃掉；loss_risk表示组合有亏损案例。商品×成本退化/亏损计数不可当作不同商品数。
 
 边界是目标商品映射成本口径，非企业净利润。短期固定成本、最低采购承诺、库存与运费应由业务核查。不同上限会有不同需求反应，工具不估计弹性；相同降量压力下数学更优不等于最严格上限应实施。总量稳健性全量计算，风险明细最多2500项且truncation标记。报告使用金色维持毛利线/绿色保本带、统一0–100%横轴和逐商品展开对照。
+
+---
+
+## 九、 Hex 风格 Context Studio 上下文治理、轨迹剧本与上下文可观测性
+
+### P0. Context Studio 四层上下文与认证护栏 (`set_workspace_context_rules` / `register_context_guide` / `endorse_context_asset` / `resolve_session_context`)
+* **四层上下文遍历**：
+  1. `1_workspace_context`：全局或会话级系统规则、命名规范及默认认证模式开关（`endorsed_only_default`）。
+  2. `2_guides`：绑定至工作区、数据表、指标或语义模型的结构化 Markdown 业务口径指南（`ContextGuide`）。
+  3. `3_semantic_layer`：受控语义模型与指标定义。
+  4. `4_endorsements`：为表、指标、语义模型和指南标记 `endorsed`、`draft`、`deprecated`、`warning` 四档信任等级。
+* **Endorsed Mode 护栏**：在 `query_semantic_metric`、`duckdb_sql_sandbox` 及契约分析算子中支持 `endorsed_only=True`（或继承会话规则），自动拦截 `deprecated` 或非 `endorsed` 资产并在非严格模式下注入 `endorsement_warnings`。
+
+### P1. Threads 风格分析轨迹与参数化剧本 (`list_analysis_trail` / `export_analysis_playbook` / `replay_analysis_playbook`)
+* **自动轨迹账本**：会话内执行的算子（`compare_metric`、`decompose_change`、`analyze_sensitivity`、`investigate_orders`、`reconcile_order_amounts`、`analyze_discount_drivers`、`audit_discount_orders`、`simulate_discount_scenarios`、`eda_profile`、`memory_olap_aggregation`、`query_semantic_metric`、`duckdb_sql_sandbox` 等）自动记录有序的 `AnalysisStep`。
+* **剧本固化与重放**：支持通过 `export_analysis_playbook` 将多步探索固化为 `AnalysisPlaybook`，并通过 `replay_analysis_playbook` 传入 `parameter_overrides`（如替换时间窗口、过滤条件或数据集）全链路确定性重跑。
+
+### P2. dbt Semantic Layer (MetricFlow) YAML 生态互通与连接器扩展 (`import_dbt_semantic_yaml` / `export_dbt_semantic_yaml`)
+* **dbt 语义 YAML 导入/导出**：直接解析 dbt `semantic_models`（含 `ref()`/`source()`、`entities`、`dimensions`、`measures`）和 `metrics`（支持 `simple`、`ratio`、`derived`/`custom`、`cumulative`），自动注册为 `SemanticModel` 与 `MetricDefinition`，并支持反向导出标准 YAML。
+* **DuckDB / JSON 本地与 Scanner 扩展**：`LocalFileConnector` 与 `duckdb_scanner` 原生支持 `duckdb://`（`.duckdb` 文件只读挂载下推）、`motherduck://` 以及 `.json`/`.ndjson`/`.jsonl` 文件直接内省与 Arrow 抽取。
+
+### P3. Context Observability 上下文健康度自检 (`audit_agent_context_health`)
+* **主动预警与评分**：综合评估当前会话的数据资产认证率、语义指标覆盖度、业务指南完备度、裸 SQL（`ungoverned_sql`）调用占比、高空值/非法行丢弃步数及高频警告，输出 0–100 的 `context_health_score`、`proactive_warnings` 和治理改进建议 `recommendations`。

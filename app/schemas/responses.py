@@ -82,3 +82,31 @@ class DiscountOrderAuditResponse(AnalyticalToolResponse):
 
 class DiscountScenarioResponse(AnalyticalToolResponse):
     result: Dict[str, Any] = Field(description='scenario_selection, scenarios, product_scenarios, scenario_orders with break-even and restore uplift, scenario_lines, variable_cost_share, risk_frontiers (bounded preserve-profit/nonloss limits, algebraic roots and initial-loss status), robustness (all configured cost cases and products), next_checks; demand stress is assumed, not forecast')
+
+
+class ContextHierarchyResponse(BaseModel):
+    status: str = "success"
+    session_id: str
+    endorsed_mode: bool
+    hierarchy: Dict[str, Any]
+    proactive_warnings: List[str] = Field(default_factory=list)
+
+
+class PlaybookReplayResponse(BaseModel):
+    status: str = "success"
+    playbook_id: str
+    title: str
+    session_id: str
+    steps_executed: int
+    parameter_overrides: Dict[str, Any] = Field(default_factory=dict)
+    results: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ContextHealthResponse(BaseModel):
+    status: str = "success"
+    session_id: str
+    context_health_score: float
+    coverage: Dict[str, Any]
+    trail_telemetry: Dict[str, Any]
+    proactive_warnings: List[Dict[str, Any]] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
