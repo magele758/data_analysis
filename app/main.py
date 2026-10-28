@@ -364,13 +364,19 @@ def api_olap(req: OLAPRequest):
 
 @app.post("/api/v1/tools/sql", response_model=AnalysisResponse)
 def api_sql(req: SQLSandboxRequest):
-    res = run_duckdb_sql(req.session_id, req.sql_query, req.limit)
+    try:
+        res = run_duckdb_sql(req.session_id, req.sql_query, req.limit, endorsed_only=req.endorsed_only)
+    except (ValueError, PermissionError) as exc:
+        raise _client_error(exc) from exc
+    meta = {"columns": res["columns"]}
+    if res.get("endorsement_warnings"):
+        meta["endorsement_warnings"] = res["endorsement_warnings"]
     return AnalysisResponse(
         status="success",
         session_id=req.session_id,
         summary_text=f"SQL executed successfully returning {res['row_count']} rows.",
         data_preview=res["data"],
-        metadata={"columns": res["columns"]}
+        metadata=meta
     )
 
 # ----------------- Analysis operators (correlation / pivot / mining) -----------------
@@ -534,9 +540,14 @@ def api_list_sessions(session_id: str, dataset_name: str, limit: int = 20):
 # ----------------- Modern Data Stack: Catalog & Lineage -----------------
 
 @app.get("/api/v1/catalog/tables")
-def api_list_catalog_tables(tag: Optional[str] = None, keyword: Optional[str] = None, session_id: str = "_global"):
+def api_list_catalog_tables(
+    tag: Optional[str] = None,
+    keyword: Optional[str] = None,
+    endorsement_status: Optional[str] = None,
+    session_id: str = "_global",
+):
     cat = get_meta_registry(session_id)
-    return {"tables": cat.list_tables(tag=tag, keyword=keyword)}
+    return {"tables": cat.list_tables(tag=tag, keyword=keyword, endorsement_status=endorsement_status)}
 
 @app.post("/api/v1/catalog/tables")
 def api_register_catalog_table(asset: TableAsset, session_id: str = "_global"):
@@ -560,17 +571,31 @@ def api_register_semantic_metric(metric: MetricDefinition, session_id: str = "_g
 
 @app.post("/api/v1/catalog/metrics/query")
 def api_query_semantic_metrics(req: SemanticQueryRequest):
+    from app.catalog.context_studio import get_context_studio
     store = get_semantic_store(req.session_id)
-    sql = store.compile_governed(req.metric_names, req.dimensions, req.filters, req.order_by, req.limit)
-    res = run_duckdb_sql(req.session_id, sql, limit=req.limit, governed=True)
+    studio = get_context_studio(req.session_id)
+    enforce_endorsed = (
+        studio.get_workspace_rules().endorsed_only_default
+        if req.endorsed_only is None
+        else bool(req.endorsed_only)
+    )
+    try:
+        warnings = store.check_endorsement_warnings(req.metric_names, endorsed_only=enforce_endorsed)
+        sql = store.compile_governed(req.metric_names, req.dimensions, req.filters, req.order_by, req.limit)
+        res = run_duckdb_sql(req.session_id, sql, limit=req.limit, governed=True, endorsed_only=enforce_endorsed)
+    except (ValueError, PermissionError) as exc:
+        raise _client_error(exc) from exc
     versions = {name: store.metric_version(name) for name in req.metric_names}
-    return {
+    out = {
         "compiled_sql": sql,
         "data": res["data"],
         "columns": res["columns"],
         "governed": True,
         "metric_versions": versions,
     }
+    if warnings or res.get("endorsement_warnings"):
+        out["endorsement_warnings"] = warnings + (res.get("endorsement_warnings") or [])
+    return out
 
 # ----------------- Modern Data Stack: Transform & ELT DAG -----------------
 
@@ -964,3 +989,150 @@ def api_simulate_discount_scenarios(req: DiscountScenarioRequest):
         return simulate_discount_scenarios(req)
     except ValueError as exc:
         raise _client_error(exc) from exc
+
+# ----------------- Hex-Style Context Studio, dbt YAML, Trail Playbooks & Health -----------------
+from app.schemas.requests import (
+    WorkspaceRuleRequest,
+    ContextGuideRequest,
+    EndorseAssetRequest,
+    ContextResolveRequest,
+    DbtSemanticYamlImportRequest,
+    ExportPlaybookRequest,
+    ReplayPlaybookRequest,
+)
+from app.schemas.responses import (
+    ContextHierarchyResponse,
+    PlaybookReplayResponse,
+    ContextHealthResponse,
+)
+from app.catalog.context_studio import get_context_studio, ContextGuide
+from app.copilot.analysis_trail import get_trail_ledger, AnalysisTrailLedger
+from app.observability.context_health import ContextHealthAuditor
+
+@app.post("/api/v1/context/rules")
+def api_set_workspace_rules(req: WorkspaceRuleRequest):
+    studio = get_context_studio(req.session_id)
+    rule = studio.set_workspace_rules(
+        system_rules=req.system_rules,
+        endorsed_only_default=req.endorsed_only_default,
+        naming_conventions=req.naming_conventions,
+    )
+    return {"status": "success", "rule": rule.model_dump()}
+
+@app.get("/api/v1/context/rules")
+def api_get_workspace_rules(session_id: str = "_global"):
+    studio = get_context_studio(session_id)
+    return {"status": "success", "rule": studio.get_workspace_rules().model_dump()}
+
+@app.post("/api/v1/context/guides")
+def api_register_context_guide(req: ContextGuideRequest):
+    studio = get_context_studio(req.session_id)
+    guide = ContextGuide(
+        name=req.name,
+        title=req.title,
+        content=req.content,
+        scope=req.scope,
+        target_names=req.target_names,
+        tags=req.tags,
+        endorsement_status=req.endorsement_status,
+    )
+    saved = studio.register_guide(guide)
+    return {"status": "success", "guide": saved.model_dump()}
+
+@app.get("/api/v1/context/guides")
+def api_list_context_guides(
+    session_id: str = "_global",
+    scope: Optional[str] = None,
+    target_name: Optional[str] = None,
+    endorsed_only: bool = False,
+):
+    studio = get_context_studio(session_id)
+    guides = [g.model_dump() for g in studio.list_guides(scope=scope, target_name=target_name, endorsed_only=endorsed_only)]
+    return {"status": "success", "guides": guides}
+
+@app.post("/api/v1/context/endorse")
+def api_endorse_asset(req: EndorseAssetRequest):
+    studio = get_context_studio(req.session_id)
+    try:
+        res = studio.endorse_asset(
+            asset_type=req.asset_type,
+            name=req.name,
+            status=req.status,
+            endorsement_note=req.endorsement_note,
+            endorsed_by=req.endorsed_by,
+        )
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+    return {"status": "success", **res}
+
+@app.post("/api/v1/context/resolve", response_model=ContextHierarchyResponse)
+def api_resolve_context(req: ContextResolveRequest):
+    studio = get_context_studio(req.session_id)
+    res = studio.resolve_hierarchy(
+        dataset_name=req.dataset_name,
+        metric_names=req.metric_names,
+        endorsed_only=req.endorsed_only,
+    )
+    return ContextHierarchyResponse(**res)
+
+@app.post("/api/v1/catalog/semantic/import_yaml")
+def api_import_dbt_semantic_yaml(req: DbtSemanticYamlImportRequest):
+    store = get_semantic_store(req.session_id)
+    try:
+        res = store.import_dbt_semantic_yaml(
+            yaml_content=req.yaml_content,
+            default_endorsement_status=req.default_endorsement_status,
+        )
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+    return {"status": "success", **res}
+
+@app.get("/api/v1/catalog/semantic/export_yaml")
+def api_export_dbt_semantic_yaml(session_id: str = "_global"):
+    store = get_semantic_store(session_id)
+    yaml_str = store.export_dbt_semantic_yaml()
+    return {"status": "success", "session_id": session_id, "yaml_content": yaml_str}
+
+@app.get("/api/v1/trail/steps")
+def api_list_trail_steps(session_id: str, limit: int = 100):
+    ledger = get_trail_ledger(session_id)
+    steps = [s.model_dump() for s in ledger.list_steps(limit=limit)]
+    return {"status": "success", "session_id": session_id, "step_count": len(steps), "steps": steps}
+
+@app.post("/api/v1/trail/playbooks/export")
+def api_export_playbook(req: ExportPlaybookRequest):
+    ledger = get_trail_ledger(req.session_id)
+    try:
+        pb = ledger.export_playbook(
+            title=req.title,
+            description=req.description,
+            step_ids=req.step_ids,
+            parameters=req.parameters,
+            playbook_id=req.playbook_id,
+            endorsement_status=req.endorsement_status,
+        )
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+    return {"status": "success", "playbook": pb.model_dump()}
+
+@app.get("/api/v1/trail/playbooks")
+def api_list_playbooks(session_id: Optional[str] = None):
+    pbs = [p.model_dump() for p in AnalysisTrailLedger.list_playbooks(session_id=session_id)]
+    return {"status": "success", "playbooks": pbs}
+
+@app.post("/api/v1/trail/playbooks/replay", response_model=PlaybookReplayResponse)
+def api_replay_playbook(req: ReplayPlaybookRequest):
+    try:
+        res = AnalysisTrailLedger.replay_playbook(
+            playbook_id=req.playbook_id,
+            target_session_id=req.target_session_id,
+            parameter_overrides=req.parameter_overrides,
+        )
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+    return PlaybookReplayResponse(**res)
+
+@app.get("/api/v1/observability/context_health", response_model=ContextHealthResponse)
+def api_audit_context_health(session_id: str = "_global"):
+    res = ContextHealthAuditor.audit_session_health(session_id)
+    return ContextHealthResponse(**res)

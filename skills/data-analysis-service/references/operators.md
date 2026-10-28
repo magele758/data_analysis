@@ -75,3 +75,9 @@ REST 路径及 MCP 工具名不变，保留 variable_cost_share 单情景字段�
 - robustness 根据配置压力v，检查全部成本案例以及每个商品。passes_all_cases 要求毛利和较B改善均非负（浮点容差1e-8）；total_only 表示仅组合通过；profit_erodes 表示组合仍盈利但改善被吃掉；loss_risk表示组合有亏损案例。商品×成本退化/亏损计数不可当作不同商品数。
 
 边界是目标商品映射成本口径，非企业净利润。短期固定成本、最低采购承诺、库存与运费应由业务核查。不同上限会有不同需求反应，工具不估计弹性；相同降量压力下数学更优不等于最严格上限应实施。总量稳健性全量计算，风险明细最多2500项且truncation标记。报告使用金色维持毛利线/绿色保本带、统一0–100%横轴和逐商品展开对照。
+
+## 7. Hex-Style Context Studio, Playbook Replay & Context Health
+* `set_workspace_context_rules` / `register_context_guide` / `endorse_context_asset` / `resolve_session_context`: Manage the 4-layer Context Traversal Hierarchy (Workspace Rules, Markdown Business Guides, Semantic Layer, Endorsements) and enforce `endorsed_only` guardrails across SQL and semantic queries.
+* `import_dbt_semantic_yaml` / `export_dbt_semantic_yaml`: Import and export dbt Semantic Layer (MetricFlow) / OSI YAML (`semantic_models`, `measures`, and `simple`/`ratio`/`derived`/`cumulative` `metrics`).
+* `list_analysis_trail` / `export_analysis_playbook` / `replay_analysis_playbook`: Automatic session-scoped `AnalysisStep` ledger and deterministic parameter-overridable Playbook replay.
+* `audit_agent_context_health`: Proactive observability auditor returning `context_health_score` (0–100), ungoverned SQL ratio, unendorsed table queries, warning frequency, and governance recommendations.

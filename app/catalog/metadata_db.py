@@ -139,10 +139,47 @@ class MetadataDB:
                 target_table TEXT NOT NULL,
                 PRIMARY KEY (source_table, target_table)
             );
+            CREATE TABLE IF NOT EXISTS context_guides (
+                name TEXT PRIMARY KEY,
+                title TEXT,
+                content TEXT,
+                scope TEXT,
+                target_names_json TEXT,
+                tags_json TEXT,
+                endorsement_status TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS workspace_rules (
+                session_id TEXT PRIMARY KEY,
+                system_rules TEXT,
+                endorsed_only_default INTEGER,
+                naming_conventions_json TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS analysis_playbooks (
+                playbook_id TEXT PRIMARY KEY,
+                session_id TEXT,
+                title TEXT,
+                description TEXT,
+                steps_json TEXT,
+                parameters_json TEXT,
+                endorsement_status TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            );
             """)
             for stmt in (
                 "ALTER TABLE semantic_metrics ADD COLUMN numerator_metric TEXT",
                 "ALTER TABLE semantic_metrics ADD COLUMN denominator_metric TEXT",
+                "ALTER TABLE semantic_metrics ADD COLUMN endorsement_status TEXT DEFAULT 'draft'",
+                "ALTER TABLE semantic_metrics ADD COLUMN endorsement_note TEXT DEFAULT ''",
+                "ALTER TABLE semantic_metrics ADD COLUMN endorsed_by TEXT",
+                "ALTER TABLE catalog_tables ADD COLUMN endorsement_status TEXT DEFAULT 'draft'",
+                "ALTER TABLE catalog_tables ADD COLUMN endorsement_note TEXT DEFAULT ''",
+                "ALTER TABLE catalog_tables ADD COLUMN endorsed_by TEXT",
+                "ALTER TABLE semantic_models ADD COLUMN endorsement_status TEXT DEFAULT 'draft'",
+                "ALTER TABLE semantic_models ADD COLUMN endorsement_note TEXT DEFAULT ''",
+                "ALTER TABLE semantic_models ADD COLUMN endorsed_by TEXT",
                 "ALTER TABLE ontology_links ADD COLUMN junction_table TEXT",
                 "ALTER TABLE ontology_links ADD COLUMN junction_source_key TEXT",
                 "ALTER TABLE ontology_links ADD COLUMN junction_target_key TEXT",
@@ -161,8 +198,10 @@ class MetadataDB:
                 conn.execute("""
                 INSERT INTO catalog_tables (
                     dataset_name, display_name, description, table_type, owner,
-                    tags_json, row_count, column_count, columns_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    tags_json, row_count, column_count, columns_json,
+                    endorsement_status, endorsement_note, endorsed_by,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(dataset_name) DO UPDATE SET
                     display_name=excluded.display_name,
                     description=excluded.description,
@@ -172,6 +211,9 @@ class MetadataDB:
                     row_count=excluded.row_count,
                     column_count=excluded.column_count,
                     columns_json=excluded.columns_json,
+                    endorsement_status=excluded.endorsement_status,
+                    endorsement_note=excluded.endorsement_note,
+                    endorsed_by=excluded.endorsed_by,
                     updated_at=excluded.updated_at
                 """, (
                     asset_dict["dataset_name"],
@@ -183,6 +225,9 @@ class MetadataDB:
                     asset_dict.get("row_count", 0),
                     asset_dict.get("column_count", 0),
                     json.dumps([c if isinstance(c, dict) else c.model_dump() for c in asset_dict.get("columns", [])]),
+                    asset_dict.get("endorsement_status") or "draft",
+                    asset_dict.get("endorsement_note") or "",
+                    asset_dict.get("endorsed_by"),
                     asset_dict.get("created_at") or now_str,
                     asset_dict.get("updated_at") or now_str
                 ))
@@ -212,6 +257,7 @@ class MetadataDB:
 
     def _row_to_asset(self, r: sqlite3.Row) -> Dict[str, Any]:
         now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        keys = r.keys()
         return {
             "dataset_name": r["dataset_name"],
             "display_name": r["display_name"],
@@ -222,6 +268,9 @@ class MetadataDB:
             "row_count": r["row_count"],
             "column_count": r["column_count"],
             "columns": json.loads(r["columns_json"] or "[]"),
+            "endorsement_status": (r["endorsement_status"] if "endorsement_status" in keys else None) or "draft",
+            "endorsement_note": (r["endorsement_note"] if "endorsement_note" in keys else None) or "",
+            "endorsed_by": r["endorsed_by"] if "endorsed_by" in keys else None,
             "created_at": r["created_at"] or now_str,
             "updated_at": r["updated_at"] or now_str
         }
@@ -234,8 +283,9 @@ class MetadataDB:
                 INSERT INTO semantic_metrics (
                     name, display_name, description, table_name, formula,
                     aggregation_type, dimensions_json, filter_expr, format,
-                    numerator_metric, denominator_metric, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    numerator_metric, denominator_metric,
+                    endorsement_status, endorsement_note, endorsed_by, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(name) DO UPDATE SET
                     display_name=excluded.display_name,
                     description=excluded.description,
@@ -246,7 +296,10 @@ class MetadataDB:
                     filter_expr=excluded.filter_expr,
                     format=excluded.format,
                     numerator_metric=excluded.numerator_metric,
-                    denominator_metric=excluded.denominator_metric
+                    denominator_metric=excluded.denominator_metric,
+                    endorsement_status=excluded.endorsement_status,
+                    endorsement_note=excluded.endorsement_note,
+                    endorsed_by=excluded.endorsed_by
                 """, (
                     metric_dict["name"],
                     metric_dict.get("display_name"),
@@ -259,6 +312,9 @@ class MetadataDB:
                     metric_dict.get("format", "number"),
                     metric_dict.get("numerator_metric"),
                     metric_dict.get("denominator_metric"),
+                    metric_dict.get("endorsement_status") or "draft",
+                    metric_dict.get("endorsement_note") or "",
+                    metric_dict.get("endorsed_by"),
                 ))
 
     def get_metric(self, name: str) -> Optional[Dict[str, Any]]:
@@ -276,6 +332,7 @@ class MetadataDB:
                 return [self._row_to_metric(r) for r in rows]
 
     def _row_to_metric(self, r: sqlite3.Row) -> Dict[str, Any]:
+        keys = r.keys()
         return {
             "name": r["name"],
             "display_name": r["display_name"],
@@ -286,8 +343,11 @@ class MetadataDB:
             "dimensions": json.loads(r["dimensions_json"] or "[]"),
             "filter_expr": r["filter_expr"],
             "format": r["format"],
-            "numerator_metric": r["numerator_metric"] if "numerator_metric" in r.keys() else None,
-            "denominator_metric": r["denominator_metric"] if "denominator_metric" in r.keys() else None,
+            "numerator_metric": r["numerator_metric"] if "numerator_metric" in keys else None,
+            "denominator_metric": r["denominator_metric"] if "denominator_metric" in keys else None,
+            "endorsement_status": (r["endorsement_status"] if "endorsement_status" in keys else None) or "draft",
+            "endorsement_note": (r["endorsement_note"] if "endorsement_note" in keys else None) or "",
+            "endorsed_by": r["endorsed_by"] if "endorsed_by" in keys else None,
         }
 
     # --- DAG Model Methods ---
@@ -532,14 +592,18 @@ class MetadataDB:
             with self._get_conn() as conn:
                 conn.execute("""
                 INSERT INTO semantic_models (
-                    name, table_name, grain_json, columns_json, entities_json, agg_time_dimension
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    name, table_name, grain_json, columns_json, entities_json, agg_time_dimension,
+                    endorsement_status, endorsement_note, endorsed_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     table_name=excluded.table_name,
                     grain_json=excluded.grain_json,
                     columns_json=excluded.columns_json,
                     entities_json=excluded.entities_json,
-                    agg_time_dimension=excluded.agg_time_dimension
+                    agg_time_dimension=excluded.agg_time_dimension,
+                    endorsement_status=excluded.endorsement_status,
+                    endorsement_note=excluded.endorsement_note,
+                    endorsed_by=excluded.endorsed_by
                 """, (
                     model_dict["name"],
                     model_dict["table_name"],
@@ -547,20 +611,30 @@ class MetadataDB:
                     json.dumps(model_dict.get("columns") or []),
                     json.dumps(model_dict.get("entities") or []),
                     model_dict.get("agg_time_dimension"),
+                    model_dict.get("endorsement_status") or "draft",
+                    model_dict.get("endorsement_note") or "",
+                    model_dict.get("endorsed_by"),
                 ))
 
     def list_semantic_models(self) -> List[Dict[str, Any]]:
         with self._lock:
             with self._get_conn() as conn:
                 rows = conn.execute("SELECT * FROM semantic_models").fetchall()
-                return [{
-                    "name": r["name"],
-                    "table_name": r["table_name"],
-                    "grain": json.loads(r["grain_json"] or "[]"),
-                    "columns": json.loads(r["columns_json"] or "[]"),
-                    "entities": json.loads(r["entities_json"] or "[]"),
-                    "agg_time_dimension": r["agg_time_dimension"],
-                } for r in rows]
+                res = []
+                for r in rows:
+                    keys = r.keys()
+                    res.append({
+                        "name": r["name"],
+                        "table_name": r["table_name"],
+                        "grain": json.loads(r["grain_json"] or "[]"),
+                        "columns": json.loads(r["columns_json"] or "[]"),
+                        "entities": json.loads(r["entities_json"] or "[]"),
+                        "agg_time_dimension": r["agg_time_dimension"],
+                        "endorsement_status": (r["endorsement_status"] if "endorsement_status" in keys else None) or "draft",
+                        "endorsement_note": (r["endorsement_note"] if "endorsement_note" in keys else None) or "",
+                        "endorsed_by": r["endorsed_by"] if "endorsed_by" in keys else None,
+                    })
+                return res
 
     def save_lineage_edge(self, source_table: str, target_table: str):
         with self._lock:
@@ -581,3 +655,143 @@ class MetadataDB:
                     {"source_table": r["source_table"], "target_table": r["target_table"]}
                     for r in rows
                 ]
+
+    # --- Context Studio: Guides & Workspace Rules & Playbooks ---
+    def save_context_guide(self, guide_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                conn.execute("""
+                INSERT INTO context_guides (
+                    name, title, content, scope, target_names_json, tags_json, endorsement_status, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    title=excluded.title,
+                    content=excluded.content,
+                    scope=excluded.scope,
+                    target_names_json=excluded.target_names_json,
+                    tags_json=excluded.tags_json,
+                    endorsement_status=excluded.endorsement_status,
+                    updated_at=excluded.updated_at
+                """, (
+                    guide_dict["name"],
+                    guide_dict.get("title") or guide_dict["name"],
+                    guide_dict.get("content") or "",
+                    guide_dict.get("scope") or "workspace",
+                    json.dumps(guide_dict.get("target_names") or []),
+                    json.dumps(guide_dict.get("tags") or []),
+                    guide_dict.get("endorsement_status") or "endorsed",
+                    guide_dict.get("updated_at") or now_str,
+                ))
+
+    def list_context_guides(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT * FROM context_guides ORDER BY updated_at DESC").fetchall()
+                return [{
+                    "name": r["name"],
+                    "title": r["title"],
+                    "content": r["content"],
+                    "scope": r["scope"],
+                    "target_names": json.loads(r["target_names_json"] or "[]"),
+                    "tags": json.loads(r["tags_json"] or "[]"),
+                    "endorsement_status": r["endorsement_status"] or "endorsed",
+                    "updated_at": r["updated_at"],
+                } for r in rows]
+
+    def save_workspace_rule(self, session_id: str, rule_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                conn.execute("""
+                INSERT INTO workspace_rules (
+                    session_id, system_rules, endorsed_only_default, naming_conventions_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    system_rules=excluded.system_rules,
+                    endorsed_only_default=excluded.endorsed_only_default,
+                    naming_conventions_json=excluded.naming_conventions_json,
+                    updated_at=excluded.updated_at
+                """, (
+                    session_id,
+                    rule_dict.get("system_rules") or "",
+                    1 if rule_dict.get("endorsed_only_default") else 0,
+                    json.dumps(rule_dict.get("naming_conventions") or {}),
+                    rule_dict.get("updated_at") or now_str,
+                ))
+
+    def get_workspace_rule(self, session_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                row = conn.execute("SELECT * FROM workspace_rules WHERE session_id=?", (session_id,)).fetchone()
+                if not row:
+                    return None
+                return {
+                    "session_id": row["session_id"],
+                    "system_rules": row["system_rules"] or "",
+                    "endorsed_only_default": bool(row["endorsed_only_default"]),
+                    "naming_conventions": json.loads(row["naming_conventions_json"] or "{}"),
+                    "updated_at": row["updated_at"],
+                }
+
+    def save_playbook(self, pb_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                conn.execute("""
+                INSERT INTO analysis_playbooks (
+                    playbook_id, session_id, title, description, steps_json, parameters_json,
+                    endorsement_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(playbook_id) DO UPDATE SET
+                    session_id=excluded.session_id,
+                    title=excluded.title,
+                    description=excluded.description,
+                    steps_json=excluded.steps_json,
+                    parameters_json=excluded.parameters_json,
+                    endorsement_status=excluded.endorsement_status,
+                    updated_at=excluded.updated_at
+                """, (
+                    pb_dict["playbook_id"],
+                    pb_dict.get("session_id") or "_global",
+                    pb_dict.get("title") or pb_dict["playbook_id"],
+                    pb_dict.get("description") or "",
+                    json.dumps(pb_dict.get("steps") or []),
+                    json.dumps(pb_dict.get("parameters") or {}),
+                    pb_dict.get("endorsement_status") or "endorsed",
+                    pb_dict.get("created_at") or now_str,
+                    pb_dict.get("updated_at") or now_str,
+                ))
+
+    def get_playbook(self, playbook_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                row = conn.execute("SELECT * FROM analysis_playbooks WHERE playbook_id=?", (playbook_id,)).fetchone()
+                if not row:
+                    return None
+                return self._row_to_playbook(row)
+
+    def list_playbooks(self, session_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                if session_id and session_id != "_global":
+                    rows = conn.execute(
+                        "SELECT * FROM analysis_playbooks WHERE session_id IN (?, '_global') ORDER BY updated_at DESC",
+                        (session_id,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute("SELECT * FROM analysis_playbooks ORDER BY updated_at DESC").fetchall()
+                return [self._row_to_playbook(r) for r in rows]
+
+    def _row_to_playbook(self, r: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "playbook_id": r["playbook_id"],
+            "session_id": r["session_id"],
+            "title": r["title"],
+            "description": r["description"],
+            "steps": json.loads(r["steps_json"] or "[]"),
+            "parameters": json.loads(r["parameters_json"] or "{}"),
+            "endorsement_status": r["endorsement_status"] or "endorsed",
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+        }

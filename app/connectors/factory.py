@@ -15,6 +15,7 @@ class ConnectorFactory:
         "mssql": MSSQLConnector,
         "sqlserver": MSSQLConnector,
         "sqlite": LocalFileConnector,
+        "duckdb": LocalFileConnector,
         "file": LocalFileConnector,
     }
 

@@ -1,5 +1,5 @@
 import re
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import duckdb
 import pyarrow as pa
 from app.cluster.session_manager import SessionManager
@@ -44,7 +44,23 @@ def _assert_read_only(clean_sql: str) -> str:
     return stmt_type
 
 
-def run_duckdb_sql(session_id: str, sql_query: str, limit: int = 100, governed: bool = False) -> Dict[str, Any]:
+def _extract_referenced_tables(clean_sql: str, known_tables: list) -> list:
+    found = []
+    for t in known_tables:
+        pat = re.compile(r'(?:"' + re.escape(t) + r'"|\b' + re.escape(t) + r'\b)', re.IGNORECASE)
+        if pat.search(clean_sql):
+            found.append(t)
+    return found
+
+
+def run_duckdb_sql(
+    session_id: str,
+    sql_query: str,
+    limit: int = 100,
+    governed: bool = False,
+    endorsed_only: Optional[bool] = None,
+    record_trail: bool = True,
+) -> Dict[str, Any]:
     """Execute ad-hoc DuckDB SQL within session memory sandbox safely."""
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
@@ -57,6 +73,32 @@ def run_duckdb_sql(session_id: str, sql_query: str, limit: int = 100, governed: 
             "External table functions are forbidden in the read-only sandbox"
         )
     stmt_type = _assert_read_only(clean_sql)
+
+    # Check Context Studio endorsement guardrails on referenced session tables
+    from app.catalog.meta_registry import get_meta_registry
+    from app.catalog.context_studio import get_context_studio
+
+    studio = get_context_studio(session_id)
+    cat = get_meta_registry(session_id)
+    enforce_endorsed = studio.get_workspace_rules().endorsed_only_default if endorsed_only is None else bool(endorsed_only)
+    ref_tables = _extract_referenced_tables(clean_sql, list(sess.datasets.keys()))
+    endorsement_warnings = []
+    for tbl_name in ref_tables:
+        asset = cat.get_table(tbl_name)
+        status = (asset.endorsement_status if asset else "draft").lower()
+        note = (asset.endorsement_note if asset else "") or ""
+        if status == "deprecated":
+            msg = f"Table '{tbl_name}' is DEPRECATED" + (f": {note}" if note else "")
+            if enforce_endorsed:
+                raise PermissionError(f"Endorsed mode blocked query on deprecated table '{tbl_name}'")
+            endorsement_warnings.append(msg)
+        elif status != "endorsed":
+            msg = f"Table '{tbl_name}' has status '{status}' (not endorsed)" + (f": {note}" if note else "")
+            if enforce_endorsed:
+                raise PermissionError(
+                    f"Endorsed mode requires 'endorsed' tables; table '{tbl_name}' has status '{status}'"
+                )
+            endorsement_warnings.append(msg)
 
     # DESCRIBE/SHOW/SUMMARIZE report as SELECT but reject a trailing LIMIT.
     limitable = clean_sql.lstrip("( \t\n").upper().startswith(("SELECT", "WITH", "FROM", "TABLE"))
@@ -78,9 +120,26 @@ def run_duckdb_sql(session_id: str, sql_query: str, limit: int = 100, governed: 
                 con.execute("SET enable_external_access=true")
             except duckdb.Error:
                 pass
-    return {
+    out: Dict[str, Any] = {
         "columns": arrow_res.column_names,
         "row_count": len(arrow_res),
         "data": ArrowUtils.table_to_compact_preview(arrow_res, limit=limit),
         "ungoverned_sql": not governed,
     }
+    if endorsement_warnings:
+        out["endorsement_warnings"] = endorsement_warnings
+    if record_trail:
+        try:
+            from app.copilot.analysis_trail import get_trail_ledger
+            get_trail_ledger(session_id).record_step(
+                operator="query_semantic_metric" if governed else "duckdb_sql_sandbox",
+                dataset_name=ref_tables[0] if ref_tables else None,
+                parameters={"sql_query": clean_sql, "limit": limit, "governed": governed},
+                summary=f"Executed {'governed' if governed else 'ad-hoc'} SQL ({len(arrow_res)} rows)",
+                sql=[clean_sql],
+                warnings=endorsement_warnings,
+                ungoverned_sql=not governed,
+            )
+        except Exception:
+            pass
+    return out

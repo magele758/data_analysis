@@ -18,6 +18,9 @@ class MetricDefinition(BaseModel):
     dimensions: List[str] = Field(default_factory=list)
     filter_expr: Optional[str] = None
     format: str = "number" # number, currency, percentage
+    endorsement_status: str = "draft" # endorsed, draft, deprecated, warning
+    endorsement_note: str = ""
+    endorsed_by: Optional[str] = None
 
 class SemanticMetricStore:
     """Semantic metric layer. Default ("_global") namespace is DB-backed; per-session
@@ -171,6 +174,413 @@ class SemanticMetricStore:
         with self._lock:
             return list(self._models.values())
 
+    def get_model(self, model_name: str) -> Optional["SemanticModel"]:
+        with self._lock:
+            return self._models.get(model_name)
+
+    def endorse_metric(
+        self,
+        metric_name: str,
+        status: str = "endorsed",
+        endorsement_note: str = "",
+        endorsed_by: Optional[str] = None,
+    ) -> MetricDefinition:
+        status_norm = (status or "endorsed").strip().lower()
+        if status_norm not in ("endorsed", "draft", "deprecated", "warning"):
+            raise ValueError(f"Invalid endorsement_status {status!r}; expected endorsed, draft, deprecated, or warning")
+        with self._lock:
+            metric = self.get_metric(metric_name)
+            if metric is None:
+                raise ValueError(f"Metric '{metric_name}' not defined in Semantic Store")
+            metric.endorsement_status = status_norm
+            metric.endorsement_note = endorsement_note or ""
+            metric.endorsed_by = endorsed_by
+            return self.register_metric(metric)
+
+    def endorse_model(
+        self,
+        model_name: str,
+        status: str = "endorsed",
+        endorsement_note: str = "",
+        endorsed_by: Optional[str] = None,
+    ) -> "SemanticModel":
+        status_norm = (status or "endorsed").strip().lower()
+        if status_norm not in ("endorsed", "draft", "deprecated", "warning"):
+            raise ValueError(f"Invalid endorsement_status {status!r}; expected endorsed, draft, deprecated, or warning")
+        with self._lock:
+            model = self._models.get(model_name)
+            if model is None:
+                raise ValueError(f"Semantic model '{model_name}' not defined in Semantic Store")
+            model.endorsement_status = status_norm
+            model.endorsement_note = endorsement_note or ""
+            model.endorsed_by = endorsed_by
+            return self.register_model(model)
+
+    def check_endorsement_warnings(
+        self,
+        metric_names: List[str],
+        endorsed_only: bool = False,
+    ) -> List[str]:
+        """Inspect endorsement status of requested metrics and their underlying semantic models."""
+        warnings: List[str] = []
+        with self._lock:
+            for name in metric_names:
+                m = self.get_metric(name)
+                if m is None:
+                    raise ValueError(f"Metric '{name}' not defined in Semantic Store")
+                m_status = (m.endorsement_status or "draft").lower()
+                if m_status == "deprecated":
+                    msg = f"Metric '{name}' is marked DEPRECATED" + (f": {m.endorsement_note}" if m.endorsement_note else "")
+                    if endorsed_only:
+                        raise ValueError(f"Endorsed mode rejected query: {msg}")
+                    warnings.append(msg)
+                elif m_status != "endorsed":
+                    msg = f"Metric '{name}' has status '{m_status}' (not endorsed)" + (f": {m.endorsement_note}" if m.endorsement_note else "")
+                    if endorsed_only:
+                        raise ValueError(f"Endorsed mode requires 'endorsed' metrics; {msg}")
+                    warnings.append(msg)
+                model = self._model_for_table(m.table_name)
+                if model is not None:
+                    mod_status = (model.endorsement_status or "draft").lower()
+                    if mod_status == "deprecated":
+                        msg = f"Semantic model '{model.name}' (table '{model.table_name}') is marked DEPRECATED"
+                        if endorsed_only:
+                            raise ValueError(f"Endorsed mode rejected query: {msg}")
+                        warnings.append(msg)
+                    elif endorsed_only and mod_status != "endorsed":
+                        raise ValueError(
+                            f"Endorsed mode requires 'endorsed' semantic model; '{model.name}' has status '{mod_status}'"
+                        )
+        return warnings
+
+    def import_dbt_semantic_yaml(
+        self,
+        yaml_content: str,
+        default_endorsement_status: str = "endorsed",
+    ) -> Dict[str, Any]:
+        """Parse dbt Semantic Layer (MetricFlow) / OSI YAML and register SemanticModels and MetricDefinitions."""
+        import re
+        import yaml
+
+        if not isinstance(yaml_content, str) or not yaml_content.strip():
+            raise ValueError("yaml_content must be a non-empty YAML string")
+        try:
+            docs = [d for d in yaml.safe_load_all(yaml_content) if isinstance(d, dict)]
+        except Exception as exc:
+            raise ValueError(f"Invalid YAML syntax: {exc}") from exc
+        if not docs:
+            raise ValueError("YAML did not contain any valid mapping document")
+
+        raw_models: List[Dict[str, Any]] = []
+        raw_metrics: List[Dict[str, Any]] = []
+        for doc in docs:
+            if isinstance(doc.get("semantic_models"), list):
+                raw_models.extend(x for x in doc["semantic_models"] if isinstance(x, dict))
+            if isinstance(doc.get("metrics"), list):
+                raw_metrics.extend(x for x in doc["metrics"] if isinstance(x, dict))
+            # Support single-object YAML documents as well
+            if doc.get("semantic_model") and isinstance(doc["semantic_model"], dict):
+                raw_models.append(doc["semantic_model"])
+            if doc.get("metric") and isinstance(doc["metric"], dict):
+                raw_metrics.append(doc["metric"])
+
+        measure_lookup: Dict[str, Dict[str, Any]] = {}
+        registered_models: List[Dict[str, Any]] = []
+        registered_metrics: List[Dict[str, Any]] = []
+
+        for sm in raw_models:
+            name = str(sm.get("name") or "").strip()
+            if not name:
+                raise ValueError("Each semantic_model in YAML requires a 'name'")
+            model_ref = str(sm.get("model") or sm.get("table_name") or name).strip()
+            m_ref = re.search(r"ref\(\s*['\"]([^'\"]+)['\"]\s*\)", model_ref)
+            if m_ref:
+                table_name = m_ref.group(1)
+            else:
+                m_src = re.search(r"source\(\s*['\"][^'\"]+['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)", model_ref)
+                table_name = m_src.group(1) if m_src else model_ref
+
+            entities: List[EntityRef] = []
+            grain: List[str] = []
+            cols: List[str] = list(sm.get("columns") or [])
+            for ent in sm.get("entities") or []:
+                if not isinstance(ent, dict):
+                    continue
+                e_name = str(ent.get("name") or "").strip()
+                e_type_raw = str(ent.get("type") or "primary").strip().lower()
+                e_type = "primary" if e_type_raw in ("primary", "unique") else "foreign"
+                e_expr = str(ent.get("expr") or e_name).strip()
+                if e_name:
+                    entities.append(EntityRef(name=e_name, type=e_type, expr=e_expr))
+                    if e_type == "primary" and e_expr not in grain:
+                        grain.append(e_expr)
+                    if e_expr not in cols:
+                        cols.append(e_expr)
+
+            agg_time_dim = sm.get("agg_time_dimension")
+            defaults = sm.get("defaults")
+            if not agg_time_dim and isinstance(defaults, dict):
+                agg_time_dim = defaults.get("agg_time_dimension")
+
+            for dim in sm.get("dimensions") or []:
+                if not isinstance(dim, dict):
+                    continue
+                d_name = str(dim.get("name") or "").strip()
+                d_expr = str(dim.get("expr") or d_name).strip()
+                d_type = str(dim.get("type") or "categorical").strip().lower()
+                for col_candidate in (d_name, d_expr):
+                    if col_candidate and col_candidate not in cols and "(" not in col_candidate:
+                        cols.append(col_candidate)
+                if d_type == "time" and not agg_time_dim:
+                    agg_time_dim = d_expr if "(" not in d_expr else d_name
+
+            if agg_time_dim and agg_time_dim not in cols:
+                cols.append(agg_time_dim)
+            if not grain and cols:
+                grain = [cols[0]]
+
+            status = str(sm.get("endorsement_status") or default_endorsement_status).lower()
+            sem_model = SemanticModel(
+                name=name,
+                table_name=table_name,
+                grain=grain,
+                columns=cols,
+                entities=entities,
+                agg_time_dimension=agg_time_dim,
+                endorsement_status=status,
+                endorsement_note=str(sm.get("description") or ""),
+            )
+            self.register_model(sem_model)
+            registered_models.append(sem_model.model_dump())
+
+            for meas in sm.get("measures") or []:
+                if not isinstance(meas, dict):
+                    continue
+                ms_name = str(meas.get("name") or "").strip()
+                if not ms_name:
+                    continue
+                agg_raw = str(meas.get("agg") or "sum").strip().upper()
+                expr = str(meas.get("expr") or ms_name).strip()
+                if agg_raw in ("SUM", "AVG", "MIN", "MAX", "MEDIAN"):
+                    formula = f"{agg_raw}({expr})"
+                    agg_type = agg_raw if agg_raw in ("SUM", "AVG") else "CUSTOM"
+                elif agg_raw == "COUNT_DISTINCT":
+                    formula = f"COUNT(DISTINCT {expr})"
+                    agg_type = "COUNT"
+                elif agg_raw == "COUNT":
+                    formula = "COUNT(*)" if expr in ("1", "*") else f"COUNT({expr})"
+                    agg_type = "COUNT"
+                elif agg_raw == "SUM_BOOLEAN":
+                    formula = f"SUM(CASE WHEN {expr} THEN 1 ELSE 0 END)"
+                    agg_type = "SUM"
+                else:
+                    formula = f"SUM({expr})"
+                    agg_type = "SUM"
+
+                measure_lookup[ms_name] = {
+                    "table_name": table_name,
+                    "formula": formula,
+                    "aggregation_type": agg_type,
+                    "dimensions": list(cols),
+                    "description": str(meas.get("description") or ""),
+                }
+                if meas.get("create_metric") is True:
+                    m_obj = MetricDefinition(
+                        name=ms_name,
+                        display_name=str(meas.get("label") or ms_name),
+                        description=str(meas.get("description") or ""),
+                        table_name=table_name,
+                        formula=formula,
+                        aggregation_type=agg_type,
+                        dimensions=list(cols),
+                        endorsement_status=status,
+                    )
+                    self.register_metric(m_obj)
+                    registered_metrics.append(m_obj.model_dump())
+
+        def _ensure_measure_metric(measure_ref: Any) -> MetricDefinition:
+            if isinstance(measure_ref, dict):
+                m_name = str(measure_ref.get("name") or "").strip()
+            else:
+                m_name = str(measure_ref or "").strip()
+            existing = self.get_metric(m_name)
+            if existing is not None:
+                return existing
+            if m_name in measure_lookup:
+                info = measure_lookup[m_name]
+                auto_m = MetricDefinition(
+                    name=m_name,
+                    display_name=m_name,
+                    description=info["description"],
+                    table_name=info["table_name"],
+                    formula=info["formula"],
+                    aggregation_type=info["aggregation_type"],
+                    dimensions=info["dimensions"],
+                    endorsement_status=default_endorsement_status,
+                )
+                return self.register_metric(auto_m)
+            raise ValueError(f"Referenced measure or metric '{m_name}' not found in semantic_models or store")
+
+        for mt in raw_metrics:
+            m_name = str(mt.get("name") or "").strip()
+            if not m_name:
+                raise ValueError("Each metric in YAML requires a 'name'")
+            m_type = str(mt.get("type") or "simple").strip().lower()
+            type_params = mt.get("type_params") or {}
+            filter_raw = mt.get("filter")
+            if isinstance(filter_raw, str):
+                # Strip simple Jinja Dimension/Entity wrappers if present, e.g. {{ Dimension('x') }} -> x
+                filter_clean = re.sub(
+                    r"\{\{\s*(?:Dimension|TimeDimension|Entity)\(\s*['\"]([^'\"]+)['\"][^)]*\)\s*\}\}",
+                    lambda m: m.group(1).split("__")[-1],
+                    filter_raw,
+                ).strip()
+            else:
+                filter_clean = None
+
+            status = str(mt.get("endorsement_status") or default_endorsement_status).lower()
+            label = str(mt.get("label") or mt.get("display_name") or m_name)
+            desc = str(mt.get("description") or "")
+
+            if m_type in ("simple", "cumulative"):
+                meas_ref = type_params.get("measure") or mt.get("measure") or m_name
+                if isinstance(meas_ref, dict):
+                    meas_name = str(meas_ref.get("name") or "").strip()
+                else:
+                    meas_name = str(meas_ref).strip()
+                if meas_name in measure_lookup:
+                    info = measure_lookup[meas_name]
+                    t_name = info["table_name"]
+                    formula = info["formula"]
+                    agg_type = "CUMULATIVE" if m_type == "cumulative" else info["aggregation_type"]
+                    dims = list(mt.get("dimensions") or info["dimensions"])
+                else:
+                    t_name = str(mt.get("table_name") or "").strip()
+                    formula = str(mt.get("formula") or "").strip()
+                    if not t_name or not formula:
+                        raise ValueError(f"Metric '{m_name}' references unknown measure '{meas_name}' and lacks table_name/formula")
+                    agg_type = "CUMULATIVE" if m_type == "cumulative" else str(mt.get("aggregation_type") or "SUM").upper()
+                    dims = list(mt.get("dimensions") or [])
+                m_def = MetricDefinition(
+                    name=m_name,
+                    display_name=label,
+                    description=desc,
+                    table_name=t_name,
+                    formula=formula,
+                    aggregation_type=agg_type,
+                    dimensions=dims,
+                    filter_expr=filter_clean,
+                    endorsement_status=status,
+                )
+            elif m_type == "ratio":
+                num_ref = type_params.get("numerator") or mt.get("numerator_metric")
+                den_ref = type_params.get("denominator") or mt.get("denominator_metric")
+                num_m = _ensure_measure_metric(num_ref)
+                den_m = _ensure_measure_metric(den_ref)
+                m_def = MetricDefinition(
+                    name=m_name,
+                    display_name=label,
+                    description=desc,
+                    table_name=num_m.table_name,
+                    formula=f"({num_m.formula}) / NULLIF(({den_m.formula}), 0)",
+                    aggregation_type="RATIO",
+                    numerator_metric=num_m.name,
+                    denominator_metric=den_m.name,
+                    dimensions=list(mt.get("dimensions") or num_m.dimensions),
+                    filter_expr=filter_clean,
+                    format="percentage",
+                    endorsement_status=status,
+                )
+            elif m_type in ("derived", "custom"):
+                expr = str(type_params.get("expr") or mt.get("formula") or "").strip()
+                input_metrics = type_params.get("metrics") or []
+                t_name = str(mt.get("table_name") or "").strip()
+                dims = list(mt.get("dimensions") or [])
+                formula = expr
+                for im in input_metrics:
+                    im_obj = _ensure_measure_metric(im)
+                    alias = str(im.get("alias") or im.get("name")) if isinstance(im, dict) else str(im)
+                    if not t_name:
+                        t_name = im_obj.table_name
+                    if not dims:
+                        dims = list(im_obj.dimensions)
+                    formula = re.sub(r"\b" + re.escape(alias) + r"\b", f"({im_obj.formula})", formula)
+                if not t_name and registered_models:
+                    t_name = registered_models[0]["table_name"]
+                if not t_name or not formula:
+                    raise ValueError(f"Derived metric '{m_name}' requires valid expression and table_name")
+                m_def = MetricDefinition(
+                    name=m_name,
+                    display_name=label,
+                    description=desc,
+                    table_name=t_name,
+                    formula=formula,
+                    aggregation_type="CUSTOM",
+                    dimensions=dims,
+                    filter_expr=filter_clean,
+                    endorsement_status=status,
+                )
+            else:
+                raise ValueError(f"Unsupported dbt metric type '{m_type}' for metric '{m_name}'")
+
+            self.register_metric(m_def)
+            registered_metrics.append(m_def.model_dump())
+
+        return {
+            "models_imported": len(registered_models),
+            "metrics_imported": len(registered_metrics),
+            "models": registered_models,
+            "metrics": registered_metrics,
+        }
+
+    def export_dbt_semantic_yaml(self) -> str:
+        """Export registered SemanticModels and MetricDefinitions as dbt MetricFlow YAML."""
+        import yaml
+        with self._lock:
+            sm_list = []
+            for m in self._models.values():
+                sm_list.append({
+                    "name": m.name,
+                    "model": f"ref('{m.table_name}')",
+                    "description": m.endorsement_note or "",
+                    "endorsement_status": m.endorsement_status,
+                    "defaults": {"agg_time_dimension": m.agg_time_dimension} if m.agg_time_dimension else {},
+                    "entities": [e.model_dump() for e in m.entities],
+                    "dimensions": [
+                        {"name": c, "type": "time" if c == m.agg_time_dimension else "categorical"}
+                        for c in m.columns
+                    ],
+                })
+            mt_list = []
+            for mt in self.list_metrics():
+                item: Dict[str, Any] = {
+                    "name": mt.name,
+                    "label": mt.display_name or mt.name,
+                    "description": mt.description or "",
+                    "table_name": mt.table_name,
+                    "endorsement_status": mt.endorsement_status,
+                }
+                if (mt.aggregation_type or "").upper() == "RATIO":
+                    item["type"] = "ratio"
+                    item["type_params"] = {
+                        "numerator": mt.numerator_metric,
+                        "denominator": mt.denominator_metric,
+                    }
+                elif (mt.aggregation_type or "").upper() == "CUMULATIVE":
+                    item["type"] = "cumulative"
+                    item["formula"] = mt.formula
+                else:
+                    item["type"] = "simple"
+                    item["formula"] = mt.formula
+                    item["aggregation_type"] = mt.aggregation_type
+                if mt.dimensions:
+                    item["dimensions"] = list(mt.dimensions)
+                if mt.filter_expr:
+                    item["filter"] = mt.filter_expr
+                mt_list.append(item)
+            payload = {"semantic_models": sm_list, "metrics": mt_list}
+            return yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
+
     def _model_for_table(self, table_name: str) -> Optional["SemanticModel"]:
         for model in self._models.values():
             if model.table_name == table_name:
@@ -255,7 +665,13 @@ class SemanticMetricStore:
             )
 
         first = metrics[0].name + "_agg"
-        select_cols = [safe_ident(d) for d in dimensions]
+        if len(metrics) == 1:
+            select_cols = [safe_ident(d) for d in dimensions]
+        else:
+            select_cols = [
+                f"COALESCE({', '.join(f'a{i}.{safe_ident(d)}' for i in range(len(metrics)))}) AS {safe_ident(d)}"
+                for d in dimensions
+            ]
         select_cols.extend(safe_ident(m.name) for m in metrics)
         sql = "WITH " + ", ".join(ctes)
         sql += f" SELECT {', '.join(select_cols)} FROM {safe_ident(first)} a0"
@@ -313,6 +729,9 @@ class SemanticModel(BaseModel):
     columns: List[str] = Field(default_factory=list)
     entities: List[EntityRef] = Field(default_factory=list)
     agg_time_dimension: Optional[str] = None
+    endorsement_status: str = "draft" # endorsed, draft, deprecated, warning
+    endorsement_note: str = ""
+    endorsed_by: Optional[str] = None
 
 
 def _where_sql(parts: List[str]) -> str:

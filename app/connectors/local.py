@@ -14,7 +14,7 @@ _SQLITE_MAGIC = b"SQLite format 3\x00"
 
 
 def resolve_local_path(conn_str: str) -> str:
-    """Resolve a file path, ``file://`` URI, or ``sqlite://`` URI to a filesystem path."""
+    """Resolve a file path, ``file://`` URI, ``sqlite://`` URI, or ``duckdb://`` URI to a filesystem path."""
     if not isinstance(conn_str, str) or not conn_str.strip():
         raise ValueError("Local connection string is empty")
     text = conn_str.strip()
@@ -22,7 +22,7 @@ def resolve_local_path(conn_str: str) -> str:
         return text
     scheme, rest = text.split("://", 1)
     scheme = scheme.lower()
-    if scheme not in ("file", "sqlite"):
+    if scheme not in ("file", "sqlite", "duckdb"):
         raise ValueError(f"LocalFileConnector cannot open scheme {scheme!r}")
     # file:///abs and sqlite:///abs are real URIs. file://relative/path is the
     # prefix this service concatenates onto a filesystem path (often relative).
@@ -107,7 +107,7 @@ class LocalFileConnector(BaseConnector):
         ext = _extension(path)
         if ext in (".xlsx", ".xls"):
             return FastExcelReader.list_sheets(path)
-        if ext in (".sqlite", ".db"):
+        if ext in (".sqlite", ".db", ".duckdb"):
             return self._list_db_tables(path)
         return [os.path.basename(path)]
 
@@ -148,8 +148,18 @@ class LocalFileConnector(BaseConnector):
                 close = getattr(reader, "close", None)
                 if close:
                     close()
-        elif ext in (".sqlite", ".db"):
+        elif ext in (".sqlite", ".db", ".duckdb"):
             cols = self._describe_db_table(path, table_name)
+        elif ext in (".json", ".ndjson", ".jsonl"):
+            con = duckdb.connect(":memory:")
+            try:
+                desc = con.execute(f"DESCRIBE SELECT * FROM read_json_auto({_sql_path_literal(path)})").fetchall()
+            finally:
+                con.close()
+            cols = [
+                ColumnInfo(name=r[0], physical_type=str(r[1]).lower(), is_nullable=(r[2] == "YES"))
+                for r in desc
+            ]
         else:
             con = duckdb.connect(":memory:")
             try:
@@ -269,13 +279,15 @@ class LocalFileConnector(BaseConnector):
             return "read_parquet(?)", [path]
         if ext == ".csv":
             return "read_csv_auto(?, sample_size=100000, ignore_errors=true, store_rejects=true)", [path]
+        if ext in (".json", ".ndjson", ".jsonl"):
+            return "read_json_auto(?)", [path]
         if ext in (".sqlite", ".db") and _is_sqlite_file(path):
             con.execute(f"ATTACH {_sql_path_literal(path)} AS sqlite_db (TYPE SQLITE)")
             if is_select(query_or_table):
                 con.execute("USE sqlite_db")
                 return f"({safe_select(query_or_table)}) AS _q", []
             return f"sqlite_db.{safe_ident(query_or_table)}", []
-        if ext in (".sqlite", ".db"):
+        if ext in (".sqlite", ".db", ".duckdb"):
             con.execute(f"ATTACH {_sql_path_literal(path)} AS local_db (READ_ONLY)")
             if is_select(query_or_table):
                 con.execute("USE local_db")

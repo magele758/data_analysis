@@ -123,6 +123,7 @@ class SQLSandboxRequest(BaseModel):
     session_id: str
     sql_query: str
     limit: int = 100
+    endorsed_only: Optional[bool] = None
 
 class RFMRequest(BaseModel):
     session_id: str
@@ -157,6 +158,7 @@ class SemanticQueryRequest(BaseModel):
     filters: Optional[str] = None
     order_by: Optional[str] = None
     limit: int = 100
+    endorsed_only: Optional[bool] = None
 
 class CleanTableRequest(BaseModel):
     session_id: str
@@ -474,3 +476,61 @@ class DiscountScenarioRequest(DiscountOrderAuditRequest):
             if any(not math.isfinite(x) or x<0 or x>1 for x in values):
                 raise ValueError('Scenario rates must be finite fractions between 0 and 1')
         return self
+
+
+# --- Hex-inspired Context Studio, dbt Semantic YAML, Trail Playbooks & Health Schemas ---
+
+class WorkspaceRuleRequest(BaseModel):
+    session_id: str = "_global"
+    system_rules: str = ""
+    endorsed_only_default: bool = False
+    naming_conventions: Dict[str, str] = Field(default_factory=dict)
+
+
+class ContextGuideRequest(BaseModel):
+    session_id: str = "_global"
+    name: str
+    title: str
+    content: str
+    scope: Literal["workspace", "table", "metric", "model"] = "workspace"
+    target_names: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+    endorsement_status: Literal["endorsed", "draft", "deprecated", "warning"] = "endorsed"
+
+
+class EndorseAssetRequest(BaseModel):
+    session_id: str = "_global"
+    asset_type: Literal["table", "metric", "model", "guide"]
+    name: str
+    status: Literal["endorsed", "draft", "deprecated", "warning"] = "endorsed"
+    endorsement_note: str = ""
+    endorsed_by: Optional[str] = None
+
+
+class ContextResolveRequest(BaseModel):
+    session_id: str = "_global"
+    dataset_name: Optional[str] = None
+    metric_names: Optional[List[str]] = None
+    endorsed_only: Optional[bool] = None
+
+
+class DbtSemanticYamlImportRequest(BaseModel):
+    session_id: str = "_global"
+    yaml_content: str
+    default_endorsement_status: Literal["endorsed", "draft", "deprecated", "warning"] = "endorsed"
+
+
+class ExportPlaybookRequest(BaseModel):
+    session_id: str
+    title: str
+    description: str = ""
+    step_ids: Optional[List[str]] = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    playbook_id: Optional[str] = None
+    endorsement_status: Literal["endorsed", "draft", "deprecated", "warning"] = "endorsed"
+
+
+class ReplayPlaybookRequest(BaseModel):
+    playbook_id: str
+    target_session_id: Optional[str] = None
+    parameter_overrides: Dict[str, Any] = Field(default_factory=dict)

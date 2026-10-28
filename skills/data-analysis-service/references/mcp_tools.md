@@ -86,3 +86,18 @@ REST 路径及 MCP 工具名不变，保留 variable_cost_share 单情景字段�
 - robustness 根据配置压力v，检查全部成本案例以及每个商品。passes_all_cases 要求毛利和较B改善均非负（浮点容差1e-8）；total_only 表示仅组合通过；profit_erodes 表示组合仍盈利但改善被吃掉；loss_risk表示组合有亏损案例。商品×成本退化/亏损计数不可当作不同商品数。
 
 边界是目标商品映射成本口径，非企业净利润。短期固定成本、最低采购承诺、库存与运费应由业务核查。不同上限会有不同需求反应，工具不估计弹性；相同降量压力下数学更优不等于最严格上限应实施。总量稳健性全量计算，风险明细最多2500项且truncation标记。报告使用金色维持毛利线/绿色保本带、统一0–100%横轴和逐商品展开对照。
+
+## Hex-Style Context Studio, dbt Semantic YAML, Trail Playbooks & Context Health Tools
+
+| Tool Name | Category | Key Parameters | Return Value |
+| :--- | :--- | :--- | :--- |
+| `set_workspace_context_rules` | Context Studio (P0) | `session_id`, `system_rules`, `endorsed_only_default`, `naming_conventions` | `status`, `rule`. REST: `POST /api/v1/context/rules` |
+| `register_context_guide` | Context Studio (P0) | `name`, `title`, `content`, `session_id`, `scope` (`workspace`/`table`/`metric`/`model`), `target_names`, `tags`, `endorsement_status` | `status`, `guide`. REST: `POST /api/v1/context/guides` |
+| `endorse_context_asset` | Context Studio (P0) | `asset_type` (`table`/`metric`/`model`/`guide`), `name`, `status` (`endorsed`/`draft`/`deprecated`/`warning`), `endorsement_note`, `endorsed_by`, `session_id` | `status`, `asset_type`, `name`, `asset`. REST: `POST /api/v1/context/endorse` |
+| `resolve_session_context` | Context Studio (P0) | `session_id`, `dataset_name`, `metric_names`, `endorsed_only` | `session_id`, `endorsed_mode`, `hierarchy` (`1_workspace_context`, `2_guides`, `3_semantic_layer`, `4_endorsements`), `proactive_warnings`. REST: `POST /api/v1/context/resolve` |
+| `list_analysis_trail` | Threads & Playbooks (P1) | `session_id`, `limit` | `session_id`, `step_count`, `steps` (ordered `AnalysisStep` ledger). REST: `GET /api/v1/trail/steps` |
+| `export_analysis_playbook` | Threads & Playbooks (P1) | `session_id`, `title`, `description`, `step_ids`, `parameters`, `playbook_id`, `endorsement_status` | `status`, `playbook` (`AnalysisPlaybook`). REST: `POST /api/v1/trail/playbooks/export` |
+| `replay_analysis_playbook` | Threads & Playbooks (P1) | `playbook_id`, `target_session_id`, `parameter_overrides` | `playbook_id`, `title`, `session_id`, `steps_executed`, `results`. REST: `POST /api/v1/trail/playbooks/replay` |
+| `import_dbt_semantic_yaml` | Semantic Ecosystem (P2) | `yaml_content`, `session_id`, `default_endorsement_status` | `models_imported`, `metrics_imported`, `models`, `metrics`. REST: `POST /api/v1/catalog/semantic/import_yaml` |
+| `export_dbt_semantic_yaml` | Semantic Ecosystem (P2) | `session_id` | `session_id`, `yaml_content`. REST: `GET /api/v1/catalog/semantic/export_yaml` |
+| `audit_agent_context_health` | Observability (P3) | `session_id` | `context_health_score` (0–100), `coverage`, `trail_telemetry`, `proactive_warnings`, `recommendations`. REST: `GET /api/v1/observability/context_health` |
