@@ -4,7 +4,7 @@ import json
 from typing import List, Optional, Dict, Any
 from fastmcp import FastMCP
 from app.cluster.session_manager import SessionManager
-from app.connectors.factory import ConnectorFactory
+from app.connectors.factory import ConnectorFactory, read_source
 from app.connectors.trace_importer import TraceImporter
 from app.catalog.meta_registry import TableAsset as _TA, ColumnMeta as _CM
 from app.logging_setup import configure_logging
@@ -49,7 +49,7 @@ from app.observability.schema_drift import SchemaDrifter
 
 mcp = FastMCP("data-analysis-service")
 
-@mcp.tool(name="connect_and_load_db", description="Connect to PostgreSQL/MySQL/MSSQL/SQLite/File, load data into in-memory session with projection & predicate pushdown. mode='materialize' (ConnectorX, default) or 'scanner' (DuckDB ATTACH + pushdown, PG/MySQL).")
+@mcp.tool(name="connect_and_load_db", description="Connect to MongoDB (read-only collection find with mongo_filter, select_cols and limit), PostgreSQL/MySQL/MSSQL/SQLite/File, load data into in-memory session with projection & predicate pushdown. mode='materialize' (ConnectorX, default) or 'scanner' (DuckDB ATTACH + pushdown, PG/MySQL).")
 def connect_and_load_db(
     conn_str: str,
     query_or_table: str,
@@ -60,13 +60,15 @@ def connect_and_load_db(
     partition_col: Optional[str] = None,
     num_partitions: int = 1,
     limit: Optional[int] = None,
-    mode: str = "materialize"
+    mode: str = "materialize",
+    mongo_filter: Optional[Dict[str, Any]] = None,
 ) -> str:
     try:
         mgr = SessionManager()
         sess = mgr.get_or_create_session(session_id)
-        connector = ConnectorFactory.get_connector(conn_str)
-        arrow_table = connector.fetch_to_arrow(
+        arrow_table, source_label = read_source(
+            conn_str,
+            mongo_filter=mongo_filter,
             query_or_table=query_or_table,
             filter_sql=filter_sql,
             select_cols=select_cols,
@@ -75,7 +77,7 @@ def connect_and_load_db(
             limit=limit,
             mode=mode,
         )
-        meta = sess.register_dataset(dataset_name, arrow_table, {"conn_str": conn_str, "source": query_or_table})
+        meta = sess.register_dataset(dataset_name, arrow_table, {"conn_str": source_label, "source": query_or_table})
     except (ValueError, FileNotFoundError) as exc:
         return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     
@@ -85,7 +87,7 @@ def connect_and_load_db(
     cat.register_table(TableAsset(
         dataset_name=dataset_name,
         display_name=dataset_name,
-        description=f"Imported from {conn_str}",
+        description=f"Imported from {source_label}",
         row_count=meta.row_count,
         column_count=meta.column_count,
         columns=cols,

@@ -6,7 +6,7 @@ Catalog / metrics / DAG / lineage are scoped per `session_id` (isolated across s
 | Tool Name | Category | Key Parameters | Return Value |
 | :--- | :--- | :--- | :--- |
 | `import_excel_or_csv` | Ingestion (Path A) | `file_path`, `dataset_name`, `sheet_name` (omit = first worksheet; unknown name is an error), `limit` | `session_id`, `row_count`, `column_count`, `summary`. Legacy `.xls` is rejected |
-| `connect_and_load_db` | Ingestion (Path A) | `conn_str`, `query_or_table`, `dataset_name`, `select_cols`, `filter_sql` | `session_id`, `row_count`, `column_count`, `summary` |
+| `connect_and_load_db` | Ingestion (Path A) | `conn_str`, `query_or_table`, `dataset_name`, `select_cols`, `filter_sql` (SQL), `mongo_filter` (MongoDB), `limit` | `session_id`, `row_count`, `column_count`, `summary` |
 | `import_traces` | Ingestion (Path B) | `source` (OTLP/JSON/NDJSON/CSV/Parquet), `records` (inline spans; wins over `source`), `dataset_name`, `session_id`, `fmt` | `session_id`, `dataset_name`, `row_count`, `columns`, `summary`. REST uses the field name `format`, not `fmt` |
 | `ontology_list_schema` | Ontology | None | `status`, `ontology_schema` (objects, links, actions) |
 | `ontology_query_objects` | Ontology | `session_id`, `object_type`, `filters`, `properties`, `limit` | `status`, `data` (`object_type`, `primary_key`, `total_instances`, `instances`). REST returns that object directly, without the `data` wrapper |
@@ -101,3 +101,15 @@ REST 路径及 MCP 工具名不变，保留 variable_cost_share 单情景字段�
 | `import_dbt_semantic_yaml` | Semantic Ecosystem (P2) | `yaml_content`, `session_id`, `default_endorsement_status` | `models_imported`, `metrics_imported`, `models`, `metrics`. REST: `POST /api/v1/catalog/semantic/import_yaml` |
 | `export_dbt_semantic_yaml` | Semantic Ecosystem (P2) | `session_id` | `session_id`, `yaml_content`. REST: `GET /api/v1/catalog/semantic/export_yaml` |
 | `audit_agent_context_health` | Observability (P3) | `session_id` | `context_health_score` (0–100), `coverage`, `trail_telemetry`, `proactive_warnings`, `recommendations`. REST: `GET /api/v1/observability/context_health` |
+
+### MongoDB
+
+Pass the same arguments to `connect_and_load_db` or `POST /api/v1/connect`.
+
+```json
+{"conn_str":"mongodb://localhost:27017/shop","query_or_table":"orders","dataset_name":"paid_orders","mongo_filter":{"status":"paid","amount":{"$gte":{"$numberDecimal":"10.00"}}},"select_cols":["_id","paid_at","amount"],"limit":1000}
+```
+
+Use a database read account. Standard and SRV URIs are supported. Select top-level fields in output order. Include `_id` explicitly when using a projection. Dotted paths are supported in filters. Use comparisons, membership, existence, array element matches, and logical predicates. Supply BSON dates, ObjectIds and decimals as Extended JSON literals. Omit SQL, scanner and partition options.
+
+ObjectIds become strings, dates UTC timestamps, decimals exact DuckDB-compatible decimals, and nested documents/arrays Extended JSON text. A missing field becomes null. Mixed types, unrepresentable decimals and imports exceeding the row, projected BSON byte or cell budget fail before registration. With no matches, the table has the projected columns (or `_id` if unspecified) and zero rows.

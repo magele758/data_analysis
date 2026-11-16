@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # In-memory session & TTL settings
     SESSION_TTL_SECONDS: int = 1800
     MAX_MEMORY_PER_SESSION_MB: int = 4096
+    MONGO_MAX_ROWS: int = Field(100_000, gt=0, lt=2**31 - 1)
+    MONGO_MAX_BSON_MB: int = Field(32, gt=0)
+    MONGO_MAX_CELLS: int = Field(2_000_000, gt=0)
     DUCKDB_MEMORY_LIMIT: str = "16GB"
     DUCKDB_THREADS: int = Field(default_factory=lambda: max(1, os.cpu_count() or 4))
 

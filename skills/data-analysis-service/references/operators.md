@@ -1,7 +1,7 @@
 # Operators Reference (22 Operators Across 6 MDS Layers)
 
 ## 1. Ingestion & Pushdown Connectors
-* `connect_and_load_db`: Connects to PostgreSQL, MySQL, SQL Server, SQLite, Parquet/CSV via Rust ConnectorX with predicate & projection pushdown.
+* `connect_and_load_db`: Connects to PostgreSQL, MySQL, SQL Server, SQLite and local files. MongoDB uses a read-only PyMongo find with projection, a structured filter and a row limit. See [MongoDB](mcp_tools.md#mongodb).
 
 ## 2. Profiling & Insights
 * `eda_profile`: Single-pass sufficient statistics (mean, std, P25, P50, P75, P95, P99, skewness, kurtosis, data quality score). Tables over 100,000 rows use `approx_count_distinct` and `approx_quantile`. Undefined skewness, kurtosis, and std stay null. When `quantile_method` is `quantile_cont`, p50 is `quantile_cont`.

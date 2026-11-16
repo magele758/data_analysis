@@ -92,6 +92,10 @@ class LocalFileConnector(BaseConnector):
     SQLite only when the file header says so; otherwise they are opened as DuckDB.
     """
 
+    @property
+    def source_label(self) -> str:
+        return self._path()
+
     def _path(self) -> str:
         return resolve_local_path(self.conn_str)
 
