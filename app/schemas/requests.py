@@ -3,11 +3,12 @@ from pydantic import BaseModel, Field
 
 class ConnectDBRequest(BaseModel):
     conn_str: str = Field(..., description="Target database connection URI (e.g., postgresql://user:pass@host:5432/db)")
-    query_or_table: str = Field(..., description="Table name or custom SQL query")
+    query_or_table: str = Field(..., description="Table name, SQL query, or MongoDB collection name")
     dataset_name: str = Field(..., description="In-memory dataset alias for this session")
     session_id: Optional[str] = Field(None, description="Existing session ID, or None to create new")
     select_cols: Optional[List[str]] = Field(None, description="Columns to project (projection pushdown)")
     filter_sql: Optional[str] = Field(None, description="WHERE filter condition to pushdown to source DB")
+    mongo_filter: Optional[Dict[str, Any]] = Field(None, description="MongoDB find filter as a JSON object, including ObjectId, date and decimal Extended JSON literals")
     partition_col: Optional[str] = Field(None, description="Column for parallel partition loading")
     num_partitions: int = Field(1, ge=1, le=32, description="Number of parallel partitions to load")
     limit: Optional[int] = Field(None, description="Limit rows to fetch")

@@ -5,6 +5,7 @@ import duckdb
 import pyarrow as pa
 
 from app.engine.sql_guard import safe_table_ref
+from app.logging_setup import safe_destination
 
 
 def is_select(query_or_table: str) -> bool:
@@ -64,6 +65,10 @@ class BaseConnector(abc.ABC):
 
     def __init__(self, conn_str: str):
         self.conn_str = conn_str
+
+    @property
+    def source_label(self) -> str:
+        return safe_destination(self.conn_str)
 
     @abc.abstractmethod
     def test_connection(self) -> bool:

@@ -25,6 +25,28 @@
 ### 5. 数据库连接与加载算子 (`connect_and_load_db`)
 * **作用**：连接外部 PostgreSQL / MySQL / SQL Server / SQLite / Parquet 文件，按需抽取并加载至当前 Session 内存空间，并自动登记至 Data Catalog。
 
+#### MongoDB
+
+HTTP 使用 `POST /api/v1/connect`，MCP 使用 `connect_and_load_db`。下面的参数从 `shop.orders` 导入最多 1000 条已支付订单。用返回的 `session_id` 和 `paid_orders` 继续执行分析。
+
+```json
+{
+  "conn_str": "mongodb://localhost:27017/shop",
+  "query_or_table": "orders",
+  "dataset_name": "paid_orders",
+  "mongo_filter": {"status": "paid", "amount": {"$gte": {"$numberDecimal": "10.00"}}},
+  "select_cols": ["_id", "paid_at", "amount"],
+  "limit": 1000
+}
+```
+
+- 连接串支持 `mongodb://` 和 `mongodb+srv://`，路径须指定数据库。请使用源库的 `read` 角色。支持密码认证、`authSource`、副本集、TLS 与读取偏好。集合导入只发起 `find` 读取。
+- 筛选、顶层字段投影和行数限制均在 MongoDB 执行。筛选支持点路径、比较、`$in/$nin`、`$exists`、`$elemMatch` 和逻辑组合。日期、ObjectId 和金额筛选可用 `$date`、`$oid` 和 `$numberDecimal`。指定投影时，只有显式选取的字段进入结果。SQL 条件、聚合管道、scanner 和分区读取会报错。
+- ObjectId 转字符串，日期转 UTC 毫秒时间戳，Decimal128 保留为十进制数。嵌套对象和数组保留为 Extended JSON 文本。按全部返回文档合并字段，缺失值补 NULL。同列出现冲突类型或金额超出 DuckDB 的 38 位精度时，错误指出字段。零匹配及 `limit=0` 返回空表，列取自投影，省略投影时使用 `_id`。
+- 默认每次最多 100,000 行、32 MiB 投影后 BSON 和 2,000,000 个单元格（行数乘输出列数）。分别通过 `DATA_AGENT_MONGO_MAX_ROWS`、`DATA_AGENT_MONGO_MAX_BSON_MB` 和 `DATA_AGENT_MONGO_MAX_CELLS` 配置。超过预算时整次失败，已有同名表保留。大集合可按索引字段或时间窗分次导入。
+
+可复验真实库链路。将 `MONGOD_TEST_BINARY` 设为本机 `mongod` 可执行文件的绝对路径，然后运行 `.venv/bin/pytest tests/test_mongodb_live.py -v`。测试会在临时目录启动启用认证的 MongoDB，创建只读账号，分别通过 HTTP 和 MCP stdio 核对按日汇总，并在结束时关闭实例、移除数据。
+
 ### 6. DuckDB 安全 SQL 沙箱 (`duckdb_sql_sandbox`)
 * **作用**：允许 Agent 直接下发原生 DuckDB SQL 表达复杂分析意图。只允许单条 SELECT/EXPLAIN，拒绝 `read_csv`、`read_parquet`、`postgres_scan` 等外部表函数，并在该条语句执行期间关闭 `enable_external_access`。指标编译出的 SQL 标记 `governed=true`；自由 SQL 标记 `ungoverned_sql=true`。
 

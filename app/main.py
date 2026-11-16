@@ -28,7 +28,7 @@ from app.schemas.requests import (
 )
 from app.schemas.responses import AnalysisResponse
 from app.cluster.session_manager import SessionManager
-from app.connectors.factory import ConnectorFactory
+from app.connectors.factory import ConnectorFactory, read_source
 from app.connectors.trace_importer import TraceImporter
 from app.operators.eda import run_eda_profile
 from app.operators.variance import run_variance_decomposition
@@ -214,8 +214,9 @@ def connect_db(req: ConnectDBRequest):
     try:
         mgr = SessionManager()
         sess = mgr.get_or_create_session(req.session_id)
-        connector = ConnectorFactory.get_connector(req.conn_str)
-        arrow_table = connector.fetch_to_arrow(
+        arrow_table, source_label = read_source(
+            req.conn_str,
+            mongo_filter=req.mongo_filter,
             query_or_table=req.query_or_table,
             filter_sql=req.filter_sql,
             select_cols=req.select_cols,
@@ -224,7 +225,7 @@ def connect_db(req: ConnectDBRequest):
             limit=req.limit,
             mode=req.mode
         )
-        meta = sess.register_dataset(req.dataset_name, arrow_table, {"conn_str": req.conn_str, "source": req.query_or_table})
+        meta = sess.register_dataset(req.dataset_name, arrow_table, {"conn_str": source_label, "source": req.query_or_table})
     except (ValueError, FileNotFoundError) as exc:
         raise _client_error(exc) from exc
     
@@ -234,7 +235,7 @@ def connect_db(req: ConnectDBRequest):
     cat.register_table(TableAsset(
         dataset_name=req.dataset_name,
         display_name=req.dataset_name,
-        description=f"Loaded from {req.conn_str}",
+        description=f"Loaded from {source_label}",
         row_count=meta.row_count,
         column_count=meta.column_count,
         columns=cols,
