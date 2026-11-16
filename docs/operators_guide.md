@@ -45,7 +45,7 @@ HTTP 使用 `POST /api/v1/connect`，MCP 使用 `connect_and_load_db`。下面�
 - ObjectId 转字符串，日期转 UTC 毫秒时间戳，Decimal128 保留为十进制数。嵌套对象和数组保留为 Extended JSON 文本。按全部返回文档合并字段，缺失值补 NULL。同列出现冲突类型或金额超出 DuckDB 的 38 位精度时，错误指出字段。零匹配及 `limit=0` 返回空表，列取自投影，省略投影时使用 `_id`。
 - 默认每次最多 100,000 行、32 MiB 投影后 BSON 和 2,000,000 个单元格（行数乘输出列数）。分别通过 `DATA_AGENT_MONGO_MAX_ROWS`、`DATA_AGENT_MONGO_MAX_BSON_MB` 和 `DATA_AGENT_MONGO_MAX_CELLS` 配置。超过预算时整次失败，已有同名表保留。大集合可按索引字段或时间窗分次导入。
 
-可复验真实库链路。将 `MONGOD_TEST_BINARY` 设为本机 `mongod` 可执行文件的绝对路径，然后运行 `.venv/bin/pytest tests/test_mongodb_live.py -v`。测试会在临时目录启动启用认证的 MongoDB，创建只读账号，分别通过 HTTP 和 MCP stdio 核对按日汇总，并在结束时关闭实例、移除数据。
+每次推送到 `main` 后，Functional CI 的全量套件会启动 MongoDB 8.0.12，运行 `test_readonly_mongo_http_and_stdio`。本地复验时，将 `MONGOD_TEST_BINARY` 设为本机 `mongod` 可执行文件的绝对路径，然后运行 `.venv/bin/pytest tests/test_mongodb_live.py -v`。测试会在临时目录启动启用认证的 MongoDB，创建只读账号，分别通过 HTTP 和 MCP stdio 核对按日汇总，并在结束时关闭实例、移除数据。
 
 ### 6. DuckDB 安全 SQL 沙箱 (`duckdb_sql_sandbox`)
 * **作用**：允许 Agent 直接下发原生 DuckDB SQL 表达复杂分析意图。只允许单条 SELECT/EXPLAIN，拒绝 `read_csv`、`read_parquet`、`postgres_scan` 等外部表函数，并在该条语句执行期间关闭 `enable_external_access`。指标编译出的 SQL 标记 `governed=true`；自由 SQL 标记 `ungoverned_sql=true`。

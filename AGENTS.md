@@ -40,7 +40,7 @@
 >    - CI 分三档：
 >      - `fast-commit.yml` 的 `commit`：浅模块。编译、前端脚本语法、导航契约。不装科学计算栈，不挡合并。
 >      - `merge.yml` 的 `contracts`：深模块接口。钉死 DuckDB 1.5.5，`pytest -m "not full"`。这是合并必须通过的检查。
->      - `functional.yml`：全量套件、DuckDB 1.5.5/2.0.0 矩阵、镜像 `/health`。不发布镜像，发布仍走 `release-image.yml`。不挡 PR。
+>      - `functional.yml`：全量套件（含真实 MongoDB 的 HTTP 和 MCP stdio 集成测试）、DuckDB 1.5.5/2.0.0 矩阵、镜像 `/health`。不发布镜像，发布仍走 `release-image.yml`。不挡 PR。
 >    - 本地对应 `scripts/ci_gates.sh fast|merge|full`。默认依赖是 `duckdb>=1.5.5,<2`。
 
 ---

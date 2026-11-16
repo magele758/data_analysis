@@ -15,7 +15,8 @@ concurrency:
 
 jobs:
   suite:
-    runs-on: ubuntu-latest
+    # Match the distribution and architecture of the MongoDB server binary.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -28,12 +29,23 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Install MongoDB 8.0.12 for the HTTP and MCP integration test
+        working-directory: ${{ runner.temp }}
+        run: |
+          archive=mongodb-linux-x86_64-ubuntu2404-8.0.12.tgz
+          curl --fail --silent --show-error --location --retry 3 "https://fastdl.mongodb.org/linux/$archive" -o "$archive"
+          echo "7665edf8ec6f0da2515c49f784da22619f686fffed990a7696c5365ee9d334b3  $archive" | sha256sum --check
+          mkdir -p mongodb
+          tar -xzf "$archive" -C mongodb --strip-components=2 "${archive%.tgz}/bin/mongod"
+
       - name: Full suite on DuckDB 1.5.5
         run: |
+          "$MONGOD_TEST_BINARY" --version
           pip install -e ".[dev]" 'duckdb==1.5.5'
           python -c "import duckdb; assert duckdb.__version__ == '1.5.5'"
-          pytest tests/ -q --tb=short
+          pytest tests/ -v --tb=short
         env:
+          MONGOD_TEST_BINARY: ${{ runner.temp }}/mongodb/mongod
           DATA_AGENT_API_KEYS: test-key-12345
 
   duckdb-matrix:
