@@ -214,6 +214,17 @@ class OntologyQueryRequest(BaseModel):
     filters: Optional[str] = None
     properties: Optional[List[str]] = None
     limit: int = 50
+    include_writeback: bool = True
+    actor_role: Optional[str] = None
+
+class OntologyInterfaceQueryRequest(BaseModel):
+    session_id: str
+    interface_name: str
+    filters: Optional[str] = None
+    properties: Optional[List[str]] = None
+    limit: int = 50
+    include_writeback: bool = True
+    actor_role: Optional[str] = None
 
 class OntologyTraverseRequest(BaseModel):
     session_id: str
@@ -223,6 +234,9 @@ class OntologyTraverseRequest(BaseModel):
     limit: int = 50
     link_path: Optional[List[str]] = None
     max_hops: int = 4
+    include_transitive: bool = False
+    include_writeback: bool = True
+    actor_role: Optional[str] = None
 
 class OntologyActionExecRequest(BaseModel):
     session_id: str
@@ -230,6 +244,24 @@ class OntologyActionExecRequest(BaseModel):
     instance_id: Any
     parameters: Dict[str, Any]
     dry_run: bool = False
+    target_object_type: Optional[str] = None
+    actor_role: Optional[str] = None
+
+class OntologyFunctionEvalRequest(BaseModel):
+    session_id: str
+    function_name: str
+    instance_id: Optional[Any] = None
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+    filters: Optional[str] = None
+    target_object_type: Optional[str] = None
+    limit: int = 50
+    include_writeback: bool = True
+    actor_role: Optional[str] = None
+
+class OntologyValidateCommitmentRequest(BaseModel):
+    session_id: str
+    object_type: Optional[str] = None
+    include_writeback: bool = True
 
 class TraceImportRequest(BaseModel):
     source: Optional[str] = None

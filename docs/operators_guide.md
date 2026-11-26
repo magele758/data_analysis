@@ -7,16 +7,16 @@
 ## 一、 Palantir 风格 Agentic Ontology 业务本体层
 
 ### 1. 本体元数据模式查询算子 (`ontology_list_schema`)
-* **作用**：获取系统内已注册的所有业务对象模型（Object Types）、关系链路（Link Types）以及可执行动作（Action Types）。
+* **作用**：获取系统内已注册的所有多态接口（Interface Types）、业务对象模型（Object Types）、关系链路（Link Types）、可执行动作（Action Types）以及对象挂载函数（Function Types）。
 
-### 2. 实体对象实例检索算子 (`ontology_query_objects`)
-* **作用**：从底层 DuckDB 数据表中检索具体业务实体（如 `Customer`、`Order`），支持属性投影与动态过滤条件。
+### 2. 实体对象与多态接口检索算子 (`ontology_query_objects` / `ontology_query_interfaces`)
+* **作用**：从底层 DuckDB 数据表中检索具体业务实体（如 `Customer`、`Order`）或跨多个实现实体多态检索接口（如 `SchedulableAsset`），支持属性投影（含 `property_mappings` 属性映射与 `formula` 虚拟派生属性）、写回层自动合并覆盖（`include_writeback=True`）、角色权限校验（`allowed_roles`）与敏感字段脱敏（`sensitive=True` 时无权限角色返回 `***REDACTED***`）。
 
-### 3. 实体关系多跳遍历算子 (`ontology_traverse_links`)
-* **作用**：沿着实体拓扑关系链执行图遍历（如从客户 `C01` 出发，通过 `customer_orders` 遍历出所有关联订单）。返回 `path`、`hops`、`hop_counts`、`hop_details`。某一跳碰到 `limit` 时 `truncated` 为真。对象查询的 `matched_count` 是过滤后的全量，`total_instances` 仍是本页行数。REST `POST /api/v1/ontology/instances/traverse` 把 `link_path` 和 `max_hops` 传给引擎。`GET /api/v1/ontology/entity_graph` 与 MCP `ontology_entity_graph` 返回 nodes、edges、broken_edges。$N:M$ 经关联表连接，关联表字段会写入目录库。
+### 3. 实体关系多跳、对称与传递闭包遍历算子 (`ontology_traverse_links`)
+* **作用**：沿着实体拓扑关系链执行图遍历（如从客户 `C01` 出发，通过 `customer_orders` 遍历出所有关联订单）。支持对称关系（`is_symmetric=True` 双向匹配）、传递关系闭包（`is_transitive=True` 且 `include_transitive=True` 时自动展开多跳传递闭包并附带 `_hop_distance`）与写回层覆盖读取。返回 `path`、`hops`、`hop_counts`、`hop_details`。某一跳碰到 `limit` 时 `truncated` 为真。对象查询的 `matched_count` 是过滤后的全量，`total_instances` 仍是本页行数。REST `POST /api/v1/ontology/instances/traverse` 把 `link_path`、`max_hops`、`include_transitive`、`include_writeback` 传给引擎。`GET /api/v1/ontology/entity_graph` 与 MCP `ontology_entity_graph` 返回 `nodes`、`edges`、`broken_edges`、`interfaces`。$N:M$ 经关联表连接，关联表字段会写入目录库。
 
-### 4. 业务动作闭环执行算子 (`ontology_execute_action`)
-* **作用**：执行业务实体上的原子动作。审计结果带执行前、执行后和 `statement_hash`。Webhook 推送返回 `FAILED` 时审计也是 `FAILED`，即使结果里仍有 `simulated_payload`。`REVERSE_ETL_SYNC` 在 `handler_config` 提供 `dest_conn_str`、`dest_table_name`、`source_table` 时调用 `DestinationSync`；缺配置时返回失败，不假装同步成功。MCP `ontology_execute_action` 默认 `dry_run=true`。REST `POST /api/v1/ontology/actions/execute` 默认 `dry_run=false`。REST 遍历请求体带 `link_path` 和 `max_hops`。
+### 4. 业务动作闭环执行、前置校验、对象函数与形式化承诺校验算子 (`ontology_execute_action` / `ontology_evaluate_function` / `ontology_validate_commitment`)
+* **作用**：执行业务实体或多态接口上的原子动作（支持 `WEBHOOK`、`SQL_MUTATION`、`REVERSE_ETL_SYNC`、`FUNCTION` 四类执行器）。支持参数范围/枚举/正则校验、RBAC 角色鉴权（`allowed_roles`）与闭世界状态机前置条件（`ActionPrecondition` 的 `sql_predicate` 在执行前针对目标实例校验，不满足则拦截并记入审计 `status="FAILED", reason="PRECONDITION_FAILED"`）。审计结果带 `precondition_results`、执行前、执行后和 `statement_hash`。Webhook 推送返回 `FAILED` 时审计也是 `FAILED`，即使结果里仍有 `simulated_payload`。`REVERSE_ETL_SYNC` 在 `handler_config` 提供 `dest_conn_str`、`dest_table_name`、`source_table` 时调用 `DestinationSync`；缺配置时返回失败，不假装同步成功。MCP `ontology_execute_action` 默认 `dry_run=true`。REST `POST /api/v1/ontology/actions/execute` 默认 `dry_run=false`。`ontology_evaluate_function` 执行挂载在对象或接口上的确定性计算函数（Functions on Objects）；`ontology_validate_commitment` 对照主键唯一/非空、SHACL 属性约束、互斥类公理（`disjoint_with`）与关系基数执行闭世界一致性审计。
 
 ---
 

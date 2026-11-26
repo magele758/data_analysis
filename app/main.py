@@ -1,7 +1,8 @@
 from app.ontology.ontology_engine import get_ontology_engine
 from app.ontology.object_type import ObjectType
+from app.ontology.interface_type import InterfaceType
 from app.ontology.link_type import LinkType
-from app.ontology.action_type import ActionType
+from app.ontology.action_type import ActionType, FunctionType
 import logging
 import os
 import time
@@ -23,8 +24,9 @@ from app.schemas.requests import (
     ClusteringRequest, TimeSeriesRequest, SQLSandboxRequest, RFMRequest,
     InsightDiscoverRequest, RunExampleRequest, FunnelRequest, SemanticQueryRequest,
     CleanTableRequest, ReverseSyncRequest, WideTableRequest, AudienceExportRequest, WebhookAlertRequest,
-    QualitySuiteRequest, SchemaDriftRequest, OntologyQueryRequest, OntologyTraverseRequest,
-    OntologyActionExecRequest, TraceImportRequest,
+    QualitySuiteRequest, SchemaDriftRequest, OntologyQueryRequest, OntologyInterfaceQueryRequest,
+    OntologyTraverseRequest, OntologyActionExecRequest, OntologyFunctionEvalRequest,
+    OntologyValidateCommitmentRequest, TraceImportRequest,
 )
 from app.schemas.responses import AnalysisResponse
 from app.cluster.session_manager import SessionManager
@@ -700,6 +702,19 @@ def api_get_ontology_schema():
     engine = get_ontology_engine()
     return engine.get_ontology_schema_summary()
 
+@app.get("/api/v1/ontology/interfaces")
+def api_list_ontology_interfaces():
+    engine = get_ontology_engine()
+    return {"interface_types": engine.list_interface_types()}
+
+@app.post("/api/v1/ontology/interfaces")
+def api_register_ontology_interface(iface: InterfaceType):
+    engine = get_ontology_engine()
+    try:
+        return engine.register_interface_type(iface)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
 @app.get("/api/v1/ontology/objects")
 def api_list_ontology_objects():
     engine = get_ontology_engine()
@@ -708,7 +723,10 @@ def api_list_ontology_objects():
 @app.post("/api/v1/ontology/objects")
 def api_register_ontology_object(obj: ObjectType):
     engine = get_ontology_engine()
-    return engine.register_object_type(obj)
+    try:
+        return engine.register_object_type(obj)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
 
 @app.get("/api/v1/ontology/links")
 def api_list_ontology_links():
@@ -718,7 +736,10 @@ def api_list_ontology_links():
 @app.post("/api/v1/ontology/links")
 def api_register_ontology_link(link: LinkType):
     engine = get_ontology_engine()
-    return engine.register_link_type(link)
+    try:
+        return engine.register_link_type(link)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
 
 @app.get("/api/v1/ontology/actions")
 def api_list_ontology_actions(target_object_type: Optional[str] = None):
@@ -728,7 +749,23 @@ def api_list_ontology_actions(target_object_type: Optional[str] = None):
 @app.post("/api/v1/ontology/actions")
 def api_register_ontology_action(action: ActionType):
     engine = get_ontology_engine()
-    return engine.register_action_type(action)
+    try:
+        return engine.register_action_type(action)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
+
+@app.get("/api/v1/ontology/functions")
+def api_list_ontology_functions(target_object_type: Optional[str] = None):
+    engine = get_ontology_engine()
+    return {"function_types": engine.list_function_types(target_object_type=target_object_type)}
+
+@app.post("/api/v1/ontology/functions")
+def api_register_ontology_function(fn: FunctionType):
+    engine = get_ontology_engine()
+    try:
+        return engine.register_function_type(fn)
+    except ValueError as exc:
+        raise _client_error(exc) from exc
 
 @app.post("/api/v1/ontology/instances/query")
 def api_query_ontology_instances(req: OntologyQueryRequest):
@@ -737,8 +774,44 @@ def api_query_ontology_instances(req: OntologyQueryRequest):
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
-    engine = get_ontology_engine()
-    return engine.query_object_instances(con, req.object_type, req.filters, req.properties, req.limit)
+    engine = get_ontology_engine(req.session_id)
+    try:
+        return engine.query_object_instances(
+            con,
+            req.object_type,
+            req.filters,
+            req.properties,
+            req.limit,
+            include_writeback=req.include_writeback,
+            actor_role=req.actor_role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
+
+@app.post("/api/v1/ontology/interfaces/query")
+def api_query_ontology_interface_instances(req: OntologyInterfaceQueryRequest):
+    mgr = SessionManager()
+    sess = mgr.get_session(req.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine(req.session_id)
+    try:
+        return engine.query_interface_instances(
+            con,
+            req.interface_name,
+            req.filters,
+            req.properties,
+            req.limit,
+            include_writeback=req.include_writeback,
+            actor_role=req.actor_role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
 
 @app.post("/api/v1/ontology/instances/traverse")
 def api_traverse_ontology_links(req: OntologyTraverseRequest):
@@ -747,7 +820,7 @@ def api_traverse_ontology_links(req: OntologyTraverseRequest):
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
-    engine = get_ontology_engine()
+    engine = get_ontology_engine(req.session_id)
     try:
         return engine.traverse_links(
             con,
@@ -757,7 +830,12 @@ def api_traverse_ontology_links(req: OntologyTraverseRequest):
             req.limit,
             link_path=req.link_path,
             max_hops=req.max_hops,
+            include_transitive=req.include_transitive,
+            include_writeback=req.include_writeback,
+            actor_role=req.actor_role,
         )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except (ValueError, FileNotFoundError) as exc:
         raise _client_error(exc) from exc
 
@@ -768,9 +846,59 @@ def api_execute_ontology_action(req: OntologyActionExecRequest):
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
     con = sess.get_duckdb_conn()
-    engine = get_ontology_engine()
+    engine = get_ontology_engine(req.session_id)
     try:
-        return engine.execute_action(con, req.action_name, req.instance_id, req.parameters, req.dry_run)
+        return engine.execute_action(
+            con,
+            req.action_name,
+            req.instance_id,
+            req.parameters,
+            req.dry_run,
+            target_object_type=req.target_object_type,
+            actor_role=req.actor_role,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
+
+@app.post("/api/v1/ontology/functions/evaluate")
+def api_evaluate_ontology_function(req: OntologyFunctionEvalRequest):
+    mgr = SessionManager()
+    sess = mgr.get_session(req.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine(req.session_id)
+    try:
+        return engine.evaluate_function(
+            con,
+            req.function_name,
+            instance_id=req.instance_id,
+            parameter_values=req.parameters,
+            filters=req.filters,
+            target_object_type=req.target_object_type,
+            limit=req.limit,
+            include_writeback=req.include_writeback,
+            actor_role=req.actor_role,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, FileNotFoundError) as exc:
+        raise _client_error(exc) from exc
+
+@app.post("/api/v1/ontology/validate")
+def api_validate_ontology_commitment(req: OntologyValidateCommitmentRequest):
+    mgr = SessionManager()
+    sess = mgr.get_session(req.session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine(req.session_id)
+    try:
+        return engine.validate_ontological_commitment(
+            con,
+            object_type_name=req.object_type,
+            include_writeback=req.include_writeback,
+        )
     except (ValueError, FileNotFoundError) as exc:
         raise _client_error(exc) from exc
 

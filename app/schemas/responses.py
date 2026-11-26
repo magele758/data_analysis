@@ -110,3 +110,11 @@ class ContextHealthResponse(BaseModel):
     trail_telemetry: Dict[str, Any]
     proactive_warnings: List[Dict[str, Any]] = Field(default_factory=list)
     recommendations: List[str] = Field(default_factory=list)
+
+
+class OntologyCommitmentResponse(BaseModel):
+    conforms: bool
+    violation_count: int
+    violations: List[Dict[str, Any]] = Field(default_factory=list)
+    checked_objects: List[str] = Field(default_factory=list)
+    checked_links: List[str] = Field(default_factory=list)

@@ -77,6 +77,21 @@ class MetadataDB:
                 title_property TEXT,
                 backed_by_table TEXT,
                 properties_json TEXT,
+                implements_json TEXT,
+                property_mappings_json TEXT,
+                disjoint_with_json TEXT,
+                writeback_table TEXT,
+                allowed_roles_json TEXT,
+                tags_json TEXT,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS ontology_interfaces (
+                name TEXT PRIMARY KEY,
+                display_name TEXT,
+                description TEXT,
+                required_properties_json TEXT,
+                extends_json TEXT,
                 tags_json TEXT,
                 created_at TEXT
             );
@@ -93,6 +108,9 @@ class MetadataDB:
                 junction_table TEXT,
                 junction_source_key TEXT,
                 junction_target_key TEXT,
+                inverse_of TEXT,
+                is_symmetric INTEGER DEFAULT 0,
+                is_transitive INTEGER DEFAULT 0,
                 created_at TEXT
             );
 
@@ -101,9 +119,23 @@ class MetadataDB:
                 display_name TEXT,
                 description TEXT,
                 target_object_type TEXT,
+                target_interface TEXT,
                 parameters_json TEXT,
+                preconditions_json TEXT,
+                allowed_roles_json TEXT,
                 handler_type TEXT,
                 handler_config_json TEXT,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS ontology_functions (
+                name TEXT PRIMARY KEY,
+                display_name TEXT,
+                description TEXT,
+                target_object_type TEXT,
+                parameters_json TEXT,
+                sql_expression TEXT,
+                return_type TEXT,
                 created_at TEXT
             );
 
@@ -114,6 +146,8 @@ class MetadataDB:
                 target_instance_id TEXT,
                 parameters_json TEXT,
                 status TEXT,
+                actor_role TEXT,
+                precondition_results_json TEXT,
                 execution_result_json TEXT,
                 executed_at TEXT
             );
@@ -183,6 +217,19 @@ class MetadataDB:
                 "ALTER TABLE ontology_links ADD COLUMN junction_table TEXT",
                 "ALTER TABLE ontology_links ADD COLUMN junction_source_key TEXT",
                 "ALTER TABLE ontology_links ADD COLUMN junction_target_key TEXT",
+                "ALTER TABLE ontology_links ADD COLUMN inverse_of TEXT",
+                "ALTER TABLE ontology_links ADD COLUMN is_symmetric INTEGER DEFAULT 0",
+                "ALTER TABLE ontology_links ADD COLUMN is_transitive INTEGER DEFAULT 0",
+                "ALTER TABLE ontology_objects ADD COLUMN implements_json TEXT",
+                "ALTER TABLE ontology_objects ADD COLUMN property_mappings_json TEXT",
+                "ALTER TABLE ontology_objects ADD COLUMN disjoint_with_json TEXT",
+                "ALTER TABLE ontology_objects ADD COLUMN writeback_table TEXT",
+                "ALTER TABLE ontology_objects ADD COLUMN allowed_roles_json TEXT",
+                "ALTER TABLE ontology_actions ADD COLUMN target_interface TEXT",
+                "ALTER TABLE ontology_actions ADD COLUMN preconditions_json TEXT",
+                "ALTER TABLE ontology_actions ADD COLUMN allowed_roles_json TEXT",
+                "ALTER TABLE ontology_action_audit ADD COLUMN actor_role TEXT",
+                "ALTER TABLE ontology_action_audit ADD COLUMN precondition_results_json TEXT",
                 "ALTER TABLE dag_models_meta ADD COLUMN unique_key TEXT",
             ):
                 try:
@@ -399,8 +446,10 @@ class MetadataDB:
                 conn.execute("""
                 INSERT INTO ontology_objects (
                     name, display_name, description, primary_key, title_property,
-                    backed_by_table, properties_json, tags_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    backed_by_table, properties_json, implements_json,
+                    property_mappings_json, disjoint_with_json, writeback_table,
+                    allowed_roles_json, tags_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     display_name=excluded.display_name,
                     description=excluded.description,
@@ -408,6 +457,11 @@ class MetadataDB:
                     title_property=excluded.title_property,
                     backed_by_table=excluded.backed_by_table,
                     properties_json=excluded.properties_json,
+                    implements_json=excluded.implements_json,
+                    property_mappings_json=excluded.property_mappings_json,
+                    disjoint_with_json=excluded.disjoint_with_json,
+                    writeback_table=excluded.writeback_table,
+                    allowed_roles_json=excluded.allowed_roles_json,
                     tags_json=excluded.tags_json
                 """, (
                     obj_dict["name"],
@@ -417,6 +471,11 @@ class MetadataDB:
                     obj_dict.get("title_property"),
                     obj_dict["backed_by_table"],
                     json.dumps([p if isinstance(p, dict) else p.model_dump() for p in obj_dict.get("properties", [])]),
+                    json.dumps(obj_dict.get("implements", [])),
+                    json.dumps(obj_dict.get("property_mappings", {})),
+                    json.dumps(obj_dict.get("disjoint_with", [])),
+                    obj_dict.get("writeback_table"),
+                    json.dumps(obj_dict.get("allowed_roles", [])),
                     json.dumps(obj_dict.get("tags", [])),
                     obj_dict.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 ))
@@ -425,17 +484,67 @@ class MetadataDB:
         with self._lock:
             with self._get_conn() as conn:
                 rows = conn.execute("SELECT * FROM ontology_objects").fetchall()
+                result = []
+                for r in rows:
+                    keys = r.keys()
+                    result.append({
+                        "name": r["name"],
+                        "display_name": r["display_name"],
+                        "description": r["description"],
+                        "primary_key": r["primary_key"],
+                        "title_property": r["title_property"],
+                        "backed_by_table": r["backed_by_table"],
+                        "properties": json.loads(r["properties_json"] or "[]"),
+                        "implements": json.loads(r["implements_json"] or "[]") if "implements_json" in keys else [],
+                        "property_mappings": json.loads(r["property_mappings_json"] or "{}") if "property_mappings_json" in keys else {},
+                        "disjoint_with": json.loads(r["disjoint_with_json"] or "[]") if "disjoint_with_json" in keys else [],
+                        "writeback_table": r["writeback_table"] if "writeback_table" in keys else None,
+                        "allowed_roles": json.loads(r["allowed_roles_json"] or "[]") if "allowed_roles_json" in keys else [],
+                        "tags": json.loads(r["tags_json"] or "[]"),
+                        "created_at": r["created_at"]
+                    })
+                return result
+
+    def save_ontology_interface(self, iface_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("""
+                INSERT INTO ontology_interfaces (
+                    name, display_name, description, required_properties_json,
+                    extends_json, tags_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    description=excluded.description,
+                    required_properties_json=excluded.required_properties_json,
+                    extends_json=excluded.extends_json,
+                    tags_json=excluded.tags_json
+                """, (
+                    iface_dict["name"],
+                    iface_dict.get("display_name"),
+                    iface_dict.get("description", ""),
+                    json.dumps([p if isinstance(p, dict) else p.model_dump() for p in iface_dict.get("required_properties", [])]),
+                    json.dumps(iface_dict.get("extends", [])),
+                    json.dumps(iface_dict.get("tags", [])),
+                    iface_dict.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                ))
+
+    def list_ontology_interfaces(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT * FROM ontology_interfaces").fetchall()
                 return [{
                     "name": r["name"],
                     "display_name": r["display_name"],
                     "description": r["description"],
-                    "primary_key": r["primary_key"],
-                    "title_property": r["title_property"],
-                    "backed_by_table": r["backed_by_table"],
-                    "properties": json.loads(r["properties_json"] or "[]"),
+                    "required_properties": json.loads(r["required_properties_json"] or "[]"),
+                    "extends": json.loads(r["extends_json"] or "[]"),
                     "tags": json.loads(r["tags_json"] or "[]"),
                     "created_at": r["created_at"]
                 } for r in rows]
+
+    def delete_ontology_interface(self, name: str) -> bool:
+        return self._delete_by_name("ontology_interfaces", "name", name)
 
     def save_ontology_link(self, link_dict: Dict[str, Any]):
         with self._lock:
@@ -444,8 +553,9 @@ class MetadataDB:
                 INSERT INTO ontology_links (
                     name, display_name, description, source_object_type,
                     target_object_type, cardinality, source_join_key, target_join_key,
-                    junction_table, junction_source_key, junction_target_key, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    junction_table, junction_source_key, junction_target_key,
+                    inverse_of, is_symmetric, is_transitive, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     display_name=excluded.display_name,
                     description=excluded.description,
@@ -456,7 +566,10 @@ class MetadataDB:
                     target_join_key=excluded.target_join_key,
                     junction_table=excluded.junction_table,
                     junction_source_key=excluded.junction_source_key,
-                    junction_target_key=excluded.junction_target_key
+                    junction_target_key=excluded.junction_target_key,
+                    inverse_of=excluded.inverse_of,
+                    is_symmetric=excluded.is_symmetric,
+                    is_transitive=excluded.is_transitive
                 """, (
                     link_dict["name"],
                     link_dict.get("display_name"),
@@ -469,6 +582,9 @@ class MetadataDB:
                     link_dict.get("junction_table"),
                     link_dict.get("junction_source_key"),
                     link_dict.get("junction_target_key"),
+                    link_dict.get("inverse_of"),
+                    1 if link_dict.get("is_symmetric") else 0,
+                    1 if link_dict.get("is_transitive") else 0,
                     link_dict.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 ))
 
@@ -476,20 +592,27 @@ class MetadataDB:
         with self._lock:
             with self._get_conn() as conn:
                 rows = conn.execute("SELECT * FROM ontology_links").fetchall()
-                return [{
-                    "name": r["name"],
-                    "display_name": r["display_name"],
-                    "description": r["description"],
-                    "source_object_type": r["source_object_type"],
-                    "target_object_type": r["target_object_type"],
-                    "cardinality": r["cardinality"],
-                    "source_join_key": r["source_join_key"],
-                    "target_join_key": r["target_join_key"],
-                    "junction_table": r["junction_table"] if "junction_table" in r.keys() else None,
-                    "junction_source_key": r["junction_source_key"] if "junction_source_key" in r.keys() else None,
-                    "junction_target_key": r["junction_target_key"] if "junction_target_key" in r.keys() else None,
-                    "created_at": r["created_at"]
-                } for r in rows]
+                result = []
+                for r in rows:
+                    keys = r.keys()
+                    result.append({
+                        "name": r["name"],
+                        "display_name": r["display_name"],
+                        "description": r["description"],
+                        "source_object_type": r["source_object_type"],
+                        "target_object_type": r["target_object_type"],
+                        "cardinality": r["cardinality"],
+                        "source_join_key": r["source_join_key"],
+                        "target_join_key": r["target_join_key"],
+                        "junction_table": r["junction_table"] if "junction_table" in keys else None,
+                        "junction_source_key": r["junction_source_key"] if "junction_source_key" in keys else None,
+                        "junction_target_key": r["junction_target_key"] if "junction_target_key" in keys else None,
+                        "inverse_of": r["inverse_of"] if "inverse_of" in keys else None,
+                        "is_symmetric": bool(r["is_symmetric"]) if "is_symmetric" in keys else False,
+                        "is_transitive": bool(r["is_transitive"]) if "is_transitive" in keys else False,
+                        "created_at": r["created_at"]
+                    })
+                return result
 
     def save_ontology_action(self, act_dict: Dict[str, Any]):
         with self._lock:
@@ -497,13 +620,17 @@ class MetadataDB:
                 conn.execute("""
                 INSERT INTO ontology_actions (
                     name, display_name, description, target_object_type,
-                    parameters_json, handler_type, handler_config_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    target_interface, parameters_json, preconditions_json,
+                    allowed_roles_json, handler_type, handler_config_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     display_name=excluded.display_name,
                     description=excluded.description,
                     target_object_type=excluded.target_object_type,
+                    target_interface=excluded.target_interface,
                     parameters_json=excluded.parameters_json,
+                    preconditions_json=excluded.preconditions_json,
+                    allowed_roles_json=excluded.allowed_roles_json,
                     handler_type=excluded.handler_type,
                     handler_config_json=excluded.handler_config_json
                 """, (
@@ -511,7 +638,10 @@ class MetadataDB:
                     act_dict.get("display_name"),
                     act_dict.get("description", ""),
                     act_dict["target_object_type"],
+                    act_dict.get("target_interface"),
                     json.dumps([p if isinstance(p, dict) else p.model_dump() for p in act_dict.get("parameters", [])]),
+                    json.dumps([p if isinstance(p, dict) else p.model_dump() for p in act_dict.get("preconditions", [])]),
+                    json.dumps(act_dict.get("allowed_roles", [])),
                     act_dict.get("handler_type", "WEBHOOK"),
                     json.dumps(act_dict.get("handler_config", {})),
                     act_dict.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -521,16 +651,67 @@ class MetadataDB:
         with self._lock:
             with self._get_conn() as conn:
                 rows = conn.execute("SELECT * FROM ontology_actions").fetchall()
+                result = []
+                for r in rows:
+                    keys = r.keys()
+                    result.append({
+                        "name": r["name"],
+                        "display_name": r["display_name"],
+                        "description": r["description"],
+                        "target_object_type": r["target_object_type"],
+                        "target_interface": r["target_interface"] if "target_interface" in keys else None,
+                        "parameters": json.loads(r["parameters_json"] or "[]"),
+                        "preconditions": json.loads(r["preconditions_json"] or "[]") if "preconditions_json" in keys else [],
+                        "allowed_roles": json.loads(r["allowed_roles_json"] or "[]") if "allowed_roles_json" in keys else [],
+                        "handler_type": r["handler_type"],
+                        "handler_config": json.loads(r["handler_config_json"] or "{}"),
+                        "created_at": r["created_at"]
+                    })
+                return result
+
+    def save_ontology_function(self, fn_dict: Dict[str, Any]):
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("""
+                INSERT INTO ontology_functions (
+                    name, display_name, description, target_object_type,
+                    parameters_json, sql_expression, return_type, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    description=excluded.description,
+                    target_object_type=excluded.target_object_type,
+                    parameters_json=excluded.parameters_json,
+                    sql_expression=excluded.sql_expression,
+                    return_type=excluded.return_type
+                """, (
+                    fn_dict["name"],
+                    fn_dict.get("display_name"),
+                    fn_dict.get("description", ""),
+                    fn_dict["target_object_type"],
+                    json.dumps([p if isinstance(p, dict) else p.model_dump() for p in fn_dict.get("parameters", [])]),
+                    fn_dict["sql_expression"],
+                    fn_dict.get("return_type", "float"),
+                    fn_dict.get("created_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                ))
+
+    def list_ontology_functions(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            with self._get_conn() as conn:
+                rows = conn.execute("SELECT * FROM ontology_functions").fetchall()
                 return [{
                     "name": r["name"],
                     "display_name": r["display_name"],
                     "description": r["description"],
                     "target_object_type": r["target_object_type"],
                     "parameters": json.loads(r["parameters_json"] or "[]"),
-                    "handler_type": r["handler_type"],
-                    "handler_config": json.loads(r["handler_config_json"] or "{}"),
+                    "sql_expression": r["sql_expression"],
+                    "return_type": r["return_type"],
                     "created_at": r["created_at"]
                 } for r in rows]
+
+    def delete_ontology_function(self, name: str) -> bool:
+        return self._delete_by_name("ontology_functions", "name", name)
 
     def save_action_audit(self, audit_dict: Dict[str, Any]):
         with self._lock:
@@ -538,8 +719,9 @@ class MetadataDB:
                 conn.execute("""
                 INSERT INTO ontology_action_audit (
                     audit_id, action_name, target_object_type, target_instance_id,
-                    parameters_json, status, execution_result_json, executed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    parameters_json, status, actor_role, precondition_results_json,
+                    execution_result_json, executed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     audit_dict["audit_id"],
                     audit_dict["action_name"],
@@ -547,6 +729,8 @@ class MetadataDB:
                     audit_dict["target_instance_id"],
                     json.dumps(audit_dict.get("parameters", {})),
                     audit_dict.get("status", "SUCCESS"),
+                    audit_dict.get("actor_role"),
+                    json.dumps(audit_dict.get("precondition_results", [])),
                     json.dumps(audit_dict.get("execution_result", {})),
                     audit_dict.get("executed_at") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
                 ))
@@ -558,16 +742,22 @@ class MetadataDB:
                     "SELECT * FROM ontology_action_audit ORDER BY executed_at DESC, rowid DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
-                return [{
-                    "audit_id": r["audit_id"],
-                    "action_name": r["action_name"],
-                    "target_object_type": r["target_object_type"],
-                    "target_instance_id": r["target_instance_id"],
-                    "parameters": json.loads(r["parameters_json"] or "{}"),
-                    "status": r["status"],
-                    "execution_result": json.loads(r["execution_result_json"] or "{}"),
-                    "executed_at": r["executed_at"]
-                } for r in rows]
+                result = []
+                for r in rows:
+                    keys = r.keys()
+                    result.append({
+                        "audit_id": r["audit_id"],
+                        "action_name": r["action_name"],
+                        "target_object_type": r["target_object_type"],
+                        "target_instance_id": r["target_instance_id"],
+                        "parameters": json.loads(r["parameters_json"] or "{}"),
+                        "status": r["status"],
+                        "actor_role": r["actor_role"] if "actor_role" in keys else None,
+                        "precondition_results": json.loads(r["precondition_results_json"] or "[]") if "precondition_results_json" in keys else [],
+                        "execution_result": json.loads(r["execution_result_json"] or "{}"),
+                        "executed_at": r["executed_at"]
+                    })
+                return result
 
     def delete_ontology_object(self, name: str) -> bool:
         return self._delete_by_name("ontology_objects", "name", name)

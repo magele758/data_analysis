@@ -604,30 +604,73 @@ def detect_table_schema_drift(session_id: str, table: str, baseline_schema: Dict
 
 # ---------------- Palantir-Style Agentic Ontology Tools ----------------
 
-@mcp.tool(name="ontology_list_schema", description="List business entities (ObjectTypes), relation graphs (LinkTypes), and available actions (ActionTypes).")
-def ontology_list_schema() -> str:
-    engine = get_ontology_engine()
+@mcp.tool(name="ontology_list_schema", description="List business interfaces (InterfaceTypes), entities (ObjectTypes), relation graphs (LinkTypes), actions (ActionTypes), and functions (FunctionTypes).")
+def ontology_list_schema(session_id: Optional[str] = None) -> str:
+    engine = get_ontology_engine(session_id or "_global")
     summary = engine.get_ontology_schema_summary()
     return json.dumps({"status": "success", "ontology_schema": summary}, ensure_ascii=False)
 
-@mcp.tool(name="ontology_query_objects", description="Query business entity instances (e.g. Customers, Orders, Devices) with property projections and filters.")
+@mcp.tool(name="ontology_query_objects", description="Query business entity instances (or polymorphic InterfaceType) with property projections, filters, writeback overlay, and RBAC masking.")
 def ontology_query_objects(
     session_id: str,
     object_type: str,
     filters: Optional[str] = None,
     properties: Optional[List[str]] = None,
-    limit: int = 50
+    limit: int = 50,
+    include_writeback: bool = True,
+    actor_role: Optional[str] = None,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
     if not sess:
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
-    engine = get_ontology_engine()
-    res = engine.query_object_instances(con, object_type, filters, properties, limit)
+    engine = get_ontology_engine(session_id)
+    try:
+        res = engine.query_object_instances(
+            con,
+            object_type,
+            filters,
+            properties,
+            limit,
+            include_writeback=include_writeback,
+            actor_role=actor_role,
+        )
+    except (ValueError, PermissionError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "data": res}, ensure_ascii=False)
 
-@mcp.tool(name="ontology_traverse_links", description="Graph-traverse from a source entity instance along relation links. link_path and max_hops are passed through. The traversal includes hop_details and truncated.")
+@mcp.tool(name="ontology_query_interfaces", description="Polymorphically query all ObjectTypes implementing an InterfaceType, projecting mapped properties into the canonical interface schema.")
+def ontology_query_interfaces(
+    session_id: str,
+    interface_name: str,
+    filters: Optional[str] = None,
+    properties: Optional[List[str]] = None,
+    limit: int = 50,
+    include_writeback: bool = True,
+    actor_role: Optional[str] = None,
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_session(session_id)
+    if not sess:
+        return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine(session_id)
+    try:
+        res = engine.query_interface_instances(
+            con,
+            interface_name,
+            filters=filters,
+            properties=properties,
+            limit=limit,
+            include_writeback=include_writeback,
+            actor_role=actor_role,
+        )
+    except (ValueError, PermissionError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
+    return json.dumps({"status": "success", "data": res}, ensure_ascii=False)
+
+@mcp.tool(name="ontology_traverse_links", description="Graph-traverse from a source entity instance along relation links. Supports multi-hop link_path, symmetric links, transitive closure (include_transitive=True), and writeback overlay.")
 def ontology_traverse_links(
     session_id: str,
     source_object_type: str,
@@ -636,46 +679,118 @@ def ontology_traverse_links(
     limit: int = 50,
     link_path: Optional[List[str]] = None,
     max_hops: int = 4,
+    include_transitive: bool = False,
+    include_writeback: bool = True,
+    actor_role: Optional[str] = None,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
     if not sess:
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
-    engine = get_ontology_engine()
+    engine = get_ontology_engine(session_id)
     try:
         res = engine.traverse_links(
             con, source_object_type, source_instance_id, link_name, limit,
             link_path=link_path, max_hops=max_hops,
+            include_transitive=include_transitive,
+            include_writeback=include_writeback,
+            actor_role=actor_role,
         )
-    except (ValueError, FileNotFoundError) as exc:
+    except (ValueError, PermissionError, FileNotFoundError) as exc:
         return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "traversal": res}, ensure_ascii=False)
 
-@mcp.tool(name="ontology_entity_graph", description="Return the ontology entity graph: nodes, edges, and broken_edges whose endpoints are not registered.")
-def ontology_entity_graph() -> str:
-    graph = get_ontology_engine().entity_graph()
+@mcp.tool(name="ontology_entity_graph", description="Return the ontology entity graph: nodes, edges, broken_edges, and interfaces.")
+def ontology_entity_graph(session_id: Optional[str] = None) -> str:
+    graph = get_ontology_engine(session_id or "_global").entity_graph()
     return json.dumps({"status": "success", "entity_graph": graph}, ensure_ascii=False)
 
-@mcp.tool(name="ontology_execute_action", description="Execute an atomic business action on an entity instance with audit logging. dry_run defaults to true so a tool call previews the action before it writes. A webhook push that returns FAILED is audited as FAILED even when the result still carries simulated_payload.")
+@mcp.tool(name="ontology_execute_action", description="Execute an atomic business action on an entity instance with parameter constraints, RBAC, closed-world precondition verification, and audit logging. dry_run defaults to true.")
 def ontology_execute_action(
     session_id: str,
     action_name: str,
     instance_id: str,
     parameters: Dict[str, Any],
-    dry_run: bool = True
+    dry_run: bool = True,
+    target_object_type: Optional[str] = None,
+    actor_role: Optional[str] = None,
 ) -> str:
     mgr = SessionManager()
     sess = mgr.get_session(session_id)
     if not sess:
         return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
     con = sess.get_duckdb_conn()
-    engine = get_ontology_engine()
+    engine = get_ontology_engine(session_id)
     try:
-        audit = engine.execute_action(con, action_name, instance_id, parameters, dry_run)
+        audit = engine.execute_action(
+            con,
+            action_name,
+            instance_id,
+            parameters,
+            dry_run,
+            target_object_type=target_object_type,
+            actor_role=actor_role,
+        )
     except (ValueError, FileNotFoundError) as exc:
         return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
     return json.dumps({"status": "success", "action_audit": audit}, ensure_ascii=False)
+
+@mcp.tool(name="ontology_evaluate_function", description="Evaluate a registered Function on Objects (FunctionType) on an entity instance or filtered set of instances.")
+def ontology_evaluate_function(
+    session_id: str,
+    function_name: str,
+    instance_id: Optional[str] = None,
+    parameters: Optional[Dict[str, Any]] = None,
+    filters: Optional[str] = None,
+    target_object_type: Optional[str] = None,
+    limit: int = 50,
+    include_writeback: bool = True,
+    actor_role: Optional[str] = None,
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_session(session_id)
+    if not sess:
+        return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine(session_id)
+    try:
+        res = engine.evaluate_function(
+            con,
+            function_name,
+            instance_id=instance_id,
+            parameter_values=parameters or {},
+            filters=filters,
+            target_object_type=target_object_type,
+            limit=limit,
+            include_writeback=include_writeback,
+            actor_role=actor_role,
+        )
+    except (ValueError, PermissionError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
+    return json.dumps({"status": "success", "function_evaluation": res}, ensure_ascii=False)
+
+@mcp.tool(name="ontology_validate_commitment", description="Validate live session data against formal ontological commitments: PK uniqueness/non-null, SHACL-like property constraints, disjointness axioms (disjoint_with), and link cardinality.")
+def ontology_validate_commitment(
+    session_id: str,
+    object_type: Optional[str] = None,
+    include_writeback: bool = True,
+) -> str:
+    mgr = SessionManager()
+    sess = mgr.get_session(session_id)
+    if not sess:
+        return json.dumps({"status": "error", "message": f"Session '{session_id}' not found"})
+    con = sess.get_duckdb_conn()
+    engine = get_ontology_engine(session_id)
+    try:
+        report = engine.validate_ontological_commitment(
+            con,
+            object_type_name=object_type,
+            include_writeback=include_writeback,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
+    return json.dumps({"status": "success", "commitment_report": report}, ensure_ascii=False)
 
 
 @mcp.tool(name="import_excel_or_csv", description="Ingest .xlsx or CSV into a session. Omitting sheet_name reads the first worksheet. A sheet name that is not in the workbook is an error. Legacy .xls is rejected.")
